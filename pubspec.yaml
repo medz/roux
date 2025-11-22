@@ -1,8 +1,8 @@
 name: routingkit
 description: >-
-  A lightweight, high-performance router for Dart with elegant API support for static, 
+  A lightweight, high-performance router for Dart with elegant API support for static,
   parameterized, and wildcard routes. Perfect for HTTP servers, API gateways, and application routing.
-version: 5.1.2
+version: 6.0.0-dev
 repository: https://github.com/medz/routingkit
 
 funding:
