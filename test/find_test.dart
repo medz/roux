@@ -103,13 +103,21 @@ void main() {
     test('remove works', () {
       final router = buildRouter();
       removeRoute(router, 'GET', '/test');
-      removeRoute(router, 'GET', '/test/*');
       removeRoute(router, 'GET', '/test/foo/*');
       removeRoute(router, 'GET', '/test/foo/**');
       removeRoute(router, 'GET', '/**');
 
       expect(findRoute(router, 'GET', '/test'), isNull);
       expect(findRoute(router, 'GET', '/anything'), isNull);
+    });
+
+    test('remove named param route', () {
+      final router = buildRouter();
+      expect(findRoute(router, 'GET', '/test/123')?.data, '/test/:id');
+
+      removeRoute(router, 'GET', '/test/:id');
+
+      expect(findRoute(router, 'GET', '/test/123')?.data, '/**');
     });
   });
 }

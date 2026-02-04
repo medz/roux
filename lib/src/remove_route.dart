@@ -57,6 +57,17 @@ void _remove<T>(
     return;
   }
 
+  // Param (named)
+  if (segment.contains(':')) {
+    if (node.param != null) {
+      _remove(node.param!, methodToken, segments, index + 1);
+      if (_isEmptyNode(node.param!)) {
+        node.param = null;
+      }
+    }
+    return;
+  }
+
   // Static (including escaped stars)
   if (segment == r'\*') {
     segment = '*';
