@@ -61,6 +61,9 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
           optional: true,
         ));
       } else if (segment.contains(':', 1)) {
+        // Treat any additional ':' after the first as embedded params
+        // (e.g. /files/:name.:ext). This is intentional even if it also
+        // matches segments like a:b.
         final regexp = getParamRegexp(ctx, segment);
         setParamRegexp(paramsRegexp, i, regexp);
         node.hasRegexParam = true;
