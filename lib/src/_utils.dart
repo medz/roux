@@ -2,9 +2,6 @@ import 'node.dart';
 
 List<String> splitPath(String path) {
   final parts = path.split('/');
-  if (parts.isEmpty) {
-    return const [];
-  }
   final segments = parts.sublist(1);
   if (segments.isNotEmpty && segments.last.isEmpty) {
     segments.removeLast();
