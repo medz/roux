@@ -1,3 +1,12 @@
-## 0.1.0
+## 0.1.0 - 2026-02-04
 
-- Initial release.
+### Added
+- Rebranded as Roux with refreshed documentation and examples.
+- Function-based routing API (createRouter, addRoute, findRoute, findAllRoutes, removeRoute, routeToRegExp).
+- Comprehensive test suite for routing operations.
+- Benchmarks for route matching.
+
+### Changed
+- README redesigned with clearer installation and usage guidance.
+- GitHub Actions workflow updated for testing.
+- Project versioning, dependencies, and build configuration updated.
