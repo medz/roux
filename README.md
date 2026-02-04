@@ -1,26 +1,26 @@
-# RoutingKit
+# roux
 
-[![Pub Version](https://img.shields.io/pub/v/routingkit?logo=dart)](https://pub.dev/packages/routingkit)
-[![Test](https://github.com/medz/routingkit/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/medz/routingkit/actions/workflows/test.yml)
+[![Pub Version](https://img.shields.io/pub/v/roux?logo=dart)](https://pub.dev/packages/roux)
+[![Test](https://github.com/medz/roux/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/medz/roux/actions/workflows/test.yml)
 
 Lightweight and fast router for Dart.
 
 ## Install
 
 ```bash
-dart pub add routingkit
+dart pub add roux
 ```
 
 With Flutter:
 
 ```bash
-flutter pub add routingkit
+flutter pub add roux
 ```
 
 ## Usage
 
 ```dart
-import 'package:routingkit/routingkit.dart';
+import 'package:roux/roux.dart';
 
 final router = createRouter<String>();
 

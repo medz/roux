@@ -1,4 +1,4 @@
-library routingkit;
+library roux;
 
 export 'src/add_route.dart' show addRoute;
 export 'src/find_all_routes.dart' show findAllRoutes;
