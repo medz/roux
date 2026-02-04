@@ -1,7 +1,14 @@
 import 'node.dart';
 
+/// Router context holding lookup structures.
+///
+/// [static] caches full static paths for O(1) exact matches.
+/// [root] is the trie root for segmented traversal; each node also has its own
+/// `static` map for child segments during trie walks.
 class RouterContext<T> {
   final Node<T> root;
+
+  /// Full static path cache for quick exact matches.
   final Map<String, Node<T>> static;
   final bool caseSensitive;
   final String anyMethodToken;
