@@ -3,6 +3,10 @@ import '_utils.dart';
 import 'node.dart';
 import 'router.dart';
 
+/// Finds the first matching route for [method] and [path].
+///
+/// Returns null when no route matches. When [params] is false, params
+/// extraction is skipped and the returned [MatchedRoute] contains only [data].
 MatchedRoute<T>? findRoute<T>(
   RouterContext<T> ctx,
   String? method,

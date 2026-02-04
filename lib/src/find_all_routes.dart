@@ -3,6 +3,12 @@ import '_utils.dart';
 import 'node.dart';
 import 'router.dart';
 
+/// Finds all matching routes for [method] and [path].
+///
+/// Matches are ordered from least specific to most specific: wildcard matches
+/// first, then param matches, then static/end-of-path matches. When [params] is
+/// false, params extraction is skipped and the returned [MatchedRoute] values
+/// contain only [data].
 List<MatchedRoute<T>> findAllRoutes<T>(
   RouterContext<T> ctx,
   String? method,

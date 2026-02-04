@@ -3,6 +3,10 @@ import '_utils.dart';
 import 'node.dart';
 import 'router.dart';
 
+/// Removes a route for [method] and [path].
+///
+/// If [path] is null, removes all routes registered for [method]. When [method]
+/// is null or empty, the any-method token is used.
 void removeRoute<T>(RouterContext<T> ctx, String? method, String? path) {
   final methodToken = normalizeMethod(ctx, method);
 

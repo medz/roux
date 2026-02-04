@@ -1,6 +1,9 @@
 import 'node.dart';
 
-/// Router context holding lookup structures.
+/// Opaque router handle that stores lookup structures.
+///
+/// Treat the fields as implementation details and use the top-level helpers
+/// like `addRoute`, `findRoute`, `findAllRoutes`, and `removeRoute`.
 ///
 /// [static] caches full static paths for O(1) exact matches.
 /// [root] is the trie root for segmented traversal; each node also has its own
@@ -10,8 +13,14 @@ class RouterContext<T> {
 
   /// Full static path cache for quick exact matches.
   final Map<String, Node<T>> static;
+
+  /// Whether path matching is case-sensitive.
   final bool caseSensitive;
+
+  /// Token representing "any method" registrations.
   final String anyMethodToken;
+
+  /// Uppercased [anyMethodToken] used for normalization.
   final String anyMethodTokenNormalized;
 
   RouterContext({
@@ -22,6 +31,10 @@ class RouterContext<T> {
   }) : anyMethodTokenNormalized = anyMethodToken.toUpperCase();
 }
 
+/// Creates a new [RouterContext].
+///
+/// When [caseSensitive] is false, path matching lowercases segments. The
+/// [anyMethodToken] is the token used to register "any method" routes.
 RouterContext<T> createRouter<T>({
   bool caseSensitive = true,
   String anyMethodToken = 'any',

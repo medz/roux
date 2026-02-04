@@ -3,6 +3,20 @@ import '_utils.dart';
 import 'node.dart';
 import 'router.dart';
 
+/// Registers a route pattern on [ctx] for [method].
+///
+/// The [path] supports:
+/// - static segments: `/users`
+/// - named params: `/users/:id`
+/// - embedded params: `/files/:name.:ext`
+/// - single-segment wildcards: `*`
+/// - multi-segment wildcards: `**` or `**:path`
+///
+/// `**` can match an empty remainder; `**:name` requires at least one segment.
+/// Escape literal `:` or `*` with a backslash, for example
+/// `/static\\:path/\\*/\\*\\*`.
+///
+/// If [T] is non-nullable, [data] is required.
 void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
   final methodToken = normalizeMethod(ctx, method);
   path = normalizePatternPath(path);

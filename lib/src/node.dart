@@ -1,7 +1,18 @@
 typedef ParamsIndexMap = List<({int index, Pattern name, bool optional})>;
 
+/// Result returned from route lookup.
+///
+/// [data] is the value associated with the matched route.
+/// [params] contains extracted parameters when the route uses `:name`, `*`,
+/// or `**` segments.
 class MatchedRoute<T> {
+  /// Data associated with the matched route.
   final T data;
+
+  /// Extracted parameters for the match, if any.
+  ///
+  /// Named params use their names. Unnamed `*` segments are `_0`, `_1`, ...;
+  /// `**` uses `_` unless a name is provided (e.g. `**:path`).
   final Map<String, String>? params;
 
   const MatchedRoute(this.data, [this.params]);

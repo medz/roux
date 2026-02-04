@@ -1,3 +1,8 @@
+/// Converts a route pattern to a [RegExp] with named captures.
+///
+/// The returned regex is anchored and allows an optional trailing slash.
+/// Named params become named capture groups; `*` and `**` use `_0`, `_1`, ...
+/// and `_` respectively.
 RegExp routeToRegExp([String route = '/']) {
   final reSegments = <String>[];
   var idCtr = 0;
