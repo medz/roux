@@ -1,22 +1,28 @@
-name: test
+name: Test
 
 on:
   push:
-    branches: ["main"]
+    branches: [main]
   pull_request:
-    branches: ["main"]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
-      - name: Install dependencies
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@v1
+
+      - name: Install Dependencies
         run: dart pub get
-      - name: Verify formatting
-        run: dart format --set-exit-if-changed --output=none .
-      - name: Analyze project source
+
+      - name: Format
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
         run: dart analyze
-      - name: Run tests
+
+      - name: Test
         run: dart test

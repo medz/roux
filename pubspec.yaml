@@ -1,9 +1,9 @@
-name: routingkit
+name: roux
 description: >-
-  A lightweight, high-performance router for Dart with elegant API support for static, 
-  parameterized, and wildcard routes. Perfect for HTTP servers, API gateways, and application routing.
-version: 5.1.2
-repository: https://github.com/medz/routingkit
+  A lightweight, fast, functional router for Dart with static, parameterized, and
+  wildcard route matching.
+version: 0.1.0
+repository: https://github.com/medz/roux
 
 funding:
   - https://github.com/sponsors/medz
@@ -13,11 +13,11 @@ topics:
   - http
   - path-matching
   - trie
-  - performance
 
 environment:
-  sdk: ^3.3.0
+  sdk: ^3.10.0
 
 dev_dependencies:
-  lints: ">=4.0.0 <6.0.0"
-  test: ^1.24.0
+  benchmark_harness: ^2.4.0
+  lints: ^6.0.0
+  test: ^1.28.0

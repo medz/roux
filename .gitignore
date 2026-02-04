@@ -1,4 +1,6 @@
+.agents/
 .dart_tool/
+.codex
 
 coverage/
 
