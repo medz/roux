@@ -14,7 +14,12 @@ RegExp routeToRegExp([String route = '/']) {
       if (segment == '**') {
         reSegments.add('?(?<_>.*)');
       } else {
-        reSegments.add('?(?<${segment.substring(3)}>.+)');
+        final name = segment.length > 3 ? segment.substring(3) : '';
+        if (name.isEmpty) {
+          reSegments.add('?(?<_>.*)');
+        } else {
+          reSegments.add('?(?<$name>.+)');
+        }
       }
       continue;
     }
