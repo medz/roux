@@ -18,6 +18,7 @@ String normalizePatternPath(String path) {
 
 void setParamRegexp(List<RegExp?> paramsRegexp, int index, RegExp regexp) {
   if (paramsRegexp.length <= index) {
+    // Grow the list and rely on null fill for gaps between entries.
     paramsRegexp.length = index + 1;
   }
   paramsRegexp[index] = regexp;
