@@ -25,7 +25,7 @@ MatchedRoute<T>? findRoute<T>(
   final staticNode = ctx.static[matchPath];
   if (staticNode?.methods != null) {
     final staticMatch = matchMethods(ctx, staticNode!.methods!, methodToken);
-    if (staticMatch != null) {
+    if (staticMatch != null && staticMatch.isNotEmpty) {
       return params
           ? toMatched(staticMatch[0], splitPath(path))
           : MatchedRoute<T>(staticMatch[0].data);
@@ -69,7 +69,7 @@ List<MethodData<T>>? _lookupTree<T>(
     // Fallback to dynamic for last child
     if (node.param?.methods != null) {
       final match = matchMethods(ctx, node.param!.methods!, methodToken);
-      if (match != null) {
+      if (match != null && match.isNotEmpty) {
         final pMap = match[0].paramsMap;
         if (pMap != null && pMap.isNotEmpty && pMap.last.optional) {
           return match;
@@ -78,7 +78,7 @@ List<MethodData<T>>? _lookupTree<T>(
     }
     if (node.wildcard?.methods != null) {
       final match = matchMethods(ctx, node.wildcard!.methods!, methodToken);
-      if (match != null) {
+      if (match != null && match.isNotEmpty) {
         final pMap = match[0].paramsMap;
         if (pMap != null && pMap.isNotEmpty && pMap.last.optional) {
           return match;

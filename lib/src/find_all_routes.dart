@@ -70,7 +70,7 @@ List<MethodData<T>> _findAll<T>(
     _findAll(ctx, node.param!, methodToken, segments, index + 1, acc);
     if (index == segments.length && node.param!.methods != null) {
       final match = matchMethods(ctx, node.param!.methods!, methodToken);
-      if (match != null) {
+      if (match != null && match.isNotEmpty) {
         final pMap = match[0].paramsMap;
         if (pMap != null && pMap.isNotEmpty && pMap.last.optional) {
           acc.addAll(match);
