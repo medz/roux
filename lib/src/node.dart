@@ -8,11 +8,17 @@ class MatchedRoute<T> {
 }
 
 class MethodData<T> {
+  final String key;
   final T data;
   final ParamsIndexMap? paramsMap;
   final List<RegExp?> paramsRegexp;
 
-  MethodData({required this.data, required this.paramsRegexp, this.paramsMap});
+  MethodData({
+    required this.key,
+    required this.data,
+    required this.paramsRegexp,
+    this.paramsMap,
+  });
 }
 
 class Node<T> {

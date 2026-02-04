@@ -15,6 +15,10 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
 
   final paramsMap = <({int index, Pattern name, bool optional})>[];
   final paramsRegexp = <RegExp?>[];
+  final keySegments = ctx.caseSensitive
+      ? segments
+      : segments.map((segment) => segment.toLowerCase()).toList();
+  final routeKey = '$methodToken /${keySegments.join('/')}';
 
   for (var i = 0; i < segments.length; i++) {
     var segment = segments[i];
@@ -82,6 +86,7 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
   );
   bucket.add(
     MethodData<T>(
+      key: routeKey,
       data: requireData(data),
       paramsRegexp: paramsRegexp,
       paramsMap: hasParams ? paramsMap : null,

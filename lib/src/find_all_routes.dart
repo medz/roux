@@ -24,13 +24,20 @@ List<MatchedRoute<T>> findAllRoutes<T>(
     return const [];
   }
 
-  final uniqueMatches = <MethodData<T>>{}..addAll(matches);
-
-  if (!params) {
-    return uniqueMatches.map((match) => MatchedRoute<T>(match.data)).toList();
+  final uniqueMatches = <String, MethodData<T>>{};
+  for (final match in matches) {
+    uniqueMatches.putIfAbsent(match.key, () => match);
   }
 
-  return uniqueMatches.map((match) => toMatched(match, segments)).toList();
+  if (!params) {
+    return uniqueMatches.values
+        .map((match) => MatchedRoute<T>(match.data))
+        .toList();
+  }
+
+  return uniqueMatches.values
+      .map((match) => toMatched(match, segments))
+      .toList();
 }
 
 List<MethodData<T>> _findAll<T>(
