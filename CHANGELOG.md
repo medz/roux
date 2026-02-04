@@ -1,3 +1,8 @@
+## 0.1.1 - Unreleased
+
+### Added
+- Added a runnable `example/main.dart` showcasing router setup and matching.
+
 ## 0.1.0 - 2026-02-04
 
 ### Added
