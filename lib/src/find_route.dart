@@ -31,17 +31,19 @@ MatchedRoute<T>? findRoute<T>(
   final segments = splitPath(path);
   final matchSegments = normalizeSegments(ctx, segments);
 
-  final match = _lookupTree(
+  final matches = _lookupTree(
     ctx,
     ctx.root,
     methodToken,
     matchSegments,
     0,
-  )?.first;
+  );
 
-  if (match == null) {
+  if (matches == null || matches.isEmpty) {
     return null;
   }
+
+  final match = matches.first;
 
   if (!params) {
     return MatchedRoute<T>(match.data);
