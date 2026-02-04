@@ -35,13 +35,7 @@ MatchedRoute<T>? findRoute<T>(
   final segments = splitPath(path);
   final matchSegments = normalizeSegments(ctx, segments);
 
-  final matches = _lookupTree(
-    ctx,
-    ctx.root,
-    methodToken,
-    matchSegments,
-    0,
-  );
+  final matches = _lookupTree(ctx, ctx.root, methodToken, matchSegments, 0);
 
   if (matches == null || matches.isEmpty) {
     return null;
