@@ -56,8 +56,9 @@ Map<String, String> getMatchParams(
     String segment;
     if (index < 0) {
       final start = -(index + 1);
-      segment =
-          start < segments.length ? segments.sublist(start).join('/') : '';
+      segment = start < segments.length
+          ? segments.sublist(start).join('/')
+          : '';
     } else {
       segment = index < segments.length ? segments[index] : '';
     }

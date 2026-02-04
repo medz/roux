@@ -48,11 +48,7 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
         node.hasRegexParam = true;
         paramsMap.add((index: i, name: regexp, optional: false));
       } else {
-        paramsMap.add((
-          index: i,
-          name: segment.substring(1),
-          optional: false,
-        ));
+        paramsMap.add((index: i, name: segment.substring(1), optional: false));
       }
       continue;
     }
@@ -84,11 +80,13 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
     methodToken,
     () => <MethodData<T>>[],
   );
-  bucket.add(MethodData<T>(
-    data: requireData(data),
-    paramsRegexp: paramsRegexp,
-    paramsMap: hasParams ? paramsMap : null,
-  ));
+  bucket.add(
+    MethodData<T>(
+      data: requireData(data),
+      paramsRegexp: paramsRegexp,
+      paramsMap: hasParams ? paramsMap : null,
+    ),
+  );
 
   if (!hasParams) {
     final staticPath = '/${matchSegments.join('/')}';

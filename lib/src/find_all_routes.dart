@@ -18,13 +18,7 @@ List<MatchedRoute<T>> findAllRoutes<T>(
   final segments = splitPath(path);
   final matchSegments = normalizeSegments(ctx, segments);
 
-  final matches = _findAll(
-    ctx,
-    ctx.root,
-    methodToken,
-    matchSegments,
-    0,
-  );
+  final matches = _findAll(ctx, ctx.root, methodToken, matchSegments, 0);
 
   if (matches.isEmpty) {
     return const [];
@@ -33,9 +27,7 @@ List<MatchedRoute<T>> findAllRoutes<T>(
   final uniqueMatches = <MethodData<T>>{}..addAll(matches);
 
   if (!params) {
-    return uniqueMatches
-        .map((match) => MatchedRoute<T>(match.data))
-        .toList();
+    return uniqueMatches.map((match) => MatchedRoute<T>(match.data)).toList();
   }
 
   return uniqueMatches.map((match) => toMatched(match, segments)).toList();
