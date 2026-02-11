@@ -26,6 +26,10 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
     _addPlainStaticRoute(ctx, methodToken, path, routeData);
     return;
   }
+  if (_isSimpleParamPattern(path)) {
+    _addSimpleParamRoute(ctx, methodToken, path, routeData);
+    return;
+  }
 
   final segments = splitPath(path);
   final matchSegments = normalizeSegments(ctx, segments);
@@ -125,6 +129,30 @@ bool _isPlainStaticPattern(String path) {
   return !path.contains(':') && !path.contains('*');
 }
 
+bool _isSimpleParamPattern(String path) {
+  if (!path.contains(':') || path.contains('*')) {
+    return false;
+  }
+
+  for (var i = 0; i < path.length; i++) {
+    if (path.codeUnitAt(i) != 58) {
+      continue;
+    }
+    if (i == 0 || path.codeUnitAt(i - 1) != 47) {
+      return false;
+    }
+
+    i += 1;
+    for (; i < path.length && path.codeUnitAt(i) != 47; i++) {
+      if (path.codeUnitAt(i) == 58) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 void _addPlainStaticRoute<T>(
   RouterContext<T> ctx,
   String methodToken,
@@ -169,6 +197,66 @@ void _addPlainStaticRoute<T>(
   } else {
     ctx.static[matchPath] = node;
   }
+}
+
+void _addSimpleParamRoute<T>(
+  RouterContext<T> ctx,
+  String methodToken,
+  String path,
+  T routeData,
+) {
+  final length = path.length;
+  var start = 1;
+  var segmentIndex = 0;
+  var node = ctx.root;
+
+  final paramsMap = <({int index, Pattern name, bool optional})>[];
+
+  for (var i = 1; i <= length; i++) {
+    if (i != length && path.codeUnitAt(i) != 47) {
+      continue;
+    }
+    if (i == length && start == i) {
+      break;
+    }
+
+    final segment = path.substring(start, i);
+    if (segment.isNotEmpty && segment.codeUnitAt(0) == 58) {
+      node = node.param ??= Node<T>(key: '*');
+      paramsMap.add((
+        index: segmentIndex,
+        name: segment.substring(1),
+        optional: false,
+      ));
+    } else {
+      final matchSegment = ctx.caseSensitive ? segment : segment.toLowerCase();
+      final child = node.static?[matchSegment];
+      if (child != null) {
+        node = child;
+      } else {
+        final staticNode = Node<T>(key: matchSegment);
+        node.static ??= <String, Node<T>>{};
+        node.static![matchSegment] = staticNode;
+        node = staticNode;
+      }
+    }
+
+    start = i + 1;
+    segmentIndex += 1;
+  }
+
+  node.methods ??= <String, List<MethodData<T>>>{};
+  final bucket = node.methods!.putIfAbsent(
+    methodToken,
+    () => <MethodData<T>>[],
+  );
+  bucket.add(
+    MethodData<T>(
+      data: routeData,
+      paramsRegexp: const <RegExp?>[],
+      paramsMap: paramsMap,
+    ),
+  );
 }
 
 String _buildStaticCachePath<T>(
