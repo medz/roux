@@ -67,7 +67,6 @@ class _RouxLookupStaticBenchmark extends _RouterBenchmark {
     for (final i in _indexes) {
       roux.addRoute(_router, 'GET', '/path$i', i);
     }
-    roux.findRoute(_router, 'GET', '/path0');
   }
 
   @override
@@ -102,7 +101,6 @@ class _RouxLookupDynamicBenchmark extends _RouterBenchmark {
     for (final i in _indexes) {
       roux.addRoute(_router, 'GET', '/users/:id/items/:itemId/profile$i', i);
     }
-    roux.findRoute(_router, 'GET', '/users/user_0/items/item_0/profile0');
   }
 
   @override
