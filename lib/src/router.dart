@@ -1,13 +1,5 @@
 import 'node.dart';
 
-class PendingRoute<T> {
-  final String? method;
-  final String path;
-  final T data;
-
-  PendingRoute({required this.method, required this.path, required this.data});
-}
-
 /// Opaque router handle that stores lookup structures.
 ///
 /// Treat the fields as implementation details and use the top-level helpers
@@ -34,14 +26,20 @@ class RouterContext<T> {
   /// Cache for method token normalization to reduce repeated allocations.
   final Map<String, String> methodCache;
 
-  /// Memoized findRoute results for [params] = true by method and path.
-  final Map<String, Map<String, MatchedRoute<T>?>> findRouteCacheWithParams;
+  /// Memoized findRoute hit results for [params] = true by method and path.
+  final Map<String, Map<String, MatchedRoute<T>>> findRouteCacheWithParams;
 
-  /// Memoized findRoute results for [params] = false by method and path.
-  final Map<String, Map<String, MatchedRoute<T>?>> findRouteCacheWithoutParams;
+  /// Memoized findRoute hit results for [params] = false by method and path.
+  final Map<String, Map<String, MatchedRoute<T>>> findRouteCacheWithoutParams;
 
-  /// Buffered route additions that are materialized on first lookup/removal.
-  final List<PendingRoute<T>> pendingRoutes;
+  /// Memoized findRoute misses for [params] = true by method and path.
+  final Map<String, Set<String>> findRouteNoMatchCacheWithParams;
+
+  /// Memoized findRoute misses for [params] = false by method and path.
+  final Map<String, Set<String>> findRouteNoMatchCacheWithoutParams;
+
+  /// Buffered route additions encoded as [method, path, data] triples.
+  final List<Object?> pendingRoutes;
 
   /// Incremented on route mutations to invalidate cached lookups lazily.
   int mutationVersion;
@@ -57,6 +55,8 @@ class RouterContext<T> {
     required this.methodCache,
     required this.findRouteCacheWithParams,
     required this.findRouteCacheWithoutParams,
+    required this.findRouteNoMatchCacheWithParams,
+    required this.findRouteNoMatchCacheWithoutParams,
     required this.pendingRoutes,
     required this.mutationVersion,
     required this.cacheVersion,
@@ -77,9 +77,11 @@ RouterContext<T> createRouter<T>({
     caseSensitive: caseSensitive,
     anyMethodToken: anyMethodToken,
     methodCache: <String, String>{},
-    findRouteCacheWithParams: <String, Map<String, MatchedRoute<T>?>>{},
-    findRouteCacheWithoutParams: <String, Map<String, MatchedRoute<T>?>>{},
-    pendingRoutes: <PendingRoute<T>>[],
+    findRouteCacheWithParams: <String, Map<String, MatchedRoute<T>>>{},
+    findRouteCacheWithoutParams: <String, Map<String, MatchedRoute<T>>>{},
+    findRouteNoMatchCacheWithParams: <String, Set<String>>{},
+    findRouteNoMatchCacheWithoutParams: <String, Set<String>>{},
+    pendingRoutes: <Object?>[],
     mutationVersion: 0,
     cacheVersion: 0,
   );

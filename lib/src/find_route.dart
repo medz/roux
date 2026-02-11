@@ -4,6 +4,8 @@ import 'add_route.dart' show materializePendingRoutes;
 import 'node.dart';
 import 'router.dart';
 
+const _maxFindRouteCacheEntriesPerMethod = 8192;
+
 /// Finds the first matching route for [method] and [path].
 ///
 /// Returns null when no route matches. When [params] is false, params
@@ -14,21 +16,27 @@ MatchedRoute<T>? findRoute<T>(
   String path, {
   bool params = true,
 }) {
-  prepareFindRouteCache(ctx);
-  materializePendingRoutes(ctx);
+  _prepareFindRouteState(ctx);
   final methodToken = normalizeMethod(ctx, method);
 
   if (path.isNotEmpty && path.codeUnitAt(path.length - 1) == 47) {
     path = path.substring(0, path.length - 1);
   }
 
-  final cache = params
+  final hitCache = params
       ? ctx.findRouteCacheWithParams
       : ctx.findRouteCacheWithoutParams;
+  final noMatchCache = params
+      ? ctx.findRouteNoMatchCacheWithParams
+      : ctx.findRouteNoMatchCacheWithoutParams;
   final cachePath = params ? path : normalizePath(ctx, path);
-  final cacheByMethod = cache[methodToken];
-  if (cacheByMethod != null && cacheByMethod.containsKey(cachePath)) {
-    return cacheByMethod[cachePath];
+  final hitByMethod = hitCache[methodToken];
+  final cachedHit = hitByMethod?[cachePath];
+  if (cachedHit != null) {
+    return cachedHit;
+  }
+  if (noMatchCache[methodToken]?.contains(cachePath) ?? false) {
+    return null;
   }
 
   final matchPath = normalizePath(ctx, path);
@@ -39,7 +47,7 @@ MatchedRoute<T>? findRoute<T>(
     final staticMatch = matchNodeMethods(ctx, staticNode, methodToken);
     if (staticMatch != null && staticMatch.isNotEmpty) {
       final result = MatchedRoute<T>(staticMatch[0].data);
-      _cacheResult(cache, methodToken, cachePath, result);
+      _cacheResult(hitCache, noMatchCache, methodToken, cachePath, result);
       return result;
     }
   }
@@ -50,7 +58,7 @@ MatchedRoute<T>? findRoute<T>(
   final matches = _lookupTree(ctx, ctx.root, methodToken, matchSegments, 0);
 
   if (matches == null || matches.isEmpty) {
-    _cacheResult(cache, methodToken, cachePath, null);
+    _cacheResult(hitCache, noMatchCache, methodToken, cachePath, null);
     return null;
   }
 
@@ -58,21 +66,61 @@ MatchedRoute<T>? findRoute<T>(
   final result = !params
       ? MatchedRoute<T>(match.data)
       : toMatched(match, segments);
-  _cacheResult(cache, methodToken, cachePath, result);
+  _cacheResult(hitCache, noMatchCache, methodToken, cachePath, result);
   return result;
 }
 
+void _prepareFindRouteState<T>(RouterContext<T> ctx) {
+  if (ctx.cacheVersion == ctx.mutationVersion) {
+    return;
+  }
+  clearFindRouteCaches(ctx);
+  materializePendingRoutes(ctx);
+  ctx.cacheVersion = ctx.mutationVersion;
+}
+
 void _cacheResult<T>(
-  Map<String, Map<String, MatchedRoute<T>?>> cache,
+  Map<String, Map<String, MatchedRoute<T>>> hitCache,
+  Map<String, Set<String>> noMatchCache,
   String methodToken,
   String cachePath,
   MatchedRoute<T>? result,
 ) {
-  final cacheByMethod = cache.putIfAbsent(
+  if (result == null) {
+    final misses = noMatchCache.putIfAbsent(methodToken, () => <String>{});
+    if (!misses.contains(cachePath) &&
+        misses.length >= _maxFindRouteCacheEntriesPerMethod) {
+      misses.remove(misses.first);
+    }
+    misses.add(cachePath);
+
+    final hits = hitCache[methodToken];
+    if (hits != null) {
+      hits.remove(cachePath);
+      if (hits.isEmpty) {
+        hitCache.remove(methodToken);
+      }
+    }
+    return;
+  }
+
+  final hits = hitCache.putIfAbsent(
     methodToken,
-    () => <String, MatchedRoute<T>?>{},
+    () => <String, MatchedRoute<T>>{},
   );
-  cacheByMethod[cachePath] = result;
+  if (!hits.containsKey(cachePath) &&
+      hits.length >= _maxFindRouteCacheEntriesPerMethod) {
+    hits.remove(hits.keys.first);
+  }
+  hits[cachePath] = result;
+
+  final misses = noMatchCache[methodToken];
+  if (misses != null) {
+    misses.remove(cachePath);
+    if (misses.isEmpty) {
+      noMatchCache.remove(methodToken);
+    }
+  }
 }
 
 List<MethodData<T>>? _lookupTree<T>(

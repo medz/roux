@@ -16,7 +16,9 @@ List<MatchedRoute<T>> findAllRoutes<T>(
   String path, {
   bool params = true,
 }) {
-  materializePendingRoutes(ctx);
+  if (ctx.pendingRoutes.isNotEmpty) {
+    materializePendingRoutes(ctx);
+  }
   final methodToken = normalizeMethod(ctx, method);
 
   if (path.isNotEmpty && path.codeUnitAt(path.length - 1) == 47) {

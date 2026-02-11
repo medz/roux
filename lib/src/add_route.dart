@@ -3,6 +3,8 @@ import '_utils.dart';
 import 'node.dart';
 import 'router.dart';
 
+const _pendingRoutesFlushThreshold = 3072 * 3;
+
 /// Registers a route pattern on [ctx] for [method].
 ///
 /// The [path] supports:
@@ -20,9 +22,14 @@ import 'router.dart';
 void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
   markFindRouteCacheDirty(ctx);
   final routeData = requireData(data);
-  ctx.pendingRoutes.add(
-    PendingRoute<T>(method: method, path: path, data: routeData),
-  );
+  ctx.pendingRoutes
+    ..add(method)
+    ..add(path)
+    ..add(routeData);
+
+  if (ctx.pendingRoutes.length >= _pendingRoutesFlushThreshold) {
+    materializePendingRoutes(ctx);
+  }
 }
 
 void materializePendingRoutes<T>(RouterContext<T> ctx) {
@@ -31,8 +38,13 @@ void materializePendingRoutes<T>(RouterContext<T> ctx) {
     return;
   }
 
-  for (final route in pendingRoutes) {
-    _addRouteToTrie(ctx, route.method, route.path, route.data);
+  for (var i = 0; i < pendingRoutes.length; i += 3) {
+    _addRouteToTrie(
+      ctx,
+      pendingRoutes[i] as String?,
+      pendingRoutes[i + 1] as String,
+      pendingRoutes[i + 2] as T,
+    );
   }
   pendingRoutes.clear();
 }
@@ -86,6 +98,19 @@ void _addRouteToTrie<T>(
 
     // Param
     if (segment == '*' || segment.contains(':')) {
+      if (segment == ':') {
+        final child = node.static?[segment];
+        if (child != null) {
+          node = child;
+          continue;
+        }
+
+        final staticNode = Node<T>();
+        node.static ??= <String, Node<T>>{};
+        node.static![segment] = staticNode;
+        node = staticNode;
+        continue;
+      }
       node = node.param ??= Node<T>();
       paramsMap ??= <({int index, Pattern name, bool optional})>[];
       if (segment == '*') {
@@ -164,6 +189,9 @@ _PatternPathKind _classifyPatternPath(String path) {
 
     sawParam = true;
     if (i == 0 || path.codeUnitAt(i - 1) != 47) {
+      return _PatternPathKind.complex;
+    }
+    if (i + 1 >= path.length || path.codeUnitAt(i + 1) == 47) {
       return _PatternPathKind.complex;
     }
 

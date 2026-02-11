@@ -120,4 +120,39 @@ void main() {
       expect(findRoute(router, 'GET', '/test/123')?.data, '/**');
     });
   });
+
+  group('cache guards', () {
+    test('method cache is bounded', () {
+      final router = createRouter<String>();
+
+      for (var i = 0; i < 600; i++) {
+        findRoute(router, 'method_$i', '/unmatched/path');
+      }
+
+      expect(router.methodCache.length, lessThanOrEqualTo(256));
+    });
+
+    test('findRoute params cache is bounded per method', () {
+      final router = createRouter<String>();
+      addRoute(router, 'GET', '/users/:id', 'user');
+
+      for (var i = 0; i < 10000; i++) {
+        findRoute(router, 'GET', '/users/$i');
+      }
+
+      final cache = router.findRouteCacheWithParams['GET'];
+      expect(cache, isNotNull);
+      expect(cache!.length, lessThanOrEqualTo(8192));
+    });
+  });
+
+  test('colon-only segment is treated as static', () {
+    final router = createRouter<String>();
+    addRoute(router, 'GET', '/:/', 'colon');
+
+    final colonMatch = findRoute(router, 'GET', '/:');
+    expect(colonMatch?.data, 'colon');
+    expect(colonMatch?.params, isNull);
+    expect(findRoute(router, 'GET', '/abc'), isNull);
+  });
 }

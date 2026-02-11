@@ -1,6 +1,8 @@
 import 'node.dart';
 import 'router.dart';
 
+const _maxMethodCacheEntries = 256;
+
 String normalizeMethod<T>(RouterContext<T> ctx, String? method) {
   if (method == null || method.isEmpty) {
     return ctx.anyMethodTokenNormalized;
@@ -22,7 +24,9 @@ String normalizeMethod<T>(RouterContext<T> ctx, String? method) {
     normalized = ctx.anyMethodTokenNormalized;
   }
 
-  ctx.methodCache[method] = normalized;
+  if (ctx.methodCache.length < _maxMethodCacheEntries) {
+    ctx.methodCache[method] = normalized;
+  }
   return normalized;
 }
 
@@ -133,20 +137,14 @@ void clearFindRouteCaches<T>(RouterContext<T> ctx) {
   if (ctx.findRouteCacheWithoutParams.isNotEmpty) {
     ctx.findRouteCacheWithoutParams.clear();
   }
+  if (ctx.findRouteNoMatchCacheWithParams.isNotEmpty) {
+    ctx.findRouteNoMatchCacheWithParams.clear();
+  }
+  if (ctx.findRouteNoMatchCacheWithoutParams.isNotEmpty) {
+    ctx.findRouteNoMatchCacheWithoutParams.clear();
+  }
 }
 
 void markFindRouteCacheDirty<T>(RouterContext<T> ctx) {
-  if (ctx.findRouteCacheWithParams.isEmpty &&
-      ctx.findRouteCacheWithoutParams.isEmpty) {
-    return;
-  }
   ctx.mutationVersion += 1;
-}
-
-void prepareFindRouteCache<T>(RouterContext<T> ctx) {
-  if (ctx.cacheVersion == ctx.mutationVersion) {
-    return;
-  }
-  clearFindRouteCaches(ctx);
-  ctx.cacheVersion = ctx.mutationVersion;
 }

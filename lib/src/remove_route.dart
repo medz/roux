@@ -10,7 +10,9 @@ import 'router.dart';
 /// is null or empty, the any-method token is used.
 void removeRoute<T>(RouterContext<T> ctx, String? method, String? path) {
   markFindRouteCacheDirty(ctx);
-  materializePendingRoutes(ctx);
+  if (ctx.pendingRoutes.isNotEmpty) {
+    materializePendingRoutes(ctx);
+  }
   final methodToken = normalizeMethod(ctx, method);
 
   if (path == null) {
