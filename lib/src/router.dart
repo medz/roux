@@ -9,6 +9,63 @@ class RouteMatch<T> {
   const RouteMatch(this.data, [this.params]);
 }
 
+final class _LazyRouteMatch<T> extends RouteMatch<T> {
+  final List<String> _paramNames;
+  final bool _hasWildcard;
+  final String _path;
+  final _ParamStack? _paramValues;
+  final String? _wildcardValue;
+  final int _wildcardStart;
+  Map<String, String>? _cachedParams;
+
+  _LazyRouteMatch({
+    required T data,
+    required List<String> paramNames,
+    required bool hasWildcard,
+    required String path,
+    required _ParamStack? paramValues,
+    required String? wildcardValue,
+    required int wildcardStart,
+  }) : _paramNames = paramNames,
+       _hasWildcard = hasWildcard,
+       _path = path,
+       _paramValues = paramValues,
+       _wildcardValue = wildcardValue,
+       _wildcardStart = wildcardStart,
+       super(data);
+
+  @override
+  Map<String, String>? get params {
+    final cached = _cachedParams;
+    if (cached != null) {
+      return cached;
+    }
+    if (_paramNames.isEmpty && !_hasWildcard) {
+      return null;
+    }
+
+    final params = <String, String>{};
+    if (_paramNames.isNotEmpty) {
+      final captured = _paramValues;
+      if (captured == null) {
+        throw StateError('Missing parameter capture stack for matched route.');
+      }
+      for (var i = 0; i < _paramNames.length; i++) {
+        params[_paramNames[i]] = _path.substring(
+          captured.startAt(i),
+          captured.endAt(i),
+        );
+      }
+    }
+    if (_hasWildcard) {
+      params['wildcard'] = _wildcardValue ?? _path.substring(_wildcardStart);
+    }
+
+    _cachedParams = params;
+    return params;
+  }
+}
+
 /// Immutable path router with static, parameter and wildcard matching.
 ///
 /// Route precedence is fixed:
@@ -230,25 +287,15 @@ class Router<T> {
       return route.noParamsMatch;
     }
 
-    final params = <String, String>{};
-    final paramNames = route.paramNames;
-    if (paramNames.isNotEmpty) {
-      final captured = paramValues;
-      if (captured == null) {
-        throw StateError('Missing parameter capture stack for matched route.');
-      }
-      for (var i = 0; i < paramNames.length; i++) {
-        params[paramNames[i]] = path.substring(
-          captured.startAt(i),
-          captured.endAt(i),
-        );
-      }
-    }
-    if (route.hasWildcard) {
-      params['wildcard'] = wildcardValue ?? path.substring(wildcardStart);
-    }
-
-    return RouteMatch<T>(route.data, params);
+    return _LazyRouteMatch<T>(
+      data: route.data,
+      paramNames: route.paramNames,
+      hasWildcard: route.hasWildcard,
+      path: path,
+      paramValues: paramValues,
+      wildcardValue: wildcardValue,
+      wildcardStart: wildcardStart,
+    );
   }
 }
 
