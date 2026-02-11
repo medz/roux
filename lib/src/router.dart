@@ -26,12 +26,20 @@ class RouterContext<T> {
   /// Cache for method token normalization to reduce repeated allocations.
   final Map<String, String> methodCache;
 
+  /// Memoized findRoute results for [params] = true by method and path.
+  final Map<String, Map<String, MatchedRoute<T>?>> findRouteCacheWithParams;
+
+  /// Memoized findRoute results for [params] = false by method and path.
+  final Map<String, Map<String, MatchedRoute<T>?>> findRouteCacheWithoutParams;
+
   RouterContext({
     required this.root,
     required this.static,
     required this.caseSensitive,
     required this.anyMethodToken,
     required this.methodCache,
+    required this.findRouteCacheWithParams,
+    required this.findRouteCacheWithoutParams,
   }) : anyMethodTokenNormalized = anyMethodToken.toUpperCase();
 }
 
@@ -44,10 +52,12 @@ RouterContext<T> createRouter<T>({
   String anyMethodToken = 'any',
 }) {
   return RouterContext<T>(
-    root: Node<T>(key: ''),
+    root: Node<T>(),
     static: <String, Node<T>>{},
     caseSensitive: caseSensitive,
     anyMethodToken: anyMethodToken,
     methodCache: <String, String>{},
+    findRouteCacheWithParams: <String, Map<String, MatchedRoute<T>?>>{},
+    findRouteCacheWithoutParams: <String, Map<String, MatchedRoute<T>?>>{},
   );
 }

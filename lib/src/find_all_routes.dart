@@ -21,10 +21,18 @@ List<MatchedRoute<T>> findAllRoutes<T>(
     path = path.substring(0, path.length - 1);
   }
 
+  final matchPath = normalizePath(ctx, path);
   final segments = splitPath(path);
   final matchSegments = normalizeSegments(ctx, segments);
 
   final matches = _findAll(ctx, ctx.root, methodToken, matchSegments, 0);
+  final staticNode = ctx.static[matchPath];
+  if (staticNode != null) {
+    final staticMatch = matchNodeMethods(ctx, staticNode, methodToken);
+    if (staticMatch != null) {
+      matches.addAll(staticMatch);
+    }
+  }
 
   if (matches.isEmpty) {
     return const [];
@@ -57,20 +65,22 @@ List<MethodData<T>> _findAll<T>(
   final segment = index < segments.length ? segments[index] : null;
 
   // 1. Wildcard
-  if (node.wildcard?.methods != null) {
-    final match = matchMethods(ctx, node.wildcard!.methods!, methodToken);
+  final wildcardNode = node.wildcard;
+  if (wildcardNode != null) {
+    final match = matchNodeMethods(ctx, wildcardNode, methodToken);
     if (match != null) {
       acc.addAll(match);
     }
   }
 
   // 2. Param
-  if (node.param != null) {
+  final paramNode = node.param;
+  if (paramNode != null) {
     if (segment != null) {
-      _findAll(ctx, node.param!, methodToken, segments, index + 1, acc);
+      _findAll(ctx, paramNode, methodToken, segments, index + 1, acc);
     }
-    if (index == segments.length && node.param!.methods != null) {
-      final match = matchMethods(ctx, node.param!.methods!, methodToken);
+    if (index == segments.length) {
+      final match = matchNodeMethods(ctx, paramNode, methodToken);
       if (match != null && match.isNotEmpty) {
         final pMap = match[0].paramsMap;
         if (pMap != null && pMap.isNotEmpty && pMap.last.optional) {
@@ -89,8 +99,8 @@ List<MethodData<T>> _findAll<T>(
   }
 
   // 4. End of path
-  if (index == segments.length && node.methods != null) {
-    final match = matchMethods(ctx, node.methods!, methodToken);
+  if (index == segments.length) {
+    final match = matchNodeMethods(ctx, node, methodToken);
     if (match != null) {
       acc.addAll(match);
     }

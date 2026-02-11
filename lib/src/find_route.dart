@@ -19,14 +19,25 @@ MatchedRoute<T>? findRoute<T>(
     path = path.substring(0, path.length - 1);
   }
 
+  final cache = params
+      ? ctx.findRouteCacheWithParams
+      : ctx.findRouteCacheWithoutParams;
+  final cachePath = params ? path : normalizePath(ctx, path);
+  final cacheByMethod = cache[methodToken];
+  if (cacheByMethod != null && cacheByMethod.containsKey(cachePath)) {
+    return cacheByMethod[cachePath];
+  }
+
   final matchPath = normalizePath(ctx, path);
 
   // Static
   final staticNode = ctx.static[matchPath];
-  if (staticNode?.methods != null) {
-    final staticMatch = matchMethods(ctx, staticNode!.methods!, methodToken);
+  if (staticNode != null) {
+    final staticMatch = matchNodeMethods(ctx, staticNode, methodToken);
     if (staticMatch != null && staticMatch.isNotEmpty) {
-      return MatchedRoute<T>(staticMatch[0].data);
+      final result = MatchedRoute<T>(staticMatch[0].data);
+      _cacheResult(cache, methodToken, cachePath, result);
+      return result;
     }
   }
 
@@ -36,16 +47,29 @@ MatchedRoute<T>? findRoute<T>(
   final matches = _lookupTree(ctx, ctx.root, methodToken, matchSegments, 0);
 
   if (matches == null || matches.isEmpty) {
+    _cacheResult(cache, methodToken, cachePath, null);
     return null;
   }
 
   final match = matches.first;
+  final result = !params
+      ? MatchedRoute<T>(match.data)
+      : toMatched(match, segments);
+  _cacheResult(cache, methodToken, cachePath, result);
+  return result;
+}
 
-  if (!params) {
-    return MatchedRoute<T>(match.data);
-  }
-
-  return toMatched(match, segments);
+void _cacheResult<T>(
+  Map<String, Map<String, MatchedRoute<T>?>> cache,
+  String methodToken,
+  String cachePath,
+  MatchedRoute<T>? result,
+) {
+  final cacheByMethod = cache.putIfAbsent(
+    methodToken,
+    () => <String, MatchedRoute<T>?>{},
+  );
+  cacheByMethod[cachePath] = result;
 }
 
 List<MethodData<T>>? _lookupTree<T>(
@@ -57,29 +81,29 @@ List<MethodData<T>>? _lookupTree<T>(
 ) {
   // 0. End of path
   if (index == segments.length) {
-    if (node.methods != null) {
-      final match = matchMethods(ctx, node.methods!, methodToken);
-      if (match != null) {
-        return match;
-      }
+    final match = matchNodeMethods(ctx, node, methodToken);
+    if (match != null) {
+      return match;
     }
 
     // Fallback to dynamic for last child
-    if (node.param?.methods != null) {
-      final match = matchMethods(ctx, node.param!.methods!, methodToken);
-      if (match != null && match.isNotEmpty) {
-        final pMap = match[0].paramsMap;
+    final paramNode = node.param;
+    if (paramNode != null) {
+      final paramMatch = matchNodeMethods(ctx, paramNode, methodToken);
+      if (paramMatch != null && paramMatch.isNotEmpty) {
+        final pMap = paramMatch[0].paramsMap;
         if (pMap != null && pMap.isNotEmpty && pMap.last.optional) {
-          return match;
+          return paramMatch;
         }
       }
     }
-    if (node.wildcard?.methods != null) {
-      final match = matchMethods(ctx, node.wildcard!.methods!, methodToken);
-      if (match != null && match.isNotEmpty) {
-        final pMap = match[0].paramsMap;
+    final wildcardNode = node.wildcard;
+    if (wildcardNode != null) {
+      final wildcardMatch = matchNodeMethods(ctx, wildcardNode, methodToken);
+      if (wildcardMatch != null && wildcardMatch.isNotEmpty) {
+        final pMap = wildcardMatch[0].paramsMap;
         if (pMap != null && pMap.isNotEmpty && pMap.last.optional) {
-          return match;
+          return wildcardMatch;
         }
       }
     }
@@ -124,8 +148,9 @@ List<MethodData<T>>? _lookupTree<T>(
   }
 
   // 3. Wildcard
-  if (node.wildcard?.methods != null) {
-    return matchMethods(ctx, node.wildcard!.methods!, methodToken);
+  final wildcardNode = node.wildcard;
+  if (wildcardNode != null) {
+    return matchNodeMethods(ctx, wildcardNode, methodToken);
   }
 
   return null;

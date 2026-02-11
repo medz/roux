@@ -66,22 +66,23 @@ class MethodData<T> {
 }
 
 class Node<T> {
-  final String key;
-
   Map<String, Node<T>>? static;
   Node<T>? param;
   Node<T>? wildcard;
 
   bool hasRegexParam;
 
+  String? singleMethodToken;
+  List<MethodData<T>>? singleMethodBucket;
   Map<String, List<MethodData<T>>>? methods;
 
   Node({
-    required this.key,
     this.static,
     this.param,
     this.wildcard,
     this.hasRegexParam = false,
+    this.singleMethodToken,
+    this.singleMethodBucket,
     this.methods,
   });
 }

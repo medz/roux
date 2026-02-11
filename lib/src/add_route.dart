@@ -18,17 +18,20 @@ import 'router.dart';
 ///
 /// If [T] is non-nullable, [data] is required.
 void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
+  clearFindRouteCaches(ctx);
   final methodToken = normalizeMethod(ctx, method);
   path = normalizePatternPath(path);
   final routeData = requireData(data);
 
-  if (_isPlainStaticPattern(path)) {
-    _addPlainStaticRoute(ctx, methodToken, path, routeData);
-    return;
-  }
-  if (_isSimpleParamPattern(path)) {
-    _addSimpleParamRoute(ctx, methodToken, path, routeData);
-    return;
+  switch (_classifyPatternPath(path)) {
+    case _PatternPathKind.plainStatic:
+      _addPlainStaticRoute(ctx, methodToken, path, routeData);
+      return;
+    case _PatternPathKind.simpleParam:
+      _addSimpleParamRoute(ctx, methodToken, path, routeData);
+      return;
+    case _PatternPathKind.complex:
+      break;
   }
 
   final segments = splitPath(path);
@@ -46,7 +49,7 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
 
     // Wildcard
     if (segment.startsWith('**')) {
-      node = node.wildcard ??= Node<T>(key: '**');
+      node = node.wildcard ??= Node<T>();
       final parts = segment.split(':');
       final name = parts.length > 1 ? parts[1] : '_';
       paramsMap ??= <({int index, Pattern name, bool optional})>[];
@@ -60,7 +63,7 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
 
     // Param
     if (segment == '*' || segment.contains(':')) {
-      node = node.param ??= Node<T>(key: '*');
+      node = node.param ??= Node<T>();
       paramsMap ??= <({int index, Pattern name, bool optional})>[];
       if (segment == '*') {
         paramsMap.add((
@@ -100,18 +103,14 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
       continue;
     }
 
-    final staticNode = Node<T>(key: matchSegment);
+    final staticNode = Node<T>();
     node.static ??= <String, Node<T>>{};
     node.static![matchSegment] = staticNode;
     node = staticNode;
   }
 
   final hasParams = paramsMap != null;
-  node.methods ??= <String, List<MethodData<T>>>{};
-  final bucket = node.methods!.putIfAbsent(
-    methodToken,
-    () => <MethodData<T>>[],
-  );
+  final bucket = getOrCreateMethodBucket(node, methodToken);
   bucket.add(
     MethodData<T>(
       data: routeData,
@@ -125,32 +124,36 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
   }
 }
 
-bool _isPlainStaticPattern(String path) {
-  return !path.contains(':') && !path.contains('*');
-}
+enum _PatternPathKind { plainStatic, simpleParam, complex }
 
-bool _isSimpleParamPattern(String path) {
-  if (!path.contains(':') || path.contains('*')) {
-    return false;
-  }
+_PatternPathKind _classifyPatternPath(String path) {
+  var sawParam = false;
 
   for (var i = 0; i < path.length; i++) {
-    if (path.codeUnitAt(i) != 58) {
+    final code = path.codeUnitAt(i);
+    if (code == 42) {
+      // '*'
+      return _PatternPathKind.complex;
+    }
+    if (code != 58) {
       continue;
     }
+
+    sawParam = true;
     if (i == 0 || path.codeUnitAt(i - 1) != 47) {
-      return false;
+      return _PatternPathKind.complex;
     }
 
     i += 1;
     for (; i < path.length && path.codeUnitAt(i) != 47; i++) {
-      if (path.codeUnitAt(i) == 58) {
-        return false;
+      final innerCode = path.codeUnitAt(i);
+      if (innerCode == 58 || innerCode == 42) {
+        return _PatternPathKind.complex;
       }
     }
   }
 
-  return true;
+  return sawParam ? _PatternPathKind.simpleParam : _PatternPathKind.plainStatic;
 }
 
 void _addPlainStaticRoute<T>(
@@ -159,44 +162,10 @@ void _addPlainStaticRoute<T>(
   String path,
   T routeData,
 ) {
-  final matchPath = normalizePath(ctx, path);
-  final length = matchPath.length;
-  var start = 1;
-  var node = ctx.root;
-
-  for (var i = 1; i <= length; i++) {
-    if (i != length && matchPath.codeUnitAt(i) != 47) {
-      continue;
-    }
-    if (i == length && start == i) {
-      break;
-    }
-
-    final segment = matchPath.substring(start, i);
-    var staticMap = node.static;
-    if (staticMap == null) {
-      final child = Node<T>(key: segment);
-      staticMap = <String, Node<T>>{segment: child};
-      node.static = staticMap;
-      node = child;
-    } else {
-      node = staticMap[segment] ??= Node<T>(key: segment);
-    }
-    start = i + 1;
-  }
-
-  node.methods ??= <String, List<MethodData<T>>>{};
-  final bucket = node.methods!.putIfAbsent(
-    methodToken,
-    () => <MethodData<T>>[],
-  );
+  final staticPath = normalizeStaticCachePath(normalizePath(ctx, path));
+  final node = ctx.static[staticPath] ??= Node<T>();
+  final bucket = getOrCreateMethodBucket(node, methodToken);
   bucket.add(MethodData<T>(data: routeData, paramsRegexp: const <RegExp?>[]));
-
-  if (length > 1 && matchPath.codeUnitAt(length - 1) == 47) {
-    ctx.static[matchPath.substring(0, length - 1)] = node;
-  } else {
-    ctx.static[matchPath] = node;
-  }
 }
 
 void _addSimpleParamRoute<T>(
@@ -222,7 +191,7 @@ void _addSimpleParamRoute<T>(
 
     final segment = path.substring(start, i);
     if (segment.isNotEmpty && segment.codeUnitAt(0) == 58) {
-      node = node.param ??= Node<T>(key: '*');
+      node = node.param ??= Node<T>();
       paramsMap.add((
         index: segmentIndex,
         name: segment.substring(1),
@@ -234,7 +203,7 @@ void _addSimpleParamRoute<T>(
       if (child != null) {
         node = child;
       } else {
-        final staticNode = Node<T>(key: matchSegment);
+        final staticNode = Node<T>();
         node.static ??= <String, Node<T>>{};
         node.static![matchSegment] = staticNode;
         node = staticNode;
@@ -245,11 +214,7 @@ void _addSimpleParamRoute<T>(
     segmentIndex += 1;
   }
 
-  node.methods ??= <String, List<MethodData<T>>>{};
-  final bucket = node.methods!.putIfAbsent(
-    methodToken,
-    () => <MethodData<T>>[],
-  );
+  final bucket = getOrCreateMethodBucket(node, methodToken);
   bucket.add(
     MethodData<T>(
       data: routeData,

@@ -24,11 +24,72 @@ String normalizePath<T>(RouterContext<T> ctx, String path) {
   return ctx.caseSensitive ? path : path.toLowerCase();
 }
 
+String normalizeStaticCachePath(String path) {
+  if (path.isNotEmpty && path.codeUnitAt(path.length - 1) == 47) {
+    return path.substring(0, path.length - 1);
+  }
+  return path;
+}
+
 List<String> normalizeSegments<T>(RouterContext<T> ctx, List<String> segments) {
   if (ctx.caseSensitive) {
     return segments;
   }
   return segments.map((segment) => segment.toLowerCase()).toList();
+}
+
+List<MethodData<T>> getOrCreateMethodBucket<T>(
+  Node<T> node,
+  String methodToken,
+) {
+  final methods = node.methods;
+  if (methods != null) {
+    return methods.putIfAbsent(methodToken, () => <MethodData<T>>[]);
+  }
+
+  final singleBucket = node.singleMethodBucket;
+  if (singleBucket == null) {
+    final bucket = <MethodData<T>>[];
+    node.singleMethodToken = methodToken;
+    node.singleMethodBucket = bucket;
+    return bucket;
+  }
+
+  if (node.singleMethodToken == methodToken) {
+    return singleBucket;
+  }
+
+  final upgraded = <String, List<MethodData<T>>>{
+    node.singleMethodToken!: singleBucket,
+  };
+  node.methods = upgraded;
+  node.singleMethodToken = null;
+  node.singleMethodBucket = null;
+  return upgraded.putIfAbsent(methodToken, () => <MethodData<T>>[]);
+}
+
+List<MethodData<T>>? matchNodeMethods<T>(
+  RouterContext<T> ctx,
+  Node<T> node,
+  String methodToken,
+) {
+  final methods = node.methods;
+  if (methods != null) {
+    return methods[methodToken] ?? methods[ctx.anyMethodTokenNormalized];
+  }
+
+  final singleBucket = node.singleMethodBucket;
+  if (singleBucket == null) {
+    return null;
+  }
+
+  final singleToken = node.singleMethodToken;
+  if (singleToken == methodToken ||
+      singleToken == ctx.anyMethodTokenNormalized) {
+    return singleBucket;
+  }
+
+  return null;
 }
 
 List<MethodData<T>>? matchMethods<T>(
@@ -57,4 +118,13 @@ bool _isAsciiUpper(String input) {
     }
   }
   return true;
+}
+
+void clearFindRouteCaches<T>(RouterContext<T> ctx) {
+  if (ctx.findRouteCacheWithParams.isNotEmpty) {
+    ctx.findRouteCacheWithParams.clear();
+  }
+  if (ctx.findRouteCacheWithoutParams.isNotEmpty) {
+    ctx.findRouteCacheWithoutParams.clear();
+  }
 }

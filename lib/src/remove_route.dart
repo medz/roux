@@ -8,15 +8,27 @@ import 'router.dart';
 /// If [path] is null, removes all routes registered for [method]. When [method]
 /// is null or empty, the any-method token is used.
 void removeRoute<T>(RouterContext<T> ctx, String? method, String? path) {
+  clearFindRouteCaches(ctx);
   final methodToken = normalizeMethod(ctx, method);
 
   if (path == null) {
     _removeAll(ctx.root, methodToken);
+    for (final entry in ctx.static.entries.toList()) {
+      _removeMethodFromNode(entry.value, methodToken);
+      if (_isEmptyNode(entry.value)) {
+        ctx.static.remove(entry.key);
+      }
+    }
     return;
   }
 
   path = normalizePatternPath(path);
   final matchPath = normalizePath(ctx, path);
+  if (_isPlainStaticPath(path)) {
+    _removeStaticRoute(ctx, methodToken, matchPath);
+    return;
+  }
+
   final segments = splitPath(matchPath);
   _remove(ctx.root, methodToken, segments, 0);
 }
@@ -28,12 +40,7 @@ void _remove<T>(
   int index,
 ) {
   if (index == segments.length) {
-    if (node.methods != null && node.methods!.containsKey(methodToken)) {
-      node.methods!.remove(methodToken);
-      if (node.methods!.isEmpty) {
-        node.methods = null;
-      }
-    }
+    _removeMethodFromNode(node, methodToken);
     return;
   }
 
@@ -92,12 +99,7 @@ void _remove<T>(
 }
 
 bool _removeAll<T>(Node<T> node, String methodToken) {
-  if (node.methods != null && node.methods!.containsKey(methodToken)) {
-    node.methods!.remove(methodToken);
-    if (node.methods!.isEmpty) {
-      node.methods = null;
-    }
-  }
+  _removeMethodFromNode(node, methodToken);
 
   if (node.param != null && _removeAll(node.param!, methodToken)) {
     node.param = null;
@@ -120,8 +122,58 @@ bool _removeAll<T>(Node<T> node, String methodToken) {
 }
 
 bool _isEmptyNode<T>(Node<T> node) {
-  return node.methods == null &&
+  return node.singleMethodBucket == null &&
+      node.methods == null &&
       node.static == null &&
       node.param == null &&
       node.wildcard == null;
+}
+
+bool _isPlainStaticPath(String path) {
+  return !path.contains(':') && !path.contains('*');
+}
+
+void _removeStaticRoute<T>(
+  RouterContext<T> ctx,
+  String methodToken,
+  String normalizedPath,
+) {
+  final staticPath = normalizeStaticCachePath(normalizedPath);
+  final node = ctx.static[staticPath];
+  if (node == null) {
+    return;
+  }
+
+  _removeMethodFromNode(node, methodToken);
+  if (_isEmptyNode(node)) {
+    ctx.static.remove(staticPath);
+  }
+}
+
+void _removeMethodFromNode<T>(Node<T> node, String methodToken) {
+  final methods = node.methods;
+  if (methods != null) {
+    if (!methods.containsKey(methodToken)) {
+      return;
+    }
+
+    methods.remove(methodToken);
+    if (methods.isEmpty) {
+      node.methods = null;
+      return;
+    }
+
+    if (methods.length == 1) {
+      final entry = methods.entries.first;
+      node.singleMethodToken = entry.key;
+      node.singleMethodBucket = entry.value;
+      node.methods = null;
+    }
+    return;
+  }
+
+  if (node.singleMethodToken == methodToken) {
+    node.singleMethodToken = null;
+    node.singleMethodBucket = null;
+  }
 }
