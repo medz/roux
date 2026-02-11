@@ -1,4 +1,6 @@
 const _slashCode = 47;
+const _asteriskCode = 42;
+const _colonCode = 58;
 const _staticMapUpgradeThreshold = 8;
 
 /// Match result produced by [Router.match].
@@ -139,16 +141,20 @@ class Router<T> {
         continue;
       }
 
-      final segments = _splitPathSegments(pattern);
-      final paramNames = <String>[];
+      List<String>? paramNames;
+      var paramCount = 0;
       var node = root;
+      var cursor = pattern.length == 1 ? pattern.length : 1;
       var wildcardAdded = false;
 
-      for (var i = 0; i < segments.length; i++) {
-        final segment = segments[i];
+      while (cursor < pattern.length) {
+        final segmentEnd = _findSegmentEnd(pattern, cursor);
+        final segmentLength = segmentEnd - cursor;
+        final firstCode = pattern.codeUnitAt(cursor);
+        final isLastSegment = segmentEnd == pattern.length;
 
-        if (segment == '*') {
-          if (i != segments.length - 1) {
+        if (segmentLength == 1 && firstCode == _asteriskCode) {
+          if (!isLastSegment) {
             throw FormatException(
               'Wildcard must be the last segment: $pattern',
             );
@@ -160,34 +166,35 @@ class Router<T> {
           }
           node.wildcardRoute = _Route<T>(
             data: data,
-            paramNames: List<String>.unmodifiable(paramNames),
+            paramNames: paramNames ?? const <String>[],
             hasWildcard: true,
           );
-          if (paramNames.length > maxParamDepth) {
-            maxParamDepth = paramNames.length;
+          if (paramCount > maxParamDepth) {
+            maxParamDepth = paramCount;
           }
           wildcardAdded = true;
           break;
         }
 
-        if (segment.codeUnitAt(0) == 58) {
-          final paramName = segment.substring(1);
+        if (firstCode == _colonCode) {
+          final paramName = pattern.substring(cursor + 1, segmentEnd);
           if (!_isValidParamName(paramName)) {
             throw FormatException('Invalid parameter name in route: $pattern');
           }
           node.paramChild ??= _Node<T>();
           node = node.paramChild!;
-          paramNames.add(paramName);
-          continue;
-        }
-
-        if (segment.contains(':') || segment.contains('*')) {
+          (paramNames ??= <String>[]).add(paramName);
+          paramCount += 1;
+        } else if (_containsReservedToken(pattern, cursor, segmentEnd)) {
           throw FormatException(
             'Unsupported segment syntax in route: $pattern',
           );
+        } else {
+          final segment = pattern.substring(cursor, segmentEnd);
+          node = node.getOrCreateStaticChild(segment);
         }
 
-        node = node.getOrCreateStaticChild(segment);
+        cursor = segmentEnd + 1;
       }
 
       if (wildcardAdded) {
@@ -201,16 +208,16 @@ class Router<T> {
       }
       final route = _Route<T>(
         data: data,
-        paramNames: List<String>.unmodifiable(paramNames),
+        paramNames: paramNames ?? const <String>[],
         hasWildcard: false,
       );
       node.exactRoute = route;
-      if (paramNames.isEmpty) {
+      if (paramCount == 0) {
         staticExactMatches[pattern] = route.noParamsMatch;
         staticExactPathLengths.add(pattern.length);
       }
-      if (paramNames.length > maxParamDepth) {
-        maxParamDepth = paramNames.length;
+      if (paramCount > maxParamDepth) {
+        maxParamDepth = paramCount;
       }
     }
 
@@ -338,7 +345,13 @@ class _Node<T> {
   _Node<T> getOrCreateStaticChild(String segment) {
     final map = _staticMap;
     if (map != null) {
-      return map.putIfAbsent(segment, _Node<T>.new);
+      final existing = map[segment];
+      if (existing != null) {
+        return existing;
+      }
+      final child = _Node<T>();
+      map[segment] = child;
+      return child;
     }
 
     final keys = _staticKeys;
@@ -363,6 +376,8 @@ class _Node<T> {
         upgraded[currentKeys[i]] = currentChildren[i];
       }
       _staticMap = upgraded;
+      _staticKeys = null;
+      _staticChildren = null;
     }
 
     return child;
@@ -435,31 +450,22 @@ bool _hasEmptyPathSegments(String path) {
   return false;
 }
 
-List<String> _splitPathSegments(String path) {
-  if (path.length == 1) {
-    return const <String>[];
-  }
-
-  final segments = <String>[];
-  var start = 1;
-  for (var i = 1; i <= path.length; i++) {
-    if (i != path.length && path.codeUnitAt(i) != _slashCode) {
-      continue;
-    }
-    if (start != i) {
-      segments.add(path.substring(start, i));
-    }
-    start = i + 1;
-  }
-  return segments;
-}
-
 int _findSegmentEnd(String path, int start) {
   var i = start;
   while (i < path.length && path.codeUnitAt(i) != _slashCode) {
     i += 1;
   }
   return i;
+}
+
+bool _containsReservedToken(String path, int start, int end) {
+  for (var i = start; i < end; i++) {
+    final code = path.codeUnitAt(i);
+    if (code == _colonCode || code == _asteriskCode) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool _equalsPathSlice(String key, String path, int start, int end) {
