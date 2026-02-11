@@ -23,11 +23,15 @@ class RouterContext<T> {
   /// Uppercased [anyMethodToken] used for normalization.
   final String anyMethodTokenNormalized;
 
+  /// Cache for method token normalization to reduce repeated allocations.
+  final Map<String, String> methodCache;
+
   RouterContext({
     required this.root,
     required this.static,
     required this.caseSensitive,
     required this.anyMethodToken,
+    required this.methodCache,
   }) : anyMethodTokenNormalized = anyMethodToken.toUpperCase();
 }
 
@@ -44,5 +48,6 @@ RouterContext<T> createRouter<T>({
     static: <String, Node<T>>{},
     caseSensitive: caseSensitive,
     anyMethodToken: anyMethodToken,
+    methodCache: <String, String>{},
   );
 }
