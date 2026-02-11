@@ -46,6 +46,7 @@ final class _LazyRouteMatch<T> extends RouteMatch<T> {
       return null;
     }
 
+    // Params are materialized lazily so data-only consumers avoid allocations.
     final params = <String, String>{};
     if (_paramNames.isNotEmpty) {
       final captured = _paramValues;
@@ -76,16 +77,27 @@ final class _LazyRouteMatch<T> extends RouteMatch<T> {
 /// 3. wildcard (`*`)
 /// 4. global fallback (`/*`)
 class Router<T> {
+  // Default bucket for routes without an explicit HTTP method.
   final _MethodState<T> _anyState = _MethodState<T>();
+  // Method-specific buckets keyed by normalized method token (for example GET).
   Map<String, _MethodState<T>>? _methodStates;
   final Map<String, String> _methodTokenCache = <String, String>{};
 
+  /// Creates a router and optionally registers initial `ANY` routes.
   Router({Map<String, T>? routes}) {
     if (routes != null && routes.isNotEmpty) {
       addAll(routes);
     }
   }
 
+  /// Registers one route.
+  ///
+  /// When [method] is omitted the route is stored in the `ANY` bucket.
+  /// Path syntax supports:
+  /// - static segments (`/users/all`)
+  /// - parameters (`/users/:id`)
+  /// - wildcard tail (`/assets/*`)
+  /// - global fallback (`/*`)
   void add(String path, T data, {String? method}) {
     final state = _stateForWrite(method);
     final normalized = _normalizePatternForCompile(path);
@@ -97,6 +109,9 @@ class Router<T> {
     );
   }
 
+  /// Registers multiple routes in the same method bucket.
+  ///
+  /// Passing `method: null` registers all routes as `ANY`.
   void addAll(Map<String, T> routes, {String? method}) {
     final state = _stateForWrite(method);
     for (final entry in routes.entries) {
@@ -110,6 +125,10 @@ class Router<T> {
     }
   }
 
+  /// Matches [path] and returns route data with lazily materialized params.
+  ///
+  /// If [method] is provided, the router first checks that specific bucket and
+  /// then falls back to `ANY` when there is no hit.
   RouteMatch<T>? match(String path, {String? method}) {
     final normalized = _normalizeInputPath(path);
     if (normalized == null) {
@@ -117,6 +136,7 @@ class Router<T> {
     }
 
     if (method != null) {
+      // Method-specific routes have precedence over the ANY bucket.
       final methodToken = _normalizeMethodToken(method);
       final methodState = _methodStates?[methodToken];
       if (methodState != null) {
@@ -131,6 +151,7 @@ class Router<T> {
   }
 
   _MethodState<T> _stateForWrite(String? method) {
+    // Method buckets are created lazily to keep the default ANY-only path light.
     if (method == null) {
       return _anyState;
     }
@@ -150,6 +171,7 @@ class Router<T> {
       throw ArgumentError.value(method, 'method', 'Method must not be empty.');
     }
 
+    // Cache multiple spellings so repeated method normalization is cheap.
     final token = trimmed.toUpperCase();
     _methodTokenCache[method] = token;
     _methodTokenCache[trimmed] = token;
@@ -158,6 +180,7 @@ class Router<T> {
   }
 
   RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
+    // Fast path for exact static hits: length pre-filter then map lookup.
     if (state.staticExactPathLengths.contains(normalized.length)) {
       final exactStatic = state.staticExactRoutes[normalized];
       if (exactStatic != null) {
@@ -185,6 +208,7 @@ class Router<T> {
     T data, {
     required bool hasReservedToken,
   }) {
+    // Global fallback applies only when no more specific route matches.
     if (pattern == '/*') {
       if (state.globalFallback != null) {
         throw FormatException('Duplicate global fallback route: $pattern');
@@ -198,6 +222,7 @@ class Router<T> {
     }
 
     if (!hasReservedToken) {
+      // Pure static patterns bypass trie construction and go directly to exact map.
       if (state.staticExactRoutes[pattern] != null) {
         throw FormatException(
           'Duplicate route shape conflicts with existing route: $pattern',
@@ -218,6 +243,7 @@ class Router<T> {
     var node = state.root;
     var cursor = pattern.length == 1 ? pattern.length : 1;
 
+    // Single-pass segment scanner used for compile-time insertion.
     while (cursor < pattern.length) {
       var segmentEnd = cursor;
       var hasReservedInSegment = false;
@@ -328,6 +354,7 @@ class Router<T> {
     }
     final nextCursor = segmentEnd < path.length ? segmentEnd + 1 : path.length;
 
+    // Precedence must remain static > param > wildcard.
     final staticChild = node.lookupStaticChildSlice(path, cursor, segmentEnd);
     if (staticChild != null) {
       final matched = _matchNodePath(
@@ -344,6 +371,7 @@ class Router<T> {
 
     final paramChild = node.paramChild;
     if (paramChild != null) {
+      // Allocate/capture param stack only when a parameter branch is visited.
       final stack = paramStack ?? _ParamStack(state.paramStackCapacity);
       stack.push(cursor, segmentEnd);
       final matched = _matchNodePath(
@@ -374,6 +402,7 @@ class Router<T> {
     String? wildcardValue,
     int wildcardStart,
   ) {
+    // Static routes reuse a cached immutable match object.
     if (!route.hasWildcard && route.paramNames.isEmpty) {
       return route.noParamsMatch;
     }
@@ -391,6 +420,7 @@ class Router<T> {
 }
 
 class _MethodState<T> {
+  // Each method bucket keeps an independent path index and matching metadata.
   final _Node<T> root = _Node<T>();
   _Route<T>? globalFallback;
   final Map<String, _Route<T>> staticExactRoutes = <String, _Route<T>>{};
@@ -412,6 +442,7 @@ class _Route<T> {
   });
 
   RouteMatch<T> get noParamsMatch {
+    // Avoids per-request allocations for pure static exact matches.
     assert(!hasWildcard && paramNames.isEmpty);
     final cached = _cachedNoParamsMatch;
     if (cached != null) {
@@ -424,6 +455,9 @@ class _Route<T> {
 }
 
 class _Node<T> {
+  // Hybrid representation:
+  // - tiny fan-out: compact parallel lists
+  // - larger fan-out: hash map
   List<String>? _staticKeys;
   List<_Node<T>>? _staticChildren;
   Map<String, _Node<T>>? _staticMap;
@@ -458,6 +492,7 @@ class _Node<T> {
     (_staticKeys ??= <String>[]).add(segment);
     (_staticChildren ??= <_Node<T>>[]).add(child);
 
+    // Small nodes stay on compact lists; upgrade to map after threshold.
     final currentKeys = _staticKeys!;
     if (currentKeys.length >= _staticMapUpgradeThreshold) {
       final upgraded = <String, _Node<T>>{};
@@ -477,6 +512,7 @@ class _Node<T> {
     final map = _staticMap;
     if (map != null) {
       if (map.length >= 16) {
+        // For larger maps hashing a temporary substring is faster than linear scan.
         return map[path.substring(start, end)];
       }
       for (final entry in map.entries) {
@@ -512,6 +548,7 @@ class _NormalizedPattern {
 }
 
 _NormalizedPattern _normalizePatternForCompile(String path) {
+  // Normalize and validate in one scan to reduce build-time overhead.
   if (path.isEmpty || path.codeUnitAt(0) != _slashCode) {
     throw FormatException('Route pattern must start with "/": $path');
   }
@@ -552,6 +589,8 @@ _NormalizedPattern _normalizePatternForCompile(String path) {
 }
 
 String? _normalizeInputPath(String path) {
+  // Query-time normalization is intentionally minimal: reject invalid shapes
+  // but avoid extra allocations when the input is already canonical.
   if (path.isEmpty || path.codeUnitAt(0) != _slashCode) {
     return null;
   }
@@ -592,6 +631,7 @@ class _ParamStack {
   final List<int> _ends;
   int _length = 0;
 
+  // Fixed-capacity stack sized from max route param depth in this method bucket.
   _ParamStack(int capacity)
     : _starts = List<int>.filled(capacity, 0, growable: false),
       _ends = List<int>.filled(capacity, 0, growable: false);
