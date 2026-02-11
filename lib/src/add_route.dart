@@ -20,6 +20,12 @@ import 'router.dart';
 void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
   final methodToken = normalizeMethod(ctx, method);
   path = normalizePatternPath(path);
+  final routeData = requireData(data);
+
+  if (_isPlainStaticPattern(path)) {
+    _addPlainStaticRoute(ctx, methodToken, path, routeData);
+    return;
+  }
 
   final segments = splitPath(path);
   final matchSegments = normalizeSegments(ctx, segments);
@@ -104,7 +110,7 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
   );
   bucket.add(
     MethodData<T>(
-      data: requireData(data),
+      data: routeData,
       paramsRegexp: paramsRegexp,
       paramsMap: paramsMap,
     ),
@@ -112,6 +118,56 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
 
   if (!hasParams) {
     ctx.static[_buildStaticCachePath(ctx, path, matchSegments)] = node;
+  }
+}
+
+bool _isPlainStaticPattern(String path) {
+  return !path.contains(':') && !path.contains('*');
+}
+
+void _addPlainStaticRoute<T>(
+  RouterContext<T> ctx,
+  String methodToken,
+  String path,
+  T routeData,
+) {
+  final matchPath = normalizePath(ctx, path);
+  final length = matchPath.length;
+  var start = 1;
+  var node = ctx.root;
+
+  for (var i = 1; i <= length; i++) {
+    if (i != length && matchPath.codeUnitAt(i) != 47) {
+      continue;
+    }
+    if (i == length && start == i) {
+      break;
+    }
+
+    final segment = matchPath.substring(start, i);
+    var staticMap = node.static;
+    if (staticMap == null) {
+      final child = Node<T>(key: segment);
+      staticMap = <String, Node<T>>{segment: child};
+      node.static = staticMap;
+      node = child;
+    } else {
+      node = staticMap[segment] ??= Node<T>(key: segment);
+    }
+    start = i + 1;
+  }
+
+  node.methods ??= <String, List<MethodData<T>>>{};
+  final bucket = node.methods!.putIfAbsent(
+    methodToken,
+    () => <MethodData<T>>[],
+  );
+  bucket.add(MethodData<T>(data: routeData, paramsRegexp: const <RegExp?>[]));
+
+  if (length > 1 && matchPath.codeUnitAt(length - 1) == 47) {
+    ctx.static[matchPath.substring(0, length - 1)] = node;
+  } else {
+    ctx.static[matchPath] = node;
   }
 }
 
