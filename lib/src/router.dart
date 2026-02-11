@@ -78,7 +78,7 @@ final class _LazyRouteMatch<T> extends RouteMatch<T> {
 class Router<T> {
   final _Node<T> _root;
   late final _Route<T>? _globalFallback;
-  late final Map<String, RouteMatch<T>> _staticExactMatches;
+  late final Map<String, _Route<T>> _staticExactRoutes;
   late final Set<int> _staticExactPathLengths;
   late final int _maxParamDepth;
   late final int _paramStackCapacity;
@@ -86,7 +86,7 @@ class Router<T> {
   Router({required Map<String, T> routes}) : _root = _Node<T>() {
     final compiled = _compile(routes, _root);
     _globalFallback = compiled.globalFallback;
-    _staticExactMatches = compiled.staticExactMatches;
+    _staticExactRoutes = compiled.staticExactRoutes;
     _staticExactPathLengths = compiled.staticExactPathLengths;
     _maxParamDepth = compiled.maxParamDepth;
     _paramStackCapacity = _maxParamDepth == 0 ? 1 : _maxParamDepth;
@@ -99,9 +99,9 @@ class Router<T> {
     }
 
     if (_staticExactPathLengths.contains(normalized.length)) {
-      final exactStatic = _staticExactMatches[normalized];
+      final exactStatic = _staticExactRoutes[normalized];
       if (exactStatic != null) {
-        return exactStatic;
+        return exactStatic.noParamsMatch;
       }
     }
 
@@ -121,7 +121,7 @@ class Router<T> {
 
   static _CompileResult<T> _compile<T>(Map<String, T> routes, _Node<T> root) {
     _Route<T>? globalFallback;
-    final staticExactMatches = <String, RouteMatch<T>>{};
+    final staticExactRoutes = <String, _Route<T>>{};
     final staticExactPathLengths = <int>{};
     var maxParamDepth = 0;
 
@@ -138,6 +138,23 @@ class Router<T> {
           paramNames: const <String>[],
           hasWildcard: true,
         );
+        continue;
+      }
+
+      final segmentStart = pattern.length == 1 ? pattern.length : 1;
+      if (!_containsReservedToken(pattern, segmentStart, pattern.length)) {
+        if (staticExactRoutes[pattern] != null) {
+          throw FormatException(
+            'Duplicate route shape conflicts with existing route: $pattern',
+          );
+        }
+        final route = _Route<T>(
+          data: data,
+          paramNames: const <String>[],
+          hasWildcard: false,
+        );
+        staticExactRoutes[pattern] = route;
+        staticExactPathLengths.add(pattern.length);
         continue;
       }
 
@@ -213,7 +230,7 @@ class Router<T> {
       );
       node.exactRoute = route;
       if (paramCount == 0) {
-        staticExactMatches[pattern] = route.noParamsMatch;
+        staticExactRoutes[pattern] = route;
         staticExactPathLengths.add(pattern.length);
       }
       if (paramCount > maxParamDepth) {
@@ -223,10 +240,8 @@ class Router<T> {
 
     return _CompileResult<T>(
       globalFallback: globalFallback,
-      staticExactMatches: Map<String, RouteMatch<T>>.unmodifiable(
-        staticExactMatches,
-      ),
-      staticExactPathLengths: Set<int>.unmodifiable(staticExactPathLengths),
+      staticExactRoutes: staticExactRoutes,
+      staticExactPathLengths: staticExactPathLengths,
       maxParamDepth: maxParamDepth,
     );
   }
@@ -308,13 +323,13 @@ class Router<T> {
 
 class _CompileResult<T> {
   final _Route<T>? globalFallback;
-  final Map<String, RouteMatch<T>> staticExactMatches;
+  final Map<String, _Route<T>> staticExactRoutes;
   final Set<int> staticExactPathLengths;
   final int maxParamDepth;
 
   const _CompileResult({
     required this.globalFallback,
-    required this.staticExactMatches,
+    required this.staticExactRoutes,
     required this.staticExactPathLengths,
     required this.maxParamDepth,
   });
@@ -324,13 +339,24 @@ class _Route<T> {
   final T data;
   final List<String> paramNames;
   final bool hasWildcard;
-  final RouteMatch<T> noParamsMatch;
+  RouteMatch<T>? _cachedNoParamsMatch;
 
   _Route({
     required this.data,
     required this.paramNames,
     required this.hasWildcard,
-  }) : noParamsMatch = RouteMatch<T>(data);
+  });
+
+  RouteMatch<T> get noParamsMatch {
+    assert(!hasWildcard && paramNames.isEmpty);
+    final cached = _cachedNoParamsMatch;
+    if (cached != null) {
+      return cached;
+    }
+    final created = RouteMatch<T>(data);
+    _cachedNoParamsMatch = created;
+    return created;
+  }
 }
 
 class _Node<T> {
