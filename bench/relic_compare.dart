@@ -97,11 +97,11 @@ class _DynamicAddRouxBenchmark extends _RouterBenchmark {
 
   @override
   void run() {
-    final routes = <String, int>{};
-    for (final i in _indexes) {
-      routes['/users/:id/items/:itemId/profile$i'] = i;
-    }
-    roux.Router<int>(routes: routes);
+    roux.Router(
+      routes: {
+        for (final i in _indexes) '/users/:id/items/:itemId/profile$i': i,
+      },
+    );
   }
 }
 
@@ -113,11 +113,11 @@ class _DynamicLookupRouxBenchmark extends _RouterBenchmark {
 
   @override
   void setup() {
-    final routes = <String, int>{};
-    for (final i in _indexes) {
-      routes['/users/:id/items/:itemId/profile$i'] = i;
-    }
-    _router = roux.Router<int>(routes: routes);
+    _router = roux.Router(
+      routes: {
+        for (final i in _indexes) '/users/:id/items/:itemId/profile$i': i,
+      },
+    );
   }
 
   @override
