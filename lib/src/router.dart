@@ -76,12 +76,9 @@ final class _LazyRouteMatch<T> extends RouteMatch<T> {
 /// 3. wildcard (`*`)
 /// 4. global fallback (`/*`)
 class Router<T> {
-  final _Node<T> _root = _Node<T>();
-  _Route<T>? _globalFallback;
-  final Map<String, _Route<T>> _staticExactRoutes = <String, _Route<T>>{};
-  final Set<int> _staticExactPathLengths = <int>{};
-  int _maxParamDepth = 0;
-  int _paramStackCapacity = 1;
+  final _MethodState<T> _anyState = _MethodState<T>();
+  Map<String, _MethodState<T>>? _methodStates;
+  final Map<String, String> _methodTokenCache = <String, String>{};
 
   Router({Map<String, T>? routes}) {
     if (routes != null && routes.isNotEmpty) {
@@ -89,19 +86,23 @@ class Router<T> {
     }
   }
 
-  void add(String path, T data) {
+  void add(String path, T data, {String? method}) {
+    final state = _stateForWrite(method);
     final normalized = _normalizePatternForCompile(path);
     _addCompiledPattern(
+      state,
       normalized.path,
       data,
       hasReservedToken: normalized.hasReservedToken,
     );
   }
 
-  void addAll(Map<String, T> routes) {
+  void addAll(Map<String, T> routes, {String? method}) {
+    final state = _stateForWrite(method);
     for (final entry in routes.entries) {
       final normalized = _normalizePatternForCompile(entry.key);
       _addCompiledPattern(
+        state,
         normalized.path,
         entry.value,
         hasReservedToken: normalized.hasReservedToken,
@@ -109,26 +110,68 @@ class Router<T> {
     }
   }
 
-  RouteMatch<T>? match(String path) {
+  RouteMatch<T>? match(String path, {String? method}) {
     final normalized = _normalizeInputPath(path);
     if (normalized == null) {
       return null;
     }
 
-    if (_staticExactPathLengths.contains(normalized.length)) {
-      final exactStatic = _staticExactRoutes[normalized];
+    if (method != null) {
+      final methodToken = _normalizeMethodToken(method);
+      final methodState = _methodStates?[methodToken];
+      if (methodState != null) {
+        final matched = _matchInState(methodState, normalized);
+        if (matched != null) {
+          return matched;
+        }
+      }
+    }
+
+    return _matchInState(_anyState, normalized);
+  }
+
+  _MethodState<T> _stateForWrite(String? method) {
+    if (method == null) {
+      return _anyState;
+    }
+    final token = _normalizeMethodToken(method);
+    final states = _methodStates ??= <String, _MethodState<T>>{};
+    return states.putIfAbsent(token, _MethodState<T>.new);
+  }
+
+  String _normalizeMethodToken(String method) {
+    final cached = _methodTokenCache[method];
+    if (cached != null) {
+      return cached;
+    }
+
+    final trimmed = method.trim();
+    if (trimmed.isEmpty) {
+      throw ArgumentError.value(method, 'method', 'Method must not be empty.');
+    }
+
+    final token = trimmed.toUpperCase();
+    _methodTokenCache[method] = token;
+    _methodTokenCache[trimmed] = token;
+    _methodTokenCache[token] = token;
+    return token;
+  }
+
+  RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
+    if (state.staticExactPathLengths.contains(normalized.length)) {
+      final exactStatic = state.staticExactRoutes[normalized];
       if (exactStatic != null) {
         return exactStatic.noParamsMatch;
       }
     }
 
     final start = normalized.length == 1 ? normalized.length : 1;
-    final matched = _matchNodePath(_root, normalized, start, null);
+    final matched = _matchNodePath(state, state.root, normalized, start, null);
     if (matched != null) {
       return matched;
     }
 
-    final fallback = _globalFallback;
+    final fallback = state.globalFallback;
     if (fallback == null) {
       return null;
     }
@@ -137,15 +180,16 @@ class Router<T> {
   }
 
   void _addCompiledPattern(
+    _MethodState<T> state,
     String pattern,
     T data, {
     required bool hasReservedToken,
   }) {
     if (pattern == '/*') {
-      if (_globalFallback != null) {
+      if (state.globalFallback != null) {
         throw FormatException('Duplicate global fallback route: $pattern');
       }
-      _globalFallback = _Route<T>(
+      state.globalFallback = _Route<T>(
         data: data,
         paramNames: const <String>[],
         hasWildcard: true,
@@ -154,7 +198,7 @@ class Router<T> {
     }
 
     if (!hasReservedToken) {
-      if (_staticExactRoutes[pattern] != null) {
+      if (state.staticExactRoutes[pattern] != null) {
         throw FormatException(
           'Duplicate route shape conflicts with existing route: $pattern',
         );
@@ -164,14 +208,14 @@ class Router<T> {
         paramNames: const <String>[],
         hasWildcard: false,
       );
-      _staticExactRoutes[pattern] = route;
-      _staticExactPathLengths.add(pattern.length);
+      state.staticExactRoutes[pattern] = route;
+      state.staticExactPathLengths.add(pattern.length);
       return;
     }
 
     List<String>? paramNames;
     var paramCount = 0;
-    var node = _root;
+    var node = state.root;
     var cursor = pattern.length == 1 ? pattern.length : 1;
 
     while (cursor < pattern.length) {
@@ -206,9 +250,11 @@ class Router<T> {
           paramNames: paramNames ?? const <String>[],
           hasWildcard: true,
         );
-        if (paramCount > _maxParamDepth) {
-          _maxParamDepth = paramCount;
-          _paramStackCapacity = _maxParamDepth == 0 ? 1 : _maxParamDepth;
+        if (paramCount > state.maxParamDepth) {
+          state.maxParamDepth = paramCount;
+          state.paramStackCapacity = state.maxParamDepth == 0
+              ? 1
+              : state.maxParamDepth;
         }
         return;
       }
@@ -245,16 +291,19 @@ class Router<T> {
     );
     node.exactRoute = route;
     if (paramCount == 0) {
-      _staticExactRoutes[pattern] = route;
-      _staticExactPathLengths.add(pattern.length);
+      state.staticExactRoutes[pattern] = route;
+      state.staticExactPathLengths.add(pattern.length);
     }
-    if (paramCount > _maxParamDepth) {
-      _maxParamDepth = paramCount;
-      _paramStackCapacity = _maxParamDepth == 0 ? 1 : _maxParamDepth;
+    if (paramCount > state.maxParamDepth) {
+      state.maxParamDepth = paramCount;
+      state.paramStackCapacity = state.maxParamDepth == 0
+          ? 1
+          : state.maxParamDepth;
     }
   }
 
   RouteMatch<T>? _matchNodePath(
+    _MethodState<T> state,
     _Node<T> node,
     String path,
     int cursor,
@@ -281,7 +330,13 @@ class Router<T> {
 
     final staticChild = node.lookupStaticChildSlice(path, cursor, segmentEnd);
     if (staticChild != null) {
-      final matched = _matchNodePath(staticChild, path, nextCursor, paramStack);
+      final matched = _matchNodePath(
+        state,
+        staticChild,
+        path,
+        nextCursor,
+        paramStack,
+      );
       if (matched != null) {
         return matched;
       }
@@ -289,9 +344,15 @@ class Router<T> {
 
     final paramChild = node.paramChild;
     if (paramChild != null) {
-      final stack = paramStack ?? _ParamStack(_paramStackCapacity);
+      final stack = paramStack ?? _ParamStack(state.paramStackCapacity);
       stack.push(cursor, segmentEnd);
-      final matched = _matchNodePath(paramChild, path, nextCursor, stack);
+      final matched = _matchNodePath(
+        state,
+        paramChild,
+        path,
+        nextCursor,
+        stack,
+      );
       stack.pop();
       if (matched != null) {
         return matched;
@@ -327,6 +388,15 @@ class Router<T> {
       wildcardStart: wildcardStart,
     );
   }
+}
+
+class _MethodState<T> {
+  final _Node<T> root = _Node<T>();
+  _Route<T>? globalFallback;
+  final Map<String, _Route<T>> staticExactRoutes = <String, _Route<T>>{};
+  final Set<int> staticExactPathLengths = <int>{};
+  int maxParamDepth = 0;
+  int paramStackCapacity = 1;
 }
 
 class _Route<T> {

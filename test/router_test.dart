@@ -39,6 +39,67 @@ void main() {
     });
   });
 
+  group('method matching', () {
+    test('uses ANY when method is not provided', () {
+      final router = Router<String>(routes: {'/users/:id': 'any'});
+      router.add('/users/:id', 'get', method: 'GET');
+
+      expect(router.match('/users/42')?.data, 'any');
+      expect(router.match('/users/42', method: 'GET')?.data, 'get');
+    });
+
+    test('falls back to ANY when method bucket misses', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'any');
+      router.add('/posts/:id', 'get-post', method: 'GET');
+
+      expect(router.match('/users/1', method: 'GET')?.data, 'any');
+      expect(router.match('/users/1', method: 'POST')?.data, 'any');
+    });
+
+    test('supports addAll with method', () {
+      final router = Router<String>();
+      router.addAll({'/health': 'ok', '/users/:id': 'detail'}, method: 'GET');
+
+      expect(router.match('/health'), isNull);
+      expect(router.match('/health', method: 'GET')?.data, 'ok');
+      expect(router.match('/users/5', method: 'GET')?.params, {'id': '5'});
+    });
+
+    test('treats method names as case-insensitive', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'get', method: 'get');
+
+      expect(router.match('/users/9', method: 'GET')?.data, 'get');
+      expect(router.match('/users/9', method: 'GeT')?.data, 'get');
+    });
+
+    test('enforces duplicate conflicts per method bucket', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'get', method: 'GET');
+      router.add('/users/:id', 'post', method: 'POST');
+
+      expect(
+        () => router.add('/users/:name', 'get2', method: 'GET'),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects empty method input', () {
+      final router = Router<String>();
+
+      expect(
+        () => router.add('/users/:id', 'x', method: '  '),
+        throwsArgumentError,
+      );
+      expect(
+        () => router.addAll({'/users/:id': 'x'}, method: ''),
+        throwsArgumentError,
+      );
+      expect(() => router.match('/users/1', method: ''), throwsArgumentError);
+    });
+  });
+
   group('match priority', () {
     final router = Router<String>(
       routes: {
