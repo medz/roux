@@ -26,9 +26,7 @@ MatchedRoute<T>? findRoute<T>(
   if (staticNode?.methods != null) {
     final staticMatch = matchMethods(ctx, staticNode!.methods!, methodToken);
     if (staticMatch != null && staticMatch.isNotEmpty) {
-      return params
-          ? toMatched(staticMatch[0], splitPath(path))
-          : MatchedRoute<T>(staticMatch[0].data);
+      return MatchedRoute<T>(staticMatch[0].data);
     }
   }
 

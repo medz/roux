@@ -17,7 +17,7 @@ String normalizePath<T>(RouterContext<T> ctx, String path) {
 
 List<String> normalizeSegments<T>(RouterContext<T> ctx, List<String> segments) {
   if (ctx.caseSensitive) {
-    return List<String>.from(segments);
+    return segments;
   }
   return segments.map((segment) => segment.toLowerCase()).toList();
 }
