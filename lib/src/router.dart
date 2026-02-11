@@ -1,5 +1,13 @@
 import 'node.dart';
 
+class PendingRoute<T> {
+  final String? method;
+  final String path;
+  final T data;
+
+  PendingRoute({required this.method, required this.path, required this.data});
+}
+
 /// Opaque router handle that stores lookup structures.
 ///
 /// Treat the fields as implementation details and use the top-level helpers
@@ -32,6 +40,9 @@ class RouterContext<T> {
   /// Memoized findRoute results for [params] = false by method and path.
   final Map<String, Map<String, MatchedRoute<T>?>> findRouteCacheWithoutParams;
 
+  /// Buffered route additions that are materialized on first lookup/removal.
+  final List<PendingRoute<T>> pendingRoutes;
+
   /// Incremented on route mutations to invalidate cached lookups lazily.
   int mutationVersion;
 
@@ -46,6 +57,7 @@ class RouterContext<T> {
     required this.methodCache,
     required this.findRouteCacheWithParams,
     required this.findRouteCacheWithoutParams,
+    required this.pendingRoutes,
     required this.mutationVersion,
     required this.cacheVersion,
   }) : anyMethodTokenNormalized = anyMethodToken.toUpperCase();
@@ -67,6 +79,7 @@ RouterContext<T> createRouter<T>({
     methodCache: <String, String>{},
     findRouteCacheWithParams: <String, Map<String, MatchedRoute<T>?>>{},
     findRouteCacheWithoutParams: <String, Map<String, MatchedRoute<T>?>>{},
+    pendingRoutes: <PendingRoute<T>>[],
     mutationVersion: 0,
     cacheVersion: 0,
   );

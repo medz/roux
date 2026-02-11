@@ -19,9 +19,32 @@ import 'router.dart';
 /// If [T] is non-nullable, [data] is required.
 void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
   markFindRouteCacheDirty(ctx);
+  final routeData = requireData(data);
+  ctx.pendingRoutes.add(
+    PendingRoute<T>(method: method, path: path, data: routeData),
+  );
+}
+
+void materializePendingRoutes<T>(RouterContext<T> ctx) {
+  final pendingRoutes = ctx.pendingRoutes;
+  if (pendingRoutes.isEmpty) {
+    return;
+  }
+
+  for (final route in pendingRoutes) {
+    _addRouteToTrie(ctx, route.method, route.path, route.data);
+  }
+  pendingRoutes.clear();
+}
+
+void _addRouteToTrie<T>(
+  RouterContext<T> ctx,
+  String? method,
+  String path,
+  T routeData,
+) {
   final methodToken = normalizeMethod(ctx, method);
   path = normalizePatternPath(path);
-  final routeData = requireData(data);
 
   switch (_classifyPatternPath(path)) {
     case _PatternPathKind.plainStatic:
@@ -189,19 +212,42 @@ void _addSimpleParamRoute<T>(
       break;
     }
 
-    final segment = path.substring(start, i);
-    if (segment.isNotEmpty && segment.codeUnitAt(0) == 58) {
+    if (path.codeUnitAt(start) == 58) {
       node = node.param ??= Node<T>();
       paramsMap.add((
         index: segmentIndex,
-        name: segment.substring(1),
+        name: path.substring(start + 1, i),
         optional: false,
       ));
     } else {
+      final staticMap = node.static;
+      if (staticMap != null) {
+        final existingKey = _findExistingStaticKey(
+          staticMap,
+          path,
+          start,
+          i,
+          ctx.caseSensitive,
+        );
+        if (existingKey != null) {
+          node = staticMap[existingKey]!;
+          start = i + 1;
+          segmentIndex += 1;
+          continue;
+        }
+      }
+
+      final segment = path.substring(start, i);
       final matchSegment = ctx.caseSensitive ? segment : segment.toLowerCase();
-      final child = node.static?[matchSegment];
-      if (child != null) {
-        node = child;
+      if (staticMap != null) {
+        final child = staticMap[matchSegment];
+        if (child != null) {
+          node = child;
+        } else {
+          final staticNode = Node<T>();
+          staticMap[matchSegment] = staticNode;
+          node = staticNode;
+        }
       } else {
         final staticNode = Node<T>();
         node.static ??= <String, Node<T>>{};
@@ -222,6 +268,42 @@ void _addSimpleParamRoute<T>(
       paramsMap: paramsMap,
     ),
   );
+}
+
+String? _findExistingStaticKey<T>(
+  Map<String, Node<T>> staticMap,
+  String path,
+  int start,
+  int end,
+  bool caseSensitive,
+) {
+  if (staticMap.isEmpty || staticMap.length > 4) {
+    return null;
+  }
+
+  final length = end - start;
+  for (final key in staticMap.keys) {
+    if (key.length != length) {
+      continue;
+    }
+
+    var matched = true;
+    for (var i = 0; i < length; i++) {
+      var code = path.codeUnitAt(start + i);
+      if (!caseSensitive && code >= 65 && code <= 90) {
+        code += 32;
+      }
+      if (key.codeUnitAt(i) != code) {
+        matched = false;
+        break;
+      }
+    }
+
+    if (matched) {
+      return key;
+    }
+  }
+  return null;
 }
 
 String _buildStaticCachePath<T>(

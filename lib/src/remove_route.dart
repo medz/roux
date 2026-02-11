@@ -1,5 +1,6 @@
 import '_router_utils.dart';
 import '_utils.dart';
+import 'add_route.dart' show materializePendingRoutes;
 import 'node.dart';
 import 'router.dart';
 
@@ -9,6 +10,7 @@ import 'router.dart';
 /// is null or empty, the any-method token is used.
 void removeRoute<T>(RouterContext<T> ctx, String? method, String? path) {
   markFindRouteCacheDirty(ctx);
+  materializePendingRoutes(ctx);
   final methodToken = normalizeMethod(ctx, method);
 
   if (path == null) {

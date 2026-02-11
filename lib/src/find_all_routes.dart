@@ -1,5 +1,6 @@
 import '_router_utils.dart';
 import '_utils.dart';
+import 'add_route.dart' show materializePendingRoutes;
 import 'node.dart';
 import 'router.dart';
 
@@ -15,6 +16,7 @@ List<MatchedRoute<T>> findAllRoutes<T>(
   String path, {
   bool params = true,
 }) {
+  materializePendingRoutes(ctx);
   final methodToken = normalizeMethod(ctx, method);
 
   if (path.isNotEmpty && path.codeUnitAt(path.length - 1) == 47) {
