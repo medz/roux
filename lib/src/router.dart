@@ -32,6 +32,12 @@ class RouterContext<T> {
   /// Memoized findRoute results for [params] = false by method and path.
   final Map<String, Map<String, MatchedRoute<T>?>> findRouteCacheWithoutParams;
 
+  /// Incremented on route mutations to invalidate cached lookups lazily.
+  int mutationVersion;
+
+  /// The mutation version the current caches are built for.
+  int cacheVersion;
+
   RouterContext({
     required this.root,
     required this.static,
@@ -40,6 +46,8 @@ class RouterContext<T> {
     required this.methodCache,
     required this.findRouteCacheWithParams,
     required this.findRouteCacheWithoutParams,
+    required this.mutationVersion,
+    required this.cacheVersion,
   }) : anyMethodTokenNormalized = anyMethodToken.toUpperCase();
 }
 
@@ -59,5 +67,7 @@ RouterContext<T> createRouter<T>({
     methodCache: <String, String>{},
     findRouteCacheWithParams: <String, Map<String, MatchedRoute<T>?>>{},
     findRouteCacheWithoutParams: <String, Map<String, MatchedRoute<T>?>>{},
+    mutationVersion: 0,
+    cacheVersion: 0,
   );
 }

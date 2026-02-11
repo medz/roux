@@ -13,6 +13,7 @@ MatchedRoute<T>? findRoute<T>(
   String path, {
   bool params = true,
 }) {
+  prepareFindRouteCache(ctx);
   final methodToken = normalizeMethod(ctx, method);
 
   if (path.isNotEmpty && path.codeUnitAt(path.length - 1) == 47) {

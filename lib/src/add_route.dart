@@ -18,7 +18,7 @@ import 'router.dart';
 ///
 /// If [T] is non-nullable, [data] is required.
 void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
-  clearFindRouteCaches(ctx);
+  markFindRouteCacheDirty(ctx);
   final methodToken = normalizeMethod(ctx, method);
   path = normalizePatternPath(path);
   final routeData = requireData(data);

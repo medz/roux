@@ -8,7 +8,7 @@ import 'router.dart';
 /// If [path] is null, removes all routes registered for [method]. When [method]
 /// is null or empty, the any-method token is used.
 void removeRoute<T>(RouterContext<T> ctx, String? method, String? path) {
-  clearFindRouteCaches(ctx);
+  markFindRouteCacheDirty(ctx);
   final methodToken = normalizeMethod(ctx, method);
 
   if (path == null) {

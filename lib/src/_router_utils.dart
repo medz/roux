@@ -128,3 +128,19 @@ void clearFindRouteCaches<T>(RouterContext<T> ctx) {
     ctx.findRouteCacheWithoutParams.clear();
   }
 }
+
+void markFindRouteCacheDirty<T>(RouterContext<T> ctx) {
+  if (ctx.findRouteCacheWithParams.isEmpty &&
+      ctx.findRouteCacheWithoutParams.isEmpty) {
+    return;
+  }
+  ctx.mutationVersion += 1;
+}
+
+void prepareFindRouteCache<T>(RouterContext<T> ctx) {
+  if (ctx.cacheVersion == ctx.mutationVersion) {
+    return;
+  }
+  clearFindRouteCaches(ctx);
+  ctx.cacheVersion = ctx.mutationVersion;
+}
