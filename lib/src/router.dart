@@ -126,7 +126,8 @@ class Router<T> {
     var maxParamDepth = 0;
 
     for (final entry in routes.entries) {
-      final pattern = _normalizePattern(entry.key);
+      final normalized = _normalizePatternForCompile(entry.key);
+      final pattern = normalized.path;
       final data = entry.value;
 
       if (pattern == '/*') {
@@ -141,8 +142,7 @@ class Router<T> {
         continue;
       }
 
-      final segmentStart = pattern.length == 1 ? pattern.length : 1;
-      if (!_containsReservedToken(pattern, segmentStart, pattern.length)) {
+      if (!normalized.hasReservedToken) {
         if (staticExactRoutes[pattern] != null) {
           throw FormatException(
             'Duplicate route shape conflicts with existing route: $pattern',
@@ -165,7 +165,19 @@ class Router<T> {
       var wildcardAdded = false;
 
       while (cursor < pattern.length) {
-        final segmentEnd = _findSegmentEnd(pattern, cursor);
+        var segmentEnd = cursor;
+        var hasReservedInSegment = false;
+        while (segmentEnd < pattern.length) {
+          final code = pattern.codeUnitAt(segmentEnd);
+          if (code == _slashCode) {
+            break;
+          }
+          if (code == _colonCode || code == _asteriskCode) {
+            hasReservedInSegment = true;
+          }
+          segmentEnd += 1;
+        }
+
         final segmentLength = segmentEnd - cursor;
         final firstCode = pattern.codeUnitAt(cursor);
         final isLastSegment = segmentEnd == pattern.length;
@@ -202,7 +214,7 @@ class Router<T> {
           node = node.paramChild!;
           (paramNames ??= <String>[]).add(paramName);
           paramCount += 1;
-        } else if (_containsReservedToken(pattern, cursor, segmentEnd)) {
+        } else if (hasReservedInSegment) {
           throw FormatException(
             'Unsupported segment syntax in route: $pattern',
           );
@@ -437,17 +449,54 @@ class _Node<T> {
   }
 }
 
-String _normalizePattern(String path) {
+class _NormalizedPattern {
+  final String path;
+  final bool hasReservedToken;
+
+  const _NormalizedPattern({
+    required this.path,
+    required this.hasReservedToken,
+  });
+}
+
+_NormalizedPattern _normalizePatternForCompile(String path) {
   if (path.isEmpty || path.codeUnitAt(0) != _slashCode) {
     throw FormatException('Route pattern must start with "/": $path');
   }
-  if (_hasEmptyPathSegments(path)) {
-    throw FormatException('Route pattern contains empty segment: $path');
+
+  var end = path.length;
+  if (end > 1 && path.codeUnitAt(end - 1) == _slashCode) {
+    if (path.codeUnitAt(end - 2) == _slashCode) {
+      throw FormatException('Route pattern contains empty segment: $path');
+    }
+    end -= 1;
   }
-  if (path.length > 1 && path.codeUnitAt(path.length - 1) == _slashCode) {
-    path = path.substring(0, path.length - 1);
+
+  var hasReservedToken = false;
+  var prevSlash = true;
+  for (var i = 1; i < end; i++) {
+    final code = path.codeUnitAt(i);
+    if (code == _slashCode) {
+      if (prevSlash) {
+        throw FormatException('Route pattern contains empty segment: $path');
+      }
+      prevSlash = true;
+      continue;
+    }
+
+    if (code == _colonCode || code == _asteriskCode) {
+      hasReservedToken = true;
+    }
+    prevSlash = false;
   }
-  return path;
+
+  if (end == path.length) {
+    return _NormalizedPattern(path: path, hasReservedToken: hasReservedToken);
+  }
+  return _NormalizedPattern(
+    path: path.substring(0, end),
+    hasReservedToken: hasReservedToken,
+  );
 }
 
 String? _normalizeInputPath(String path) {
@@ -466,32 +515,12 @@ String? _normalizeInputPath(String path) {
   return path;
 }
 
-bool _hasEmptyPathSegments(String path) {
-  for (var i = 1; i < path.length; i++) {
-    if (path.codeUnitAt(i) == _slashCode &&
-        path.codeUnitAt(i - 1) == _slashCode) {
-      return true;
-    }
-  }
-  return false;
-}
-
 int _findSegmentEnd(String path, int start) {
   var i = start;
   while (i < path.length && path.codeUnitAt(i) != _slashCode) {
     i += 1;
   }
   return i;
-}
-
-bool _containsReservedToken(String path, int start, int end) {
-  for (var i = start; i < end; i++) {
-    final code = path.codeUnitAt(i);
-    if (code == _colonCode || code == _asteriskCode) {
-      return true;
-    }
-  }
-  return false;
 }
 
 bool _equalsPathSlice(String key, String path, int start, int end) {
