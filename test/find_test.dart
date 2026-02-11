@@ -155,4 +155,22 @@ void main() {
     expect(colonMatch?.params, isNull);
     expect(findRoute(router, 'GET', '/abc'), isNull);
   });
+
+  test('materialize pending routes is exception-safe', () {
+    final router = createRouter<String>();
+    addRoute(router, 'GET', '/ok', 'ok');
+    addRoute(router, 'GET', '/:a.:b(', 'bad');
+
+    expect(() => findRoute(router, 'GET', '/ok'), throwsFormatException);
+
+    expect(router.pendingRoutes.length, 3);
+    expect(router.pendingRoutes[0], 'GET');
+    expect(router.pendingRoutes[1], '/:a.:b(');
+    expect(router.pendingRoutes[2], 'bad');
+
+    // Clear the invalid pending route and ensure previously processed entries
+    // are not replayed.
+    router.pendingRoutes.clear();
+    expect(findRoute(router, 'GET', '/ok')?.data, 'ok');
+  });
 }

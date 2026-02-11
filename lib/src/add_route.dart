@@ -38,15 +38,27 @@ void materializePendingRoutes<T>(RouterContext<T> ctx) {
     return;
   }
 
-  for (var i = 0; i < pendingRoutes.length; i += 3) {
-    _addRouteToTrie(
-      ctx,
-      pendingRoutes[i] as String?,
-      pendingRoutes[i + 1] as String,
-      pendingRoutes[i + 2] as T,
-    );
+  var processedEntries = 0;
+  try {
+    for (var i = 0; i < pendingRoutes.length; i += 3) {
+      _addRouteToTrie(
+        ctx,
+        pendingRoutes[i] as String?,
+        pendingRoutes[i + 1] as String,
+        pendingRoutes[i + 2] as T,
+      );
+      processedEntries = i + 3;
+    }
+  } finally {
+    if (processedEntries == 0) {
+      return;
+    }
+    if (processedEntries >= pendingRoutes.length) {
+      pendingRoutes.clear();
+    } else {
+      pendingRoutes.removeRange(0, processedEntries);
+    }
   }
-  pendingRoutes.clear();
 }
 
 void _addRouteToTrie<T>(
