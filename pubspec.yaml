@@ -2,7 +2,7 @@ name: roux
 description: >-
   A lightweight, fast, functional router for Dart with static, parameterized, and
   wildcard route matching.
-version: 0.1.1
+version: 0.2.0
 repository: https://github.com/medz/roux
 
 funding:
