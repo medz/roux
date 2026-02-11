@@ -1,8 +1,24 @@
 import 'node.dart';
 
 List<String> splitPath(String path) {
-  final parts = path.split('/');
-  final segments = parts.sublist(1);
+  final segments = <String>[];
+  final length = path.length;
+  var start = 0;
+  var first = true;
+
+  for (var i = 0; i <= length; i++) {
+    if (i != length && path.codeUnitAt(i) != 47) {
+      continue;
+    }
+
+    if (first) {
+      first = false;
+    } else {
+      segments.add(path.substring(start, i));
+    }
+    start = i + 1;
+  }
+
   if (segments.isNotEmpty && segments.last.isEmpty) {
     segments.removeLast();
   }
@@ -12,6 +28,9 @@ List<String> splitPath(String path) {
 String normalizePatternPath(String path) {
   if (path.isEmpty || path.codeUnitAt(0) != 47) {
     path = '/$path';
+  }
+  if (!path.contains(r'\:')) {
+    return path;
   }
   return path.replaceAll(r'\:', '%3A');
 }
@@ -55,7 +74,7 @@ Map<String, String> getMatchParams(
     if (index < 0) {
       final start = -(index + 1);
       segment = start < segments.length
-          ? segments.sublist(start).join('/')
+          ? _joinSegmentsFrom(segments, start)
           : '';
     } else {
       segment = index < segments.length ? segments[index] : '';
@@ -81,4 +100,17 @@ Map<String, String> getMatchParams(
     }
   }
   return params;
+}
+
+String _joinSegmentsFrom(List<String> segments, int start) {
+  if (start >= segments.length) {
+    return '';
+  }
+
+  final sb = StringBuffer(segments[start]);
+  for (var i = start + 1; i < segments.length; i++) {
+    sb.write('/');
+    sb.write(segments[i]);
+  }
+  return sb.toString();
 }
