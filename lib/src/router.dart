@@ -19,12 +19,18 @@ class RouteMatch<T> {
 class Router<T> {
   final _Node<T> _root;
   late final _Route<T>? _globalFallback;
+  late final Map<String, RouteMatch<T>> _staticExactMatches;
+  late final Set<int> _staticExactPathLengths;
   late final int _maxParamDepth;
+  late final int _paramStackCapacity;
 
   Router({required Map<String, T> routes}) : _root = _Node<T>() {
     final compiled = _compile(routes, _root);
     _globalFallback = compiled.globalFallback;
+    _staticExactMatches = compiled.staticExactMatches;
+    _staticExactPathLengths = compiled.staticExactPathLengths;
     _maxParamDepth = compiled.maxParamDepth;
+    _paramStackCapacity = _maxParamDepth == 0 ? 1 : _maxParamDepth;
   }
 
   RouteMatch<T>? match(String path) {
@@ -33,10 +39,15 @@ class Router<T> {
       return null;
     }
 
-    final stackCapacity = _maxParamDepth == 0 ? 1 : _maxParamDepth;
-    final paramStack = _ParamStack(stackCapacity);
+    if (_staticExactPathLengths.contains(normalized.length)) {
+      final exactStatic = _staticExactMatches[normalized];
+      if (exactStatic != null) {
+        return exactStatic;
+      }
+    }
+
     final start = normalized.length == 1 ? normalized.length : 1;
-    final matched = _matchNodePath(_root, normalized, start, paramStack);
+    final matched = _matchNodePath(_root, normalized, start, null);
     if (matched != null) {
       return matched;
     }
@@ -46,17 +57,13 @@ class Router<T> {
       return null;
     }
     final wildcardValue = normalized.length == 1 ? '' : normalized.substring(1);
-    return _materializeMatch(
-      fallback,
-      normalized,
-      paramStack,
-      wildcardValue,
-      0,
-    );
+    return _materializeMatch(fallback, normalized, null, wildcardValue, 0);
   }
 
   static _CompileResult<T> _compile<T>(Map<String, T> routes, _Node<T> root) {
     _Route<T>? globalFallback;
+    final staticExactMatches = <String, RouteMatch<T>>{};
+    final staticExactPathLengths = <int>{};
     var maxParamDepth = 0;
 
     for (final entry in routes.entries) {
@@ -135,11 +142,16 @@ class Router<T> {
           'Duplicate route shape conflicts with existing route: $pattern',
         );
       }
-      node.exactRoute = _Route<T>(
+      final route = _Route<T>(
         data: data,
         paramNames: List<String>.unmodifiable(paramNames),
         hasWildcard: false,
       );
+      node.exactRoute = route;
+      if (paramNames.isEmpty) {
+        staticExactMatches[pattern] = route.noParamsMatch;
+        staticExactPathLengths.add(pattern.length);
+      }
       if (paramNames.length > maxParamDepth) {
         maxParamDepth = paramNames.length;
       }
@@ -147,6 +159,10 @@ class Router<T> {
 
     return _CompileResult<T>(
       globalFallback: globalFallback,
+      staticExactMatches: Map<String, RouteMatch<T>>.unmodifiable(
+        staticExactMatches,
+      ),
+      staticExactPathLengths: Set<int>.unmodifiable(staticExactPathLengths),
       maxParamDepth: maxParamDepth,
     );
   }
@@ -155,7 +171,7 @@ class Router<T> {
     _Node<T> node,
     String path,
     int cursor,
-    _ParamStack paramStack,
+    _ParamStack? paramStack,
   ) {
     if (cursor >= path.length) {
       final exact = node.exactRoute;
@@ -186,9 +202,10 @@ class Router<T> {
 
     final paramChild = node.paramChild;
     if (paramChild != null) {
-      paramStack.push(cursor, segmentEnd);
-      final matched = _matchNodePath(paramChild, path, nextCursor, paramStack);
-      paramStack.pop();
+      final stack = paramStack ?? _ParamStack(_paramStackCapacity);
+      stack.push(cursor, segmentEnd);
+      final matched = _matchNodePath(paramChild, path, nextCursor, stack);
+      stack.pop();
       if (matched != null) {
         return matched;
       }
@@ -205,7 +222,7 @@ class Router<T> {
   RouteMatch<T> _materializeMatch(
     _Route<T> route,
     String path,
-    _ParamStack paramValues,
+    _ParamStack? paramValues,
     String? wildcardValue,
     int wildcardStart,
   ) {
@@ -214,11 +231,18 @@ class Router<T> {
     }
 
     final params = <String, String>{};
-    for (var i = 0; i < route.paramNames.length; i++) {
-      params[route.paramNames[i]] = path.substring(
-        paramValues.startAt(i),
-        paramValues.endAt(i),
-      );
+    final paramNames = route.paramNames;
+    if (paramNames.isNotEmpty) {
+      final captured = paramValues;
+      if (captured == null) {
+        throw StateError('Missing parameter capture stack for matched route.');
+      }
+      for (var i = 0; i < paramNames.length; i++) {
+        params[paramNames[i]] = path.substring(
+          captured.startAt(i),
+          captured.endAt(i),
+        );
+      }
     }
     if (route.hasWildcard) {
       params['wildcard'] = wildcardValue ?? path.substring(wildcardStart);
@@ -230,10 +254,14 @@ class Router<T> {
 
 class _CompileResult<T> {
   final _Route<T>? globalFallback;
+  final Map<String, RouteMatch<T>> staticExactMatches;
+  final Set<int> staticExactPathLengths;
   final int maxParamDepth;
 
   const _CompileResult({
     required this.globalFallback,
+    required this.staticExactMatches,
+    required this.staticExactPathLengths,
     required this.maxParamDepth,
   });
 }
