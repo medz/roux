@@ -27,12 +27,8 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
   var node = ctx.root;
   var unnamedParamIndex = 0;
 
-  final paramsMap = <({int index, Pattern name, bool optional})>[];
-  final paramsRegexp = <RegExp?>[];
-  final keySegments = ctx.caseSensitive
-      ? segments
-      : segments.map((segment) => segment.toLowerCase()).toList();
-  final routeKey = '$methodToken /${keySegments.join('/')}';
+  List<({int index, Pattern name, bool optional})>? paramsMap;
+  var paramsRegexp = const <RegExp?>[];
 
   for (var i = 0; i < segments.length; i++) {
     var segment = segments[i];
@@ -43,6 +39,7 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
       node = node.wildcard ??= Node<T>(key: '**');
       final parts = segment.split(':');
       final name = parts.length > 1 ? parts[1] : '_';
+      paramsMap ??= <({int index, Pattern name, bool optional})>[];
       paramsMap.add((
         index: -(i + 1),
         name: name,
@@ -54,6 +51,7 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
     // Param
     if (segment == '*' || segment.contains(':')) {
       node = node.param ??= Node<T>(key: '*');
+      paramsMap ??= <({int index, Pattern name, bool optional})>[];
       if (segment == '*') {
         paramsMap.add((
           index: i,
@@ -65,6 +63,9 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
         // (e.g. /files/:name.:ext). This is intentional even if it also
         // matches segments like a:b.
         final regexp = getParamRegexp(ctx, segment);
+        if (paramsRegexp.isEmpty) {
+          paramsRegexp = <RegExp?>[];
+        }
         setParamRegexp(paramsRegexp, i, regexp);
         node.hasRegexParam = true;
         paramsMap.add((index: i, name: regexp, optional: false));
@@ -95,7 +96,7 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
     node = staticNode;
   }
 
-  final hasParams = paramsMap.isNotEmpty;
+  final hasParams = paramsMap != null;
   node.methods ??= <String, List<MethodData<T>>>{};
   final bucket = node.methods!.putIfAbsent(
     methodToken,
@@ -103,15 +104,29 @@ void addRoute<T>(RouterContext<T> ctx, String? method, String path, [T? data]) {
   );
   bucket.add(
     MethodData<T>(
-      key: routeKey,
       data: requireData(data),
       paramsRegexp: paramsRegexp,
-      paramsMap: hasParams ? paramsMap : null,
+      paramsMap: paramsMap,
     ),
   );
 
   if (!hasParams) {
-    final staticPath = '/${matchSegments.join('/')}';
-    ctx.static[staticPath] = node;
+    ctx.static[_buildStaticCachePath(ctx, path, matchSegments)] = node;
   }
+}
+
+String _buildStaticCachePath<T>(
+  RouterContext<T> ctx,
+  String path,
+  List<String> matchSegments,
+) {
+  if (!path.contains(r'\*')) {
+    final normalizedPath = normalizePath(ctx, path);
+    if (normalizedPath.length > 1 &&
+        normalizedPath.codeUnitAt(normalizedPath.length - 1) == 47) {
+      return normalizedPath.substring(0, normalizedPath.length - 1);
+    }
+    return normalizedPath;
+  }
+  return '/${matchSegments.join('/')}';
 }

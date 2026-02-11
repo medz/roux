@@ -30,20 +30,19 @@ List<MatchedRoute<T>> findAllRoutes<T>(
     return const [];
   }
 
-  final uniqueMatches = <String, MethodData<T>>{};
+  final uniqueMatches = <MethodData<T>>[];
+  final seen = Set<MethodData<T>>.identity();
   for (final match in matches) {
-    uniqueMatches.putIfAbsent(match.key, () => match);
+    if (seen.add(match)) {
+      uniqueMatches.add(match);
+    }
   }
 
   if (!params) {
-    return uniqueMatches.values
-        .map((match) => MatchedRoute<T>(match.data))
-        .toList();
+    return uniqueMatches.map((match) => MatchedRoute<T>(match.data)).toList();
   }
 
-  return uniqueMatches.values
-      .map((match) => toMatched(match, segments))
-      .toList();
+  return uniqueMatches.map((match) => toMatched(match, segments)).toList();
 }
 
 List<MethodData<T>> _findAll<T>(
@@ -67,7 +66,9 @@ List<MethodData<T>> _findAll<T>(
 
   // 2. Param
   if (node.param != null) {
-    _findAll(ctx, node.param!, methodToken, segments, index + 1, acc);
+    if (segment != null) {
+      _findAll(ctx, node.param!, methodToken, segments, index + 1, acc);
+    }
     if (index == segments.length && node.param!.methods != null) {
       final match = matchMethods(ctx, node.param!.methods!, methodToken);
       if (match != null && match.isNotEmpty) {
