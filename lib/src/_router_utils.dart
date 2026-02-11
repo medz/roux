@@ -6,12 +6,18 @@ String normalizeMethod<T>(RouterContext<T> ctx, String? method) {
     return ctx.anyMethodTokenNormalized;
   }
 
+  if (_isAsciiUpper(method)) {
+    return method == ctx.anyMethodTokenNormalized
+        ? ctx.anyMethodTokenNormalized
+        : method;
+  }
+
   final cached = ctx.methodCache[method];
   if (cached != null) {
     return cached;
   }
 
-  var normalized = _isAsciiUpper(method) ? method : method.toUpperCase();
+  var normalized = method.toUpperCase();
   if (normalized == ctx.anyMethodTokenNormalized) {
     normalized = ctx.anyMethodTokenNormalized;
   }
