@@ -68,7 +68,7 @@ final class _LazyRouteMatch<T> extends RouteMatch<T> {
   }
 }
 
-/// Immutable path router with static, parameter and wildcard matching.
+/// Path router with static, parameter and wildcard matching.
 ///
 /// Route precedence is fixed:
 /// 1. static segment
@@ -76,20 +76,37 @@ final class _LazyRouteMatch<T> extends RouteMatch<T> {
 /// 3. wildcard (`*`)
 /// 4. global fallback (`/*`)
 class Router<T> {
-  final _Node<T> _root;
-  late final _Route<T>? _globalFallback;
-  late final Map<String, _Route<T>> _staticExactRoutes;
-  late final Set<int> _staticExactPathLengths;
-  late final int _maxParamDepth;
-  late final int _paramStackCapacity;
+  final _Node<T> _root = _Node<T>();
+  _Route<T>? _globalFallback;
+  final Map<String, _Route<T>> _staticExactRoutes = <String, _Route<T>>{};
+  final Set<int> _staticExactPathLengths = <int>{};
+  int _maxParamDepth = 0;
+  int _paramStackCapacity = 1;
 
-  Router({required Map<String, T> routes}) : _root = _Node<T>() {
-    final compiled = _compile(routes, _root);
-    _globalFallback = compiled.globalFallback;
-    _staticExactRoutes = compiled.staticExactRoutes;
-    _staticExactPathLengths = compiled.staticExactPathLengths;
-    _maxParamDepth = compiled.maxParamDepth;
-    _paramStackCapacity = _maxParamDepth == 0 ? 1 : _maxParamDepth;
+  Router({Map<String, T>? routes}) {
+    if (routes != null && routes.isNotEmpty) {
+      addAll(routes);
+    }
+  }
+
+  void add(String path, T data) {
+    final normalized = _normalizePatternForCompile(path);
+    _addCompiledPattern(
+      normalized.path,
+      data,
+      hasReservedToken: normalized.hasReservedToken,
+    );
+  }
+
+  void addAll(Map<String, T> routes) {
+    for (final entry in routes.entries) {
+      final normalized = _normalizePatternForCompile(entry.key);
+      _addCompiledPattern(
+        normalized.path,
+        entry.value,
+        hasReservedToken: normalized.hasReservedToken,
+      );
+    }
   }
 
   RouteMatch<T>? match(String path) {
@@ -119,143 +136,122 @@ class Router<T> {
     return _materializeMatch(fallback, normalized, null, wildcardValue, 0);
   }
 
-  static _CompileResult<T> _compile<T>(Map<String, T> routes, _Node<T> root) {
-    _Route<T>? globalFallback;
-    final staticExactRoutes = <String, _Route<T>>{};
-    final staticExactPathLengths = <int>{};
-    var maxParamDepth = 0;
-
-    for (final entry in routes.entries) {
-      final normalized = _normalizePatternForCompile(entry.key);
-      final pattern = normalized.path;
-      final data = entry.value;
-
-      if (pattern == '/*') {
-        if (globalFallback != null) {
-          throw FormatException('Duplicate global fallback route: $pattern');
-        }
-        globalFallback = _Route<T>(
-          data: data,
-          paramNames: const <String>[],
-          hasWildcard: true,
-        );
-        continue;
+  void _addCompiledPattern(
+    String pattern,
+    T data, {
+    required bool hasReservedToken,
+  }) {
+    if (pattern == '/*') {
+      if (_globalFallback != null) {
+        throw FormatException('Duplicate global fallback route: $pattern');
       }
+      _globalFallback = _Route<T>(
+        data: data,
+        paramNames: const <String>[],
+        hasWildcard: true,
+      );
+      return;
+    }
 
-      if (!normalized.hasReservedToken) {
-        if (staticExactRoutes[pattern] != null) {
-          throw FormatException(
-            'Duplicate route shape conflicts with existing route: $pattern',
-          );
-        }
-        final route = _Route<T>(
-          data: data,
-          paramNames: const <String>[],
-          hasWildcard: false,
-        );
-        staticExactRoutes[pattern] = route;
-        staticExactPathLengths.add(pattern.length);
-        continue;
-      }
-
-      List<String>? paramNames;
-      var paramCount = 0;
-      var node = root;
-      var cursor = pattern.length == 1 ? pattern.length : 1;
-      var wildcardAdded = false;
-
-      while (cursor < pattern.length) {
-        var segmentEnd = cursor;
-        var hasReservedInSegment = false;
-        while (segmentEnd < pattern.length) {
-          final code = pattern.codeUnitAt(segmentEnd);
-          if (code == _slashCode) {
-            break;
-          }
-          if (code == _colonCode || code == _asteriskCode) {
-            hasReservedInSegment = true;
-          }
-          segmentEnd += 1;
-        }
-
-        final segmentLength = segmentEnd - cursor;
-        final firstCode = pattern.codeUnitAt(cursor);
-        final isLastSegment = segmentEnd == pattern.length;
-
-        if (segmentLength == 1 && firstCode == _asteriskCode) {
-          if (!isLastSegment) {
-            throw FormatException(
-              'Wildcard must be the last segment: $pattern',
-            );
-          }
-          if (node.wildcardRoute != null) {
-            throw FormatException(
-              'Duplicate wildcard route shape at prefix for pattern: $pattern',
-            );
-          }
-          node.wildcardRoute = _Route<T>(
-            data: data,
-            paramNames: paramNames ?? const <String>[],
-            hasWildcard: true,
-          );
-          if (paramCount > maxParamDepth) {
-            maxParamDepth = paramCount;
-          }
-          wildcardAdded = true;
-          break;
-        }
-
-        if (firstCode == _colonCode) {
-          final paramName = pattern.substring(cursor + 1, segmentEnd);
-          if (!_isValidParamName(paramName)) {
-            throw FormatException('Invalid parameter name in route: $pattern');
-          }
-          node.paramChild ??= _Node<T>();
-          node = node.paramChild!;
-          (paramNames ??= <String>[]).add(paramName);
-          paramCount += 1;
-        } else if (hasReservedInSegment) {
-          throw FormatException(
-            'Unsupported segment syntax in route: $pattern',
-          );
-        } else {
-          final segment = pattern.substring(cursor, segmentEnd);
-          node = node.getOrCreateStaticChild(segment);
-        }
-
-        cursor = segmentEnd + 1;
-      }
-
-      if (wildcardAdded) {
-        continue;
-      }
-
-      if (node.exactRoute != null) {
+    if (!hasReservedToken) {
+      if (_staticExactRoutes[pattern] != null) {
         throw FormatException(
           'Duplicate route shape conflicts with existing route: $pattern',
         );
       }
       final route = _Route<T>(
         data: data,
-        paramNames: paramNames ?? const <String>[],
+        paramNames: const <String>[],
         hasWildcard: false,
       );
-      node.exactRoute = route;
-      if (paramCount == 0) {
-        staticExactRoutes[pattern] = route;
-        staticExactPathLengths.add(pattern.length);
-      }
-      if (paramCount > maxParamDepth) {
-        maxParamDepth = paramCount;
-      }
+      _staticExactRoutes[pattern] = route;
+      _staticExactPathLengths.add(pattern.length);
+      return;
     }
 
-    return _CompileResult<T>(
-      globalFallback: globalFallback,
-      staticExactRoutes: staticExactRoutes,
-      staticExactPathLengths: staticExactPathLengths,
-      maxParamDepth: maxParamDepth,
+    List<String>? paramNames;
+    var paramCount = 0;
+    var node = _root;
+    var cursor = pattern.length == 1 ? pattern.length : 1;
+
+    while (cursor < pattern.length) {
+      var segmentEnd = cursor;
+      var hasReservedInSegment = false;
+      while (segmentEnd < pattern.length) {
+        final code = pattern.codeUnitAt(segmentEnd);
+        if (code == _slashCode) {
+          break;
+        }
+        if (code == _colonCode || code == _asteriskCode) {
+          hasReservedInSegment = true;
+        }
+        segmentEnd += 1;
+      }
+
+      final segmentLength = segmentEnd - cursor;
+      final firstCode = pattern.codeUnitAt(cursor);
+      final isLastSegment = segmentEnd == pattern.length;
+
+      if (segmentLength == 1 && firstCode == _asteriskCode) {
+        if (!isLastSegment) {
+          throw FormatException('Wildcard must be the last segment: $pattern');
+        }
+        if (node.wildcardRoute != null) {
+          throw FormatException(
+            'Duplicate wildcard route shape at prefix for pattern: $pattern',
+          );
+        }
+        node.wildcardRoute = _Route<T>(
+          data: data,
+          paramNames: paramNames ?? const <String>[],
+          hasWildcard: true,
+        );
+        if (paramCount > _maxParamDepth) {
+          _maxParamDepth = paramCount;
+          _paramStackCapacity = _maxParamDepth == 0 ? 1 : _maxParamDepth;
+        }
+        return;
+      }
+
+      if (firstCode == _colonCode) {
+        final paramName = pattern.substring(cursor + 1, segmentEnd);
+        if (!_isValidParamName(paramName)) {
+          throw FormatException('Invalid parameter name in route: $pattern');
+        }
+        node.paramChild ??= _Node<T>();
+        node = node.paramChild!;
+        (paramNames ??= <String>[]).add(paramName);
+        paramCount += 1;
+      } else if (hasReservedInSegment) {
+        throw FormatException('Unsupported segment syntax in route: $pattern');
+      } else {
+        final segment = pattern.substring(cursor, segmentEnd);
+        node = node.getOrCreateStaticChild(segment);
+      }
+
+      cursor = segmentEnd + 1;
+    }
+
+    if (node.exactRoute != null) {
+      throw FormatException(
+        'Duplicate route shape conflicts with existing route: $pattern',
+      );
+    }
+
+    final route = _Route<T>(
+      data: data,
+      paramNames: paramNames ?? const <String>[],
+      hasWildcard: false,
     );
+    node.exactRoute = route;
+    if (paramCount == 0) {
+      _staticExactRoutes[pattern] = route;
+      _staticExactPathLengths.add(pattern.length);
+    }
+    if (paramCount > _maxParamDepth) {
+      _maxParamDepth = paramCount;
+      _paramStackCapacity = _maxParamDepth == 0 ? 1 : _maxParamDepth;
+    }
   }
 
   RouteMatch<T>? _matchNodePath(
@@ -331,20 +327,6 @@ class Router<T> {
       wildcardStart: wildcardStart,
     );
   }
-}
-
-class _CompileResult<T> {
-  final _Route<T>? globalFallback;
-  final Map<String, _Route<T>> staticExactRoutes;
-  final Set<int> staticExactPathLengths;
-  final int maxParamDepth;
-
-  const _CompileResult({
-    required this.globalFallback,
-    required this.staticExactRoutes,
-    required this.staticExactPathLengths,
-    required this.maxParamDepth,
-  });
 }
 
 class _Route<T> {

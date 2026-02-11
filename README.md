@@ -3,7 +3,7 @@
 [![Pub Version](https://img.shields.io/pub/v/roux?logo=dart)](https://pub.dev/packages/roux)
 [![Test](https://github.com/medz/roux/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/medz/roux/actions/workflows/test.yml)
 
-Lightweight, fast immutable router for Dart with static, parameterized, and
+Lightweight, fast router for Dart with static, parameterized, and
 wildcard path matching.
 
 ## Install
@@ -51,6 +51,8 @@ Notes:
 - Embedded syntax like `/files/:name.:ext` is intentionally unsupported.
 - Matching is case-sensitive.
 - Trailing slash on input is ignored (`/users` equals `/users/`).
+- You can register routes via constructor (`Router(routes: {...})`) or
+  incrementally (`add` / `addAll`).
 
 ## Matching Order
 

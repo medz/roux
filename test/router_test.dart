@@ -2,6 +2,43 @@ import 'package:roux/roux.dart';
 import 'package:test/test.dart';
 
 void main() {
+  group('route registration', () {
+    test('supports empty constructor and add', () {
+      final router = Router<String>();
+      expect(router.match('/users/42'), isNull);
+
+      router.add('/users/:id', 'user');
+      expect(router.match('/users/42')?.data, 'user');
+      expect(router.match('/users/42')?.params, {'id': '42'});
+    });
+
+    test('supports addAll', () {
+      final router = Router<String>();
+      router.addAll({'/': 'root', '/users/all': 'all', '/users/:id': 'detail'});
+
+      expect(router.match('/')?.data, 'root');
+      expect(router.match('/users/all')?.data, 'all');
+      expect(router.match('/users/7')?.data, 'detail');
+      expect(router.match('/users/7')?.params, {'id': '7'});
+    });
+
+    test('supports add after initial routes', () {
+      final router = Router<String>(routes: {'/': 'root'});
+      router.add('/users/*', 'users');
+
+      expect(router.match('/')?.data, 'root');
+      expect(router.match('/users/a/b')?.data, 'users');
+      expect(router.match('/users/a/b')?.params, {'wildcard': 'a/b'});
+    });
+
+    test('rejects duplicate route shape on add', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'a');
+
+      expect(() => router.add('/users/:name', 'b'), throwsFormatException);
+    });
+  });
+
   group('match priority', () {
     final router = Router<String>(
       routes: {
