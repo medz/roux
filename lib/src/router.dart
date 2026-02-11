@@ -1,48 +1,452 @@
-import 'node.dart';
+const _slashCode = 47;
+const _staticMapUpgradeThreshold = 8;
 
-/// Opaque router handle that stores lookup structures.
-///
-/// Treat the fields as implementation details and use the top-level helpers
-/// like `addRoute`, `findRoute`, `findAllRoutes`, and `removeRoute`.
-///
-/// [static] caches full static paths for O(1) exact matches.
-/// [root] is the trie root for segmented traversal; each node also has its own
-/// `static` map for child segments during trie walks.
-class RouterContext<T> {
-  final Node<T> root;
+/// Match result produced by [Router.match].
+class RouteMatch<T> {
+  final T data;
+  final Map<String, String>? params;
 
-  /// Full static path cache for quick exact matches.
-  final Map<String, Node<T>> static;
-
-  /// Whether path matching is case-sensitive.
-  final bool caseSensitive;
-
-  /// Token representing "any method" registrations.
-  final String anyMethodToken;
-
-  /// Uppercased [anyMethodToken] used for normalization.
-  final String anyMethodTokenNormalized;
-
-  RouterContext({
-    required this.root,
-    required this.static,
-    required this.caseSensitive,
-    required this.anyMethodToken,
-  }) : anyMethodTokenNormalized = anyMethodToken.toUpperCase();
+  const RouteMatch(this.data, [this.params]);
 }
 
-/// Creates a new [RouterContext].
+/// Immutable path router with static, parameter and wildcard matching.
 ///
-/// When [caseSensitive] is false, path matching lowercases segments. The
-/// [anyMethodToken] is the token used to register "any method" routes.
-RouterContext<T> createRouter<T>({
-  bool caseSensitive = true,
-  String anyMethodToken = 'any',
-}) {
-  return RouterContext<T>(
-    root: Node<T>(key: ''),
-    static: <String, Node<T>>{},
-    caseSensitive: caseSensitive,
-    anyMethodToken: anyMethodToken,
-  );
+/// Route precedence is fixed:
+/// 1. static segment
+/// 2. parameter segment (`:id`)
+/// 3. wildcard (`*`)
+/// 4. global fallback (`/*`)
+class Router<T> {
+  final _Node<T> _root;
+  late final _Route<T>? _globalFallback;
+  late final int _maxParamDepth;
+
+  Router({required Map<String, T> routes}) : _root = _Node<T>() {
+    final compiled = _compile(routes, _root);
+    _globalFallback = compiled.globalFallback;
+    _maxParamDepth = compiled.maxParamDepth;
+  }
+
+  RouteMatch<T>? match(String path) {
+    final normalized = _normalizeInputPath(path);
+    if (normalized == null) {
+      return null;
+    }
+
+    final stackCapacity = _maxParamDepth == 0 ? 1 : _maxParamDepth;
+    final paramStack = _ParamStack(stackCapacity);
+    final start = normalized.length == 1 ? normalized.length : 1;
+    final matched = _matchNodePath(_root, normalized, start, paramStack);
+    if (matched != null) {
+      return matched;
+    }
+
+    final fallback = _globalFallback;
+    if (fallback == null) {
+      return null;
+    }
+    final wildcardValue = normalized.length == 1 ? '' : normalized.substring(1);
+    return _materializeMatch(
+      fallback,
+      normalized,
+      paramStack,
+      wildcardValue,
+      0,
+    );
+  }
+
+  static _CompileResult<T> _compile<T>(Map<String, T> routes, _Node<T> root) {
+    _Route<T>? globalFallback;
+    var maxParamDepth = 0;
+
+    for (final entry in routes.entries) {
+      final pattern = _normalizePattern(entry.key);
+      final data = entry.value;
+
+      if (pattern == '/*') {
+        if (globalFallback != null) {
+          throw FormatException('Duplicate global fallback route: $pattern');
+        }
+        globalFallback = _Route<T>(
+          data: data,
+          paramNames: const <String>[],
+          hasWildcard: true,
+        );
+        continue;
+      }
+
+      final segments = _splitPathSegments(pattern);
+      final paramNames = <String>[];
+      var node = root;
+      var wildcardAdded = false;
+
+      for (var i = 0; i < segments.length; i++) {
+        final segment = segments[i];
+
+        if (segment == '*') {
+          if (i != segments.length - 1) {
+            throw FormatException(
+              'Wildcard must be the last segment: $pattern',
+            );
+          }
+          if (node.wildcardRoute != null) {
+            throw FormatException(
+              'Duplicate wildcard route shape at prefix for pattern: $pattern',
+            );
+          }
+          node.wildcardRoute = _Route<T>(
+            data: data,
+            paramNames: List<String>.unmodifiable(paramNames),
+            hasWildcard: true,
+          );
+          if (paramNames.length > maxParamDepth) {
+            maxParamDepth = paramNames.length;
+          }
+          wildcardAdded = true;
+          break;
+        }
+
+        if (segment.codeUnitAt(0) == 58) {
+          final paramName = segment.substring(1);
+          if (!_isValidParamName(paramName)) {
+            throw FormatException('Invalid parameter name in route: $pattern');
+          }
+          node.paramChild ??= _Node<T>();
+          node = node.paramChild!;
+          paramNames.add(paramName);
+          continue;
+        }
+
+        if (segment.contains(':') || segment.contains('*')) {
+          throw FormatException(
+            'Unsupported segment syntax in route: $pattern',
+          );
+        }
+
+        node = node.getOrCreateStaticChild(segment);
+      }
+
+      if (wildcardAdded) {
+        continue;
+      }
+
+      if (node.exactRoute != null) {
+        throw FormatException(
+          'Duplicate route shape conflicts with existing route: $pattern',
+        );
+      }
+      node.exactRoute = _Route<T>(
+        data: data,
+        paramNames: List<String>.unmodifiable(paramNames),
+        hasWildcard: false,
+      );
+      if (paramNames.length > maxParamDepth) {
+        maxParamDepth = paramNames.length;
+      }
+    }
+
+    return _CompileResult<T>(
+      globalFallback: globalFallback,
+      maxParamDepth: maxParamDepth,
+    );
+  }
+
+  RouteMatch<T>? _matchNodePath(
+    _Node<T> node,
+    String path,
+    int cursor,
+    _ParamStack paramStack,
+  ) {
+    if (cursor >= path.length) {
+      final exact = node.exactRoute;
+      if (exact != null) {
+        return _materializeMatch(exact, path, paramStack, null, 0);
+      }
+
+      final wildcard = node.wildcardRoute;
+      if (wildcard != null) {
+        return _materializeMatch(wildcard, path, paramStack, '', 0);
+      }
+      return null;
+    }
+
+    final segmentEnd = _findSegmentEnd(path, cursor);
+    if (segmentEnd == cursor) {
+      return null;
+    }
+    final nextCursor = segmentEnd < path.length ? segmentEnd + 1 : path.length;
+
+    final staticChild = node.lookupStaticChildSlice(path, cursor, segmentEnd);
+    if (staticChild != null) {
+      final matched = _matchNodePath(staticChild, path, nextCursor, paramStack);
+      if (matched != null) {
+        return matched;
+      }
+    }
+
+    final paramChild = node.paramChild;
+    if (paramChild != null) {
+      paramStack.push(cursor, segmentEnd);
+      final matched = _matchNodePath(paramChild, path, nextCursor, paramStack);
+      paramStack.pop();
+      if (matched != null) {
+        return matched;
+      }
+    }
+
+    final wildcard = node.wildcardRoute;
+    if (wildcard != null) {
+      return _materializeMatch(wildcard, path, paramStack, null, cursor);
+    }
+
+    return null;
+  }
+
+  RouteMatch<T> _materializeMatch(
+    _Route<T> route,
+    String path,
+    _ParamStack paramValues,
+    String? wildcardValue,
+    int wildcardStart,
+  ) {
+    if (!route.hasWildcard && route.paramNames.isEmpty) {
+      return route.noParamsMatch;
+    }
+
+    final params = <String, String>{};
+    for (var i = 0; i < route.paramNames.length; i++) {
+      params[route.paramNames[i]] = path.substring(
+        paramValues.startAt(i),
+        paramValues.endAt(i),
+      );
+    }
+    if (route.hasWildcard) {
+      params['wildcard'] = wildcardValue ?? path.substring(wildcardStart);
+    }
+
+    return RouteMatch<T>(route.data, params);
+  }
+}
+
+class _CompileResult<T> {
+  final _Route<T>? globalFallback;
+  final int maxParamDepth;
+
+  const _CompileResult({
+    required this.globalFallback,
+    required this.maxParamDepth,
+  });
+}
+
+class _Route<T> {
+  final T data;
+  final List<String> paramNames;
+  final bool hasWildcard;
+  final RouteMatch<T> noParamsMatch;
+
+  _Route({
+    required this.data,
+    required this.paramNames,
+    required this.hasWildcard,
+  }) : noParamsMatch = RouteMatch<T>(data);
+}
+
+class _Node<T> {
+  List<String>? _staticKeys;
+  List<_Node<T>>? _staticChildren;
+  Map<String, _Node<T>>? _staticMap;
+
+  _Node<T>? paramChild;
+  _Route<T>? exactRoute;
+  _Route<T>? wildcardRoute;
+
+  _Node<T> getOrCreateStaticChild(String segment) {
+    final map = _staticMap;
+    if (map != null) {
+      return map.putIfAbsent(segment, _Node<T>.new);
+    }
+
+    final keys = _staticKeys;
+    final children = _staticChildren;
+    if (keys != null && children != null) {
+      for (var i = 0; i < keys.length; i++) {
+        if (keys[i] == segment) {
+          return children[i];
+        }
+      }
+    }
+
+    final child = _Node<T>();
+    (_staticKeys ??= <String>[]).add(segment);
+    (_staticChildren ??= <_Node<T>>[]).add(child);
+
+    final currentKeys = _staticKeys!;
+    if (currentKeys.length >= _staticMapUpgradeThreshold) {
+      final upgraded = <String, _Node<T>>{};
+      final currentChildren = _staticChildren!;
+      for (var i = 0; i < currentKeys.length; i++) {
+        upgraded[currentKeys[i]] = currentChildren[i];
+      }
+      _staticMap = upgraded;
+    }
+
+    return child;
+  }
+
+  _Node<T>? lookupStaticChildSlice(String path, int start, int end) {
+    final map = _staticMap;
+    if (map != null) {
+      if (map.length >= 16) {
+        return map[path.substring(start, end)];
+      }
+      for (final entry in map.entries) {
+        if (_equalsPathSlice(entry.key, path, start, end)) {
+          return entry.value;
+        }
+      }
+      return null;
+    }
+
+    final keys = _staticKeys;
+    final children = _staticChildren;
+    if (keys == null || children == null) {
+      return null;
+    }
+    for (var i = 0; i < keys.length; i++) {
+      if (_equalsPathSlice(keys[i], path, start, end)) {
+        return children[i];
+      }
+    }
+    return null;
+  }
+}
+
+String _normalizePattern(String path) {
+  if (path.isEmpty || path.codeUnitAt(0) != _slashCode) {
+    throw FormatException('Route pattern must start with "/": $path');
+  }
+  if (_hasEmptyPathSegments(path)) {
+    throw FormatException('Route pattern contains empty segment: $path');
+  }
+  if (path.length > 1 && path.codeUnitAt(path.length - 1) == _slashCode) {
+    path = path.substring(0, path.length - 1);
+  }
+  return path;
+}
+
+String? _normalizeInputPath(String path) {
+  if (path.isEmpty || path.codeUnitAt(0) != _slashCode) {
+    return null;
+  }
+  if (path.length > 1 && path.codeUnitAt(path.length - 1) == _slashCode) {
+    if (path.codeUnitAt(path.length - 2) == _slashCode) {
+      return null;
+    }
+    path = path.substring(0, path.length - 1);
+  }
+  if (path.length > 1 && path.codeUnitAt(1) == _slashCode) {
+    return null;
+  }
+  return path;
+}
+
+bool _hasEmptyPathSegments(String path) {
+  for (var i = 1; i < path.length; i++) {
+    if (path.codeUnitAt(i) == _slashCode &&
+        path.codeUnitAt(i - 1) == _slashCode) {
+      return true;
+    }
+  }
+  return false;
+}
+
+List<String> _splitPathSegments(String path) {
+  if (path.length == 1) {
+    return const <String>[];
+  }
+
+  final segments = <String>[];
+  var start = 1;
+  for (var i = 1; i <= path.length; i++) {
+    if (i != path.length && path.codeUnitAt(i) != _slashCode) {
+      continue;
+    }
+    if (start != i) {
+      segments.add(path.substring(start, i));
+    }
+    start = i + 1;
+  }
+  return segments;
+}
+
+int _findSegmentEnd(String path, int start) {
+  var i = start;
+  while (i < path.length && path.codeUnitAt(i) != _slashCode) {
+    i += 1;
+  }
+  return i;
+}
+
+bool _equalsPathSlice(String key, String path, int start, int end) {
+  if (key.length != (end - start)) {
+    return false;
+  }
+  for (var i = 0; i < key.length; i++) {
+    if (key.codeUnitAt(i) != path.codeUnitAt(start + i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+class _ParamStack {
+  final List<int> _starts;
+  final List<int> _ends;
+  int _length = 0;
+
+  _ParamStack(int capacity)
+    : _starts = List<int>.filled(capacity, 0, growable: false),
+      _ends = List<int>.filled(capacity, 0, growable: false);
+
+  void push(int start, int end) {
+    _starts[_length] = start;
+    _ends[_length] = end;
+    _length += 1;
+  }
+
+  void pop() {
+    _length -= 1;
+  }
+
+  int startAt(int index) => _starts[index];
+
+  int endAt(int index) => _ends[index];
+}
+
+bool _isValidParamName(String name) {
+  if (name.isEmpty) {
+    return false;
+  }
+
+  final first = name.codeUnitAt(0);
+  final validFirst =
+      (first >= 65 && first <= 90) ||
+      (first >= 97 && first <= 122) ||
+      first == 95;
+  if (!validFirst) {
+    return false;
+  }
+
+  for (var i = 1; i < name.length; i++) {
+    final c = name.codeUnitAt(i);
+    final valid =
+        (c >= 65 && c <= 90) ||
+        (c >= 97 && c <= 122) ||
+        (c >= 48 && c <= 57) ||
+        c == 95;
+    if (!valid) {
+      return false;
+    }
+  }
+  return true;
 }
