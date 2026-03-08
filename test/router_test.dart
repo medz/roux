@@ -39,6 +39,260 @@ void main() {
     });
   });
 
+  group('duplicate policy', () {
+    test('uses reject as the default router policy', () {
+      final router = Router<String>(routes: {'/users/:id': 'first'});
+
+      expect(() => router.add('/users/:id', 'second'), throwsFormatException);
+    });
+
+    test('supports replace at router level for static routes', () {
+      final router = Router<String>(
+        routes: {'/users/all': 'first'},
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
+
+      router.add('/users/all', 'second');
+
+      expect(router.match('/users/all')?.data, 'second');
+    });
+
+    test('supports keepFirst at router level for static routes', () {
+      final router = Router<String>(
+        routes: {'/users/all': 'first'},
+        duplicatePolicy: DuplicatePolicy.keepFirst,
+      );
+
+      router.add('/users/all', 'second');
+
+      expect(router.match('/users/all')?.data, 'first');
+    });
+
+    test('supports call-level override over router default', () {
+      final router = Router<String>(
+        routes: {'/users/all': 'first'},
+        duplicatePolicy: DuplicatePolicy.reject,
+      );
+
+      router.add(
+        '/users/all',
+        'second',
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
+
+      expect(router.match('/users/all')?.data, 'second');
+    });
+
+    test('supports replace for wildcard routes', () {
+      final router = Router<String>();
+
+      router.add('/files/*', 'first');
+      router.add(
+        '/files/*',
+        'second',
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
+
+      expect(router.match('/files/a/b')?.data, 'second');
+      expect(router.match('/files/a/b')?.params, {'wildcard': 'a/b'});
+    });
+
+    test('supports keepFirst for wildcard routes', () {
+      final router = Router<String>();
+
+      router.add('/files/*', 'first');
+      router.add(
+        '/files/*',
+        'second',
+        duplicatePolicy: DuplicatePolicy.keepFirst,
+      );
+
+      expect(router.match('/files/a/b')?.data, 'first');
+      expect(router.match('/files/a/b')?.params, {'wildcard': 'a/b'});
+    });
+
+    test('supports replace for global fallback routes', () {
+      final router = Router<String>();
+
+      router.add('/*', 'first');
+      router.add('/*', 'second', duplicatePolicy: DuplicatePolicy.replace);
+
+      expect(router.match('/unknown')?.data, 'second');
+      expect(router.match('/unknown')?.params, {'wildcard': 'unknown'});
+    });
+
+    test('supports keepFirst for global fallback routes', () {
+      final router = Router<String>();
+
+      router.add('/*', 'first');
+      router.add('/*', 'second', duplicatePolicy: DuplicatePolicy.keepFirst);
+
+      expect(router.match('/unknown')?.data, 'first');
+      expect(router.match('/unknown')?.params, {'wildcard': 'unknown'});
+    });
+
+    test('supports replace for parameter routes with identical names', () {
+      final router = Router<String>();
+
+      router.add('/users/:id', 'first');
+      router.add(
+        '/users/:id',
+        'second',
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
+
+      expect(router.match('/users/42')?.data, 'second');
+      expect(router.match('/users/42')?.params, {'id': '42'});
+    });
+
+    test('supports keepFirst for parameter routes with identical names', () {
+      final router = Router<String>();
+
+      router.add('/users/:id', 'first');
+      router.add(
+        '/users/:id',
+        'second',
+        duplicatePolicy: DuplicatePolicy.keepFirst,
+      );
+
+      expect(router.match('/users/42')?.data, 'first');
+      expect(router.match('/users/42')?.params, {'id': '42'});
+    });
+
+    test('keeps parameter-name drift as an error under replace', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'first');
+
+      expect(
+        () => router.add(
+          '/users/:name',
+          'second',
+          duplicatePolicy: DuplicatePolicy.replace,
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('keeps parameter-name drift as an error under keepFirst', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'first');
+
+      expect(
+        () => router.add(
+          '/users/:name',
+          'second',
+          duplicatePolicy: DuplicatePolicy.keepFirst,
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('applies duplicate policy per method bucket only', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'any');
+      router.add('/users/:id', 'get', method: 'GET');
+      router.add(
+        '/users/:id',
+        'get-replaced',
+        method: 'GET',
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
+
+      expect(router.match('/users/1')?.data, 'any');
+      expect(router.match('/users/1', method: 'GET')?.data, 'get-replaced');
+    });
+
+    test('keeps addAll sequential under replace', () {
+      final router = Router<String>(duplicatePolicy: DuplicatePolicy.replace);
+
+      router.addAll({'/users/all': 'first', '/users/all/': 'second'});
+
+      expect(router.match('/users/all')?.data, 'second');
+    });
+
+    test('keeps addAll sequential under keepFirst', () {
+      final router = Router<String>(duplicatePolicy: DuplicatePolicy.keepFirst);
+
+      router.addAll({'/users/all': 'first', '/users/all/': 'second'});
+
+      expect(router.match('/users/all')?.data, 'first');
+    });
+
+    test('keeps addAll non-transactional under reject', () {
+      final router = Router<String>();
+
+      expect(
+        () => router.addAll({'/users/all': 'first', '/users/all/': 'second'}),
+        throwsFormatException,
+      );
+
+      expect(router.match('/users/all')?.data, 'first');
+    });
+
+    test('matchAll sees only the retained route entry', () {
+      final router = Router<String>(duplicatePolicy: DuplicatePolicy.replace);
+      router.add('/*', 'global');
+      router.add('/api/*', 'first');
+      router.add('/api/*', 'second');
+
+      final matches = router.matchAll('/api/demo');
+
+      expect(matches.map((match) => match.data), ['global', 'second']);
+    });
+
+    test('matchAll keeps the earliest retained route entry under keepFirst', () {
+      final router = Router<String>(duplicatePolicy: DuplicatePolicy.keepFirst);
+      router.add('/*', 'global');
+      router.add('/api/*', 'first');
+      router.add('/api/*', 'second');
+
+      final matches = router.matchAll('/api/demo');
+
+      expect(matches.map((match) => match.data), ['global', 'first']);
+    });
+
+    test('matchAll keeps the original retained entry after reject failure', () {
+      final router = Router<String>();
+      router.add('/*', 'global');
+      router.add('/api/*', 'first');
+
+      expect(
+        () => router.add('/api/*', 'second'),
+        throwsFormatException,
+      );
+
+      final matches = router.matchAll('/api/demo');
+
+      expect(matches.map((match) => match.data), ['global', 'first']);
+    });
+
+    test('matchAll reflects retained entries independently per method bucket', () {
+      final router = Router<String>();
+      router.add('/*', 'global-any');
+      router.add('/api/*', 'api-any-first');
+      router.add(
+        '/api/*',
+        'api-any-second',
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
+      router.add('/api/*', 'api-get-first', method: 'GET');
+      router.add(
+        '/api/*',
+        'api-get-second',
+        method: 'GET',
+        duplicatePolicy: DuplicatePolicy.keepFirst,
+      );
+
+      final matches = router.matchAll('/api/demo', method: 'GET');
+
+      expect(matches.map((match) => match.data), [
+        'global-any',
+        'api-any-second',
+        'api-get-first',
+      ]);
+    });
+  });
+
   group('method matching', () {
     test('uses ANY when method is not provided', () {
       final router = Router<String>(routes: {'/users/:id': 'any'});
