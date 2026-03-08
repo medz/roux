@@ -1,3 +1,26 @@
+## 0.4.0
+
+### Features
+
+- Add `DuplicatePolicy.append` so a normalized route slot can retain multiple
+  handlers in registration order.
+- `Router.matchAll(...)` now expands appended entries from the same slot while
+  keeping deterministic route priority ordering.
+
+### Fixes
+
+- `matchAll(...)` now snapshots captured params before backtracking so lazy
+  parameter materialization stays stable for every collected match.
+- Lookup normalization now rejects interior empty path segments such as
+  `"/users//42"` instead of letting fallback wildcards match them.
+
+### Performance
+
+- Reduced matcher hot-path overhead by removing recursive traversal and
+  streamlining slot collection/materialization.
+- Improved `matchAll(...)` throughput across static, dynamic, and appended-route
+  scenarios with dedicated benchmarks.
+
 ## 0.3.0
 
 ### Features
