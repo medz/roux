@@ -240,57 +240,62 @@ void main() {
       expect(matches.map((match) => match.data), ['global', 'second']);
     });
 
-    test('matchAll keeps the earliest retained route entry under keepFirst', () {
-      final router = Router<String>(duplicatePolicy: DuplicatePolicy.keepFirst);
-      router.add('/*', 'global');
-      router.add('/api/*', 'first');
-      router.add('/api/*', 'second');
+    test(
+      'matchAll keeps the earliest retained route entry under keepFirst',
+      () {
+        final router = Router<String>(
+          duplicatePolicy: DuplicatePolicy.keepFirst,
+        );
+        router.add('/*', 'global');
+        router.add('/api/*', 'first');
+        router.add('/api/*', 'second');
 
-      final matches = router.matchAll('/api/demo');
+        final matches = router.matchAll('/api/demo');
 
-      expect(matches.map((match) => match.data), ['global', 'first']);
-    });
+        expect(matches.map((match) => match.data), ['global', 'first']);
+      },
+    );
 
     test('matchAll keeps the original retained entry after reject failure', () {
       final router = Router<String>();
       router.add('/*', 'global');
       router.add('/api/*', 'first');
 
-      expect(
-        () => router.add('/api/*', 'second'),
-        throwsFormatException,
-      );
+      expect(() => router.add('/api/*', 'second'), throwsFormatException);
 
       final matches = router.matchAll('/api/demo');
 
       expect(matches.map((match) => match.data), ['global', 'first']);
     });
 
-    test('matchAll reflects retained entries independently per method bucket', () {
-      final router = Router<String>();
-      router.add('/*', 'global-any');
-      router.add('/api/*', 'api-any-first');
-      router.add(
-        '/api/*',
-        'api-any-second',
-        duplicatePolicy: DuplicatePolicy.replace,
-      );
-      router.add('/api/*', 'api-get-first', method: 'GET');
-      router.add(
-        '/api/*',
-        'api-get-second',
-        method: 'GET',
-        duplicatePolicy: DuplicatePolicy.keepFirst,
-      );
+    test(
+      'matchAll reflects retained entries independently per method bucket',
+      () {
+        final router = Router<String>();
+        router.add('/*', 'global-any');
+        router.add('/api/*', 'api-any-first');
+        router.add(
+          '/api/*',
+          'api-any-second',
+          duplicatePolicy: DuplicatePolicy.replace,
+        );
+        router.add('/api/*', 'api-get-first', method: 'GET');
+        router.add(
+          '/api/*',
+          'api-get-second',
+          method: 'GET',
+          duplicatePolicy: DuplicatePolicy.keepFirst,
+        );
 
-      final matches = router.matchAll('/api/demo', method: 'GET');
+        final matches = router.matchAll('/api/demo', method: 'GET');
 
-      expect(matches.map((match) => match.data), [
-        'global-any',
-        'api-any-second',
-        'api-get-first',
-      ]);
-    });
+        expect(matches.map((match) => match.data), [
+          'global-any',
+          'api-any-second',
+          'api-get-first',
+        ]);
+      },
+    );
   });
 
   group('method matching', () {
