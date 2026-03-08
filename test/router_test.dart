@@ -179,6 +179,118 @@ void main() {
     });
   });
 
+  group('matchAll', () {
+    List<RouteMatch<String>> matchAll(
+      Router<String> router,
+      String path, {
+      String? method,
+    }) {
+      return router.matchAll(path, method: method);
+    }
+
+    test('returns empty list when nothing matches', () {
+      final router = Router<String>(routes: {'/users/:id': 'detail'});
+
+      expect(matchAll(router, '/posts/1'), isEmpty);
+    });
+
+    test('returns empty list for invalid lookup path', () {
+      final router = Router<String>(routes: {'/users/:id': 'detail'});
+
+      expect(matchAll(router, ''), isEmpty);
+      expect(matchAll(router, 'users/1'), isEmpty);
+      expect(matchAll(router, '//users/1'), isEmpty);
+      expect(matchAll(router, '/users//1'), isEmpty);
+    });
+
+    test('returns matches from less specific to more specific', () {
+      final router = Router<String>(
+        routes: {
+          '/*': 'global',
+          '/api/*': 'api-wildcard',
+          '/api/:id': 'api-param',
+          '/api/demo': 'api-demo',
+        },
+      );
+
+      final matches = matchAll(router, '/api/demo');
+
+      expect(matches.map((match) => match.data), [
+        'global',
+        'api-wildcard',
+        'api-param',
+        'api-demo',
+      ]);
+    });
+
+    test('returns route-local params for each matched route', () {
+      final router = Router<String>(
+        routes: {
+          '/*': 'global',
+          '/api/*': 'api-wildcard',
+          '/api/:id': 'api-param',
+          '/api/demo': 'api-demo',
+        },
+      );
+
+      final matches = matchAll(router, '/api/demo');
+
+      expect(matches[0].params, {'wildcard': 'api/demo'});
+      expect(matches[1].params, {'wildcard': 'demo'});
+      expect(matches[2].params, {'id': 'demo'});
+      expect(matches[3].params, isNull);
+    });
+
+    test('includes ANY and exact method matches when method is provided', () {
+      final router = Router<String>();
+      router.add('/*', 'global-any');
+      router.add('/*', 'global-get', method: 'GET');
+      router.add('/api/*', 'api-any');
+      router.add('/api/*', 'api-get', method: 'GET');
+
+      final matches = matchAll(router, '/api/demo', method: 'GET');
+
+      expect(matches.map((match) => match.data), [
+        'global-any',
+        'global-get',
+        'api-any',
+        'api-get',
+      ]);
+    });
+
+    test('uses only ANY routes when method is omitted', () {
+      final router = Router<String>();
+      router.add('/*', 'global-any');
+      router.add('/*', 'global-get', method: 'GET');
+      router.add('/api/*', 'api-any');
+      router.add('/api/*', 'api-get', method: 'GET');
+
+      final matches = matchAll(router, '/api/demo');
+
+      expect(matches.map((match) => match.data), ['global-any', 'api-any']);
+    });
+
+    test('rejects empty method input', () {
+      final router = Router<String>(routes: {'/users/:id': 'detail'});
+
+      expect(
+        () => matchAll(router, '/users/1', method: ''),
+        throwsArgumentError,
+      );
+    });
+
+    test('keeps single-match behavior unchanged', () {
+      final router = Router<String>();
+      router.add('/*', 'global');
+      router.add('/api/*', 'api-wildcard');
+      router.add('/api/:id', 'api-param');
+      router.add('/api/demo', 'api-demo');
+
+      expect(router.match('/api/demo')?.data, 'api-demo');
+      expect(router.match('/api/demo')?.params, isNull);
+    });
+  });
+
   group('normalization and invalid input', () {
     final router = Router<String>(
       routes: {'/a': 'a', '/Users': 'Users', '/a%2Fb': 'encoded'},

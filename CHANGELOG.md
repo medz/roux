@@ -1,3 +1,12 @@
+## Unreleased
+
+### Features
+
+- Add `Router.matchAll(...)` to collect every matching route in deterministic
+  less-specific-to-more-specific order.
+- Method-aware multi-match lookups now include both `ANY` and exact-method
+  matches, with `ANY` ordered first at the same scope.
+
 ## 0.2.0
 
 ### Breaking Changes
