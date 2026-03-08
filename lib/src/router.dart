@@ -723,11 +723,31 @@ class Router<T> {
     required int methodRank,
     required List<_CollectedMatch<T>> output,
   }) {
-    for (var i = 0; i < slot.routes.length; i++) {
+    final single = slot.singleOrNull;
+    if (single != null) {
       output.add(
         _CollectedMatch<T>(
           match: _materializeCollectedMatch(
-            slot.routes[i],
+            single,
+            path,
+            paramValues,
+            wildcardValue,
+            wildcardStart,
+          ),
+          depth: depth,
+          routeKind: routeKind,
+          methodRank: methodRank,
+          slotEntryRank: 0,
+        ),
+      );
+      return;
+    }
+
+    for (var i = 0; i < slot.length; i++) {
+      output.add(
+        _CollectedMatch<T>(
+          match: _materializeCollectedMatch(
+            slot.routeAt(i),
             path,
             paramValues,
             wildcardValue,
@@ -763,8 +783,7 @@ class Router<T> {
       case DuplicatePolicy.keepFirst:
         return existing;
       case DuplicatePolicy.append:
-        existing.routes.add(replacement);
-        return existing;
+        return existing.appended(replacement);
     }
   }
 }
@@ -821,10 +840,54 @@ class _Route<T> {
   }
 }
 
-extension type _RouteSlot<T>(List<_Route<T>> routes) {
-  _RouteSlot.single(_Route<T> route) : this(<_Route<T>>[route]);
+extension type _RouteSlot<T>(Object _value) {
+  _RouteSlot.single(_Route<T> route) : this(route);
 
-  _Route<T> get first => routes[0];
+  _Route<T> get first {
+    final single = singleOrNull;
+    if (single != null) {
+      return single;
+    }
+    return (_value as List<_Route<T>>)[0];
+  }
+
+  _Route<T>? get singleOrNull {
+    final value = _value;
+    if (value is _Route<T>) {
+      return value;
+    }
+    return null;
+  }
+
+  int get length {
+    final single = singleOrNull;
+    if (single != null) {
+      return 1;
+    }
+    return (_value as List<_Route<T>>).length;
+  }
+
+  _Route<T> routeAt(int index) {
+    final single = singleOrNull;
+    if (single != null) {
+      if (index != 0) {
+        throw RangeError.index(index, this, 'index', null, 1);
+      }
+      return single;
+    }
+    return (_value as List<_Route<T>>)[index];
+  }
+
+  _RouteSlot<T> appended(_Route<T> route) {
+    final single = singleOrNull;
+    if (single != null) {
+      return _RouteSlot<T>(<_Route<T>>[single, route]);
+    }
+
+    final routes = _value as List<_Route<T>>;
+    routes.add(route);
+    return this;
+  }
 }
 
 class _Node<T> {
