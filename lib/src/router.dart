@@ -356,7 +356,7 @@ class Router<T> {
         state.globalFallback = resolved;
         return;
       }
-      state.globalFallback = _RouteSlot<T>(route);
+      state.globalFallback = _RouteSlot<T>.single(route);
       return;
     }
 
@@ -388,7 +388,7 @@ class Router<T> {
         paramNames: const <String>[],
         hasWildcard: false,
       );
-      state.staticExactRoutes[pattern] = _RouteSlot<T>(route);
+      state.staticExactRoutes[pattern] = _RouteSlot<T>.single(route);
       state.staticExactPathLengths.add(pattern.length);
       return;
     }
@@ -442,7 +442,7 @@ class Router<T> {
           node.wildcardRoute = resolved;
           return;
         }
-        node.wildcardRoute = _RouteSlot<T>(route);
+        node.wildcardRoute = _RouteSlot<T>.single(route);
         if (paramCount > state.maxParamDepth) {
           state.maxParamDepth = paramCount;
           state.paramStackCapacity = state.maxParamDepth == 0
@@ -492,7 +492,7 @@ class Router<T> {
       node.exactRoute = resolved;
       return;
     }
-    node.exactRoute = _RouteSlot<T>(route);
+    node.exactRoute = _RouteSlot<T>.single(route);
     if (paramCount == 0) {
       state.staticExactRoutes[pattern] = node.exactRoute!;
       state.staticExactPathLengths.add(pattern.length);
@@ -759,7 +759,7 @@ class Router<T> {
       case DuplicatePolicy.reject:
         throw FormatException(rejectMessage);
       case DuplicatePolicy.replace:
-        return _RouteSlot<T>(replacement);
+        return _RouteSlot<T>.single(replacement);
       case DuplicatePolicy.keepFirst:
         return existing;
       case DuplicatePolicy.append:
@@ -821,10 +821,8 @@ class _Route<T> {
   }
 }
 
-class _RouteSlot<T> {
-  final List<_Route<T>> routes;
-
-  _RouteSlot(_Route<T> route) : routes = <_Route<T>>[route];
+extension type _RouteSlot<T>(List<_Route<T>> routes) {
+  _RouteSlot.single(_Route<T> route) : this(<_Route<T>>[route]);
 
   _Route<T> get first => routes[0];
 }
