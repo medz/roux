@@ -36,6 +36,9 @@ final router = Router<String>(
 final match = router.match('/users/123');
 print(match?.data);   // users-id
 print(match?.params); // {id: 123}
+
+final stack = router.matchAll('/users/123');
+print(stack.map((match) => match.data)); // (global-fallback, users-wildcard, users-id)
 ```
 
 ## Route Syntax
@@ -56,10 +59,23 @@ Notes:
 
 ## Matching Order
 
+For `match(...)`:
+
 1. Exact route (`/users/all`)
 2. Parameter route (`/users/:id`)
 3. Wildcard route (`/users/*`)
 4. Global fallback (`/*`)
+
+For `matchAll(...)`:
+
+1. Global fallback (`/*`)
+2. Wildcard scope (`/users/*`)
+3. Parameter route (`/users/:id`)
+4. Exact route (`/users/all`)
+
+`matchAll(...)` returns every matching route from less specific to more
+specific. When a `method` is provided, both `ANY` and exact-method entries
+participate, with `ANY` ordered first at the same scope.
 
 ## Benchmarks
 
