@@ -743,11 +743,14 @@ class Router<T> {
       return;
     }
 
-    for (var i = 0; i < slot.length; i++) {
+    var entryRank = 0;
+    _RouteSlot<T>? current = slot.head;
+    while (current != null) {
+      final entry = current;
       output.add(
         _CollectedMatch<T>(
           match: _materializeCollectedMatch(
-            slot.routeAt(i),
+            entry.value,
             path,
             paramValues,
             wildcardValue,
@@ -756,9 +759,12 @@ class Router<T> {
           depth: depth,
           routeKind: routeKind,
           methodRank: methodRank,
-          slotEntryRank: i,
+          slotEntryRank: entryRank,
         ),
       );
+
+      current = entry.next;
+      entryRank += 1;
     }
   }
 
@@ -840,52 +846,30 @@ class _Route<T> {
   }
 }
 
-extension type _RouteSlot<T>(Object _value) {
-  _RouteSlot.single(_Route<T> route) : this(route);
+final class _RouteSlot<T> {
+  final _Route<T> value;
+  _RouteSlot<T>? next;
+  _RouteSlot<T>? tail;
 
-  _Route<T> get first {
-    final single = singleOrNull;
-    if (single != null) {
-      return single;
-    }
-    return (_value as List<_Route<T>>)[0];
-  }
+  _RouteSlot.single(this.value);
 
-  _Route<T>? get singleOrNull {
-    final value = _value;
-    if (value is _Route<T>) {
-      return value;
-    }
-    return null;
-  }
+  _Route<T> get first => value;
 
-  int get length {
-    final single = singleOrNull;
-    if (single != null) {
-      return 1;
-    }
-    return (_value as List<_Route<T>>).length;
-  }
+  _Route<T>? get singleOrNull => next == null ? value : null;
 
-  _Route<T> routeAt(int index) {
-    final single = singleOrNull;
-    if (single != null) {
-      if (index != 0) {
-        throw RangeError.index(index, this, 'index', null, 1);
-      }
-      return single;
-    }
-    return (_value as List<_Route<T>>)[index];
-  }
+  _RouteSlot<T> get head => this;
 
   _RouteSlot<T> appended(_Route<T> route) {
-    final single = singleOrNull;
-    if (single != null) {
-      return _RouteSlot<T>(<_Route<T>>[single, route]);
+    final appended = _RouteSlot<T>.single(route);
+    final currentTail = tail;
+    if (currentTail == null) {
+      next = appended;
+      tail = appended;
+      return this;
     }
 
-    final routes = _value as List<_Route<T>>;
-    routes.add(route);
+    currentTail.next = appended;
+    tail = appended;
     return this;
   }
 }
