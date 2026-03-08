@@ -72,12 +72,7 @@ class _StaticAnyBenchmark extends _MatchAllBenchmark {
 
   @override
   Router<int> buildRouter() => Router<int>(
-    routes: {
-      '/*': 1,
-      '/api/*': 2,
-      '/api/users/*': 3,
-      '/api/users/all': 4,
-    },
+    routes: {'/*': 1, '/api/*': 2, '/api/users/*': 3, '/api/users/all': 4},
   );
 
   @override
