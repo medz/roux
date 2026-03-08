@@ -60,6 +60,7 @@ Available policies:
 - `DuplicatePolicy.reject` keeps the current default and throws on duplicates
 - `DuplicatePolicy.replace` keeps the latest retained entry
 - `DuplicatePolicy.keepFirst` keeps the earliest retained entry
+- `DuplicatePolicy.append` retains all entries in registration order
 
 Per-call overrides are also supported:
 
@@ -69,6 +70,19 @@ router.add(
   'third',
   duplicatePolicy: DuplicatePolicy.keepFirst,
 );
+```
+
+To retain multiple handlers in the same normalized slot:
+
+```dart
+final router = Router<String>(duplicatePolicy: DuplicatePolicy.append);
+router.add('/*', 'global-logger');
+router.add('/*', 'root-scope-middleware');
+
+print(router.match('/users/42')?.data); // global-logger
+print(
+  router.matchAll('/users/42').map((match) => match.data),
+); // (global-logger, root-scope-middleware)
 ```
 
 Parameter-name drift remains a hard error under all policies. For example,
@@ -108,7 +122,9 @@ For `matchAll(...)`:
 
 `matchAll(...)` returns every matching route from less specific to more
 specific. When a `method` is provided, both `ANY` and exact-method entries
-participate, with `ANY` ordered first at the same scope.
+participate, with `ANY` ordered first at the same scope. When duplicate slots
+are retained via `DuplicatePolicy.append`, entries from the same slot stay in
+registration order.
 
 ## Benchmarks
 
