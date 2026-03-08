@@ -3,7 +3,7 @@ import 'dart:collection';
 const _slashCode = 47;
 const _asteriskCode = 42;
 const _colonCode = 58;
-const _staticMapUpgradeThreshold = 8;
+const _staticMapUpgradeThreshold = 2;
 const _wildcardSpecificityRank = 0;
 const _paramSpecificityRank = 1;
 const _staticSpecificityRank = 2;
@@ -40,11 +40,7 @@ class RouteMatch<T> {
     final route = _route;
     return route == null
         ? _params
-        : _params ??= route.paramsView(
-            _path!,
-            _paramValues,
-            _wildcardStart,
-          );
+        : _params ??= route.paramsView(_path!, _paramValues, _wildcardStart);
   }
 }
 
@@ -68,14 +64,11 @@ class Router<T> {
     String? method,
     DuplicatePolicy? duplicatePolicy,
   }) {
-    final state = _stateForWrite(method);
-    final normalized = _normalizePatternForCompile(path);
-    _addCompiledPattern(
-      state,
-      normalized.$1,
+    _addPattern(
+      _stateForWrite(method),
+      path,
       data,
       duplicatePolicy: duplicatePolicy ?? _duplicatePolicy,
-      hasReservedToken: normalized.$2,
     );
   }
 
@@ -87,13 +80,11 @@ class Router<T> {
     final state = _stateForWrite(method);
     final effectivePolicy = duplicatePolicy ?? _duplicatePolicy;
     for (final entry in routes.entries) {
-      final normalized = _normalizePatternForCompile(entry.key);
-      _addCompiledPattern(
+      _addPattern(
         state,
-        normalized.$1,
+        entry.key,
         entry.value,
         duplicatePolicy: effectivePolicy,
-        hasReservedToken: normalized.$2,
       );
     }
   }
@@ -201,13 +192,7 @@ class Router<T> {
     }
 
     final start = normalized.length == 1 ? normalized.length : 1;
-    _collectNodeMatches(
-      state,
-      normalized,
-      start,
-      methodRank,
-      output,
-    );
+    _collectNodeMatches(state, normalized, start, methodRank, output);
 
     final exactStatic = state.staticExactRoutes[normalized];
     if (exactStatic != null) {
@@ -224,14 +209,48 @@ class Router<T> {
     }
   }
 
-  void _addCompiledPattern(
+  void _addPattern(
     _MethodState<T> state,
     String pattern,
     T data, {
     required DuplicatePolicy duplicatePolicy,
-    required bool hasReservedToken,
   }) {
-    if (pattern == '/*') {
+    if (pattern.isEmpty || pattern.codeUnitAt(0) != _slashCode) {
+      throw FormatException('Route pattern must start with "/": $pattern');
+    }
+
+    var end = pattern.length;
+    if (end > 1 && pattern.codeUnitAt(end - 1) == _slashCode) {
+      if (pattern.codeUnitAt(end - 2) == _slashCode) {
+        throw FormatException('Route pattern contains empty segment: $pattern');
+      }
+      end -= 1;
+    }
+
+    var hasReservedToken = false;
+    var prevSlash = true;
+    for (var i = 1; i < end; i++) {
+      final code = pattern.codeUnitAt(i);
+      if (code == _slashCode) {
+        if (prevSlash) {
+          throw FormatException(
+            'Route pattern contains empty segment: $pattern',
+          );
+        }
+        prevSlash = true;
+        continue;
+      }
+      if (code == _colonCode || code == _asteriskCode) {
+        hasReservedToken = true;
+      }
+      prevSlash = false;
+    }
+
+    final normalized = end == pattern.length
+        ? pattern
+        : pattern.substring(0, end);
+
+    if (normalized == '/*') {
       final route = _Route<T>(
         data: data,
         paramNames: const <String>[],
@@ -243,9 +262,9 @@ class Router<T> {
           : _resolveDuplicateRoute(
               existing: existing,
               replacement: route,
-              pattern: pattern,
+              pattern: normalized,
               duplicatePolicy: duplicatePolicy,
-              rejectMessage: 'Duplicate global fallback route: $pattern',
+              rejectMessage: 'Duplicate global fallback route: $normalized',
             );
       return;
     }
@@ -256,16 +275,16 @@ class Router<T> {
         paramNames: const <String>[],
         hasWildcard: false,
       );
-      final existing = state.staticExactRoutes[pattern];
-      state.staticExactRoutes[pattern] = existing == null
+      final existing = state.staticExactRoutes[normalized];
+      state.staticExactRoutes[normalized] = existing == null
           ? route
           : _resolveDuplicateRoute(
               existing: existing,
               replacement: route,
-              pattern: pattern,
+              pattern: normalized,
               duplicatePolicy: duplicatePolicy,
               rejectMessage:
-                  'Duplicate route shape conflicts with existing route: $pattern',
+                  'Duplicate route shape conflicts with existing route: $normalized',
             );
       return;
     }
@@ -273,13 +292,10 @@ class Router<T> {
     List<String>? paramNames;
     var paramCount = 0;
     var node = state.root;
-    for (
-      var cursor = pattern.length == 1 ? pattern.length : 1;
-      cursor < pattern.length;
-    ) {
+    for (var cursor = end == 1 ? end : 1; cursor < end;) {
       var segmentEnd = cursor;
       var hasReservedInSegment = false;
-      while (segmentEnd < pattern.length) {
+      while (segmentEnd < end) {
         final code = pattern.codeUnitAt(segmentEnd);
         if (code == _slashCode) {
           break;
@@ -293,8 +309,10 @@ class Router<T> {
       final segmentLength = segmentEnd - cursor;
       final firstCode = pattern.codeUnitAt(cursor);
       if (segmentLength == 1 && firstCode == _asteriskCode) {
-        if (segmentEnd != pattern.length) {
-          throw FormatException('Wildcard must be the last segment: $pattern');
+        if (segmentEnd != end) {
+          throw FormatException(
+            'Wildcard must be the last segment: $normalized',
+          );
         }
         final route = _Route<T>(
           data: data,
@@ -307,10 +325,10 @@ class Router<T> {
             : _resolveDuplicateRoute(
                 existing: existing,
                 replacement: route,
-                pattern: pattern,
+                pattern: normalized,
                 duplicatePolicy: duplicatePolicy,
                 rejectMessage:
-                    'Duplicate wildcard route shape at prefix for pattern: $pattern',
+                    'Duplicate wildcard route shape at prefix for pattern: $normalized',
               );
         if (paramCount > state.maxParamDepth) {
           state.maxParamDepth = paramCount;
@@ -321,7 +339,7 @@ class Router<T> {
       if (firstCode == _colonCode) {
         final paramName = pattern.substring(cursor + 1, segmentEnd);
         if (!_isValidParamName(paramName)) {
-          throw FormatException('Invalid parameter name in route: $pattern');
+          throw FormatException('Invalid parameter name in route: $normalized');
         }
         node = node.paramChild ??= _Node<T>();
         (paramNames ??= <String>[]).add(paramName);
@@ -329,12 +347,10 @@ class Router<T> {
       } else {
         if (hasReservedInSegment) {
           throw FormatException(
-            'Unsupported segment syntax in route: $pattern',
+            'Unsupported segment syntax in route: $normalized',
           );
         }
-        node = node.getOrCreateStaticChild(
-          pattern.substring(cursor, segmentEnd),
-        );
+        node = node.getOrCreateStaticChildSlice(pattern, cursor, segmentEnd);
       }
       cursor = segmentEnd + 1;
     }
@@ -350,13 +366,13 @@ class Router<T> {
         : _resolveDuplicateRoute(
             existing: existing,
             replacement: route,
-            pattern: pattern,
+            pattern: normalized,
             duplicatePolicy: duplicatePolicy,
             rejectMessage:
-                'Duplicate route shape conflicts with existing route: $pattern',
+                'Duplicate route shape conflicts with existing route: $normalized',
           );
     if (paramCount == 0) {
-      state.staticExactRoutes[pattern] = node.exactRoute!;
+      state.staticExactRoutes[normalized] = node.exactRoute!;
     }
     if (paramCount > state.maxParamDepth) {
       state.maxParamDepth = paramCount;
@@ -472,12 +488,7 @@ class Router<T> {
         stack = branch.prev;
         final backtrackWildcard = node.wildcardRoute;
         if (backtrackWildcard != null) {
-          return _materializeMatch(
-            backtrackWildcard,
-            path,
-            paramStack,
-            cursor,
-          );
+          return _materializeMatch(backtrackWildcard, path, paramStack, cursor);
         }
       }
       return null;
@@ -648,12 +659,7 @@ class Router<T> {
     while (current != null) {
       final entry = current;
       output.add(
-        _materializeMatch(
-          entry,
-          path,
-          paramValues,
-          wildcardStart,
-        ),
+        _materializeMatch(entry, path, paramValues, wildcardStart),
         depth: depth,
         routeKind: routeKind,
         methodRank: methodRank,
@@ -815,7 +821,9 @@ class _LazyParamsMap extends MapBase<String, String> {
       if (_paramNames[i] == key) {
         final captured = _paramValues;
         if (captured == null) {
-          throw StateError('Missing parameter capture stack for matched route.');
+          throw StateError(
+            'Missing parameter capture stack for matched route.',
+          );
         }
         return _path.substring(captured.startAt(i), captured.endAt(i));
       }
@@ -932,6 +940,58 @@ class _Node<T> {
     return child;
   }
 
+  _Node<T> getOrCreateStaticChildSlice(String path, int start, int end) {
+    final map = _staticMap;
+    if (map != null) {
+      if (map.length >= 16) {
+        for (final entry in map.entries) {
+          if (_equalsPathSlice(entry.key, path, start, end)) {
+            return entry.value;
+          }
+        }
+      } else {
+        for (final entry in map.entries) {
+          if (_equalsPathSlice(entry.key, path, start, end)) {
+            return entry.value;
+          }
+        }
+      }
+      final segment = path.substring(start, end);
+      final child = _Node<T>();
+      map[segment] = child;
+      return child;
+    }
+
+    final keys = _staticKeys;
+    final children = _staticChildren;
+    if (keys != null && children != null) {
+      for (var i = 0; i < keys.length; i++) {
+        if (_equalsPathSlice(keys[i], path, start, end)) {
+          return children[i];
+        }
+      }
+    }
+
+    final segment = path.substring(start, end);
+    final child = _Node<T>();
+    (_staticKeys ??= <String>[]).add(segment);
+    (_staticChildren ??= <_Node<T>>[]).add(child);
+
+    final currentKeys = _staticKeys!;
+    if (currentKeys.length >= _staticMapUpgradeThreshold) {
+      final upgraded = <String, _Node<T>>{};
+      final currentChildren = _staticChildren!;
+      for (var i = 0; i < currentKeys.length; i++) {
+        upgraded[currentKeys[i]] = currentChildren[i];
+      }
+      _staticMap = upgraded;
+      _staticKeys = null;
+      _staticChildren = null;
+    }
+
+    return child;
+  }
+
   _Node<T>? lookupStaticChildSlice(String path, int start, int end) {
     final map = _staticMap;
     if (map != null) {
@@ -958,36 +1018,6 @@ class _Node<T> {
     }
     return null;
   }
-}
-
-(String, bool) _normalizePatternForCompile(String path) {
-  if (path.isEmpty || path.codeUnitAt(0) != _slashCode) {
-    throw FormatException('Route pattern must start with "/": $path');
-  }
-
-  var end = path.length;
-  if (end > 1 && path.codeUnitAt(end - 1) == _slashCode) {
-    if (path.codeUnitAt(end - 2) == _slashCode) {
-      throw FormatException('Route pattern contains empty segment: $path');
-    }
-    end -= 1;
-  }
-
-  var hasReservedToken = false;
-  var prevSlash = true;
-  for (var i = 1; i < end; i++) {
-    final code = path.codeUnitAt(i);
-    if (code == _slashCode) {
-      if (prevSlash) {
-        throw FormatException('Route pattern contains empty segment: $path');
-      }
-      prevSlash = true;
-      continue;
-    }
-    if (code == _colonCode || code == _asteriskCode) hasReservedToken = true;
-    prevSlash = false;
-  }
-  return (end == path.length ? path : path.substring(0, end), hasReservedToken);
 }
 
 String? _normalizeInputPath(String path) {
@@ -1025,7 +1055,6 @@ bool _equalsPathSlice(String key, String path, int start, int end) {
   }
   return true;
 }
-
 
 int _countPathSegments(String path) {
   var count = 0;
