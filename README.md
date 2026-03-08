@@ -41,6 +41,39 @@ final stack = router.matchAll('/users/123');
 print(stack.map((match) => match.data)); // (global-fallback, users-wildcard, users-id)
 ```
 
+## Duplicate Policy
+
+Duplicate route handling is configurable at both router and call level:
+
+```dart
+final router = Router<String>(
+  duplicatePolicy: DuplicatePolicy.replace,
+  routes: {'/users/:id': 'first'},
+);
+
+router.add('/users/:id', 'second');
+print(router.match('/users/42')?.data); // second
+```
+
+Available policies:
+
+- `DuplicatePolicy.reject` keeps the current default and throws on duplicates
+- `DuplicatePolicy.replace` keeps the latest retained entry
+- `DuplicatePolicy.keepFirst` keeps the earliest retained entry
+
+Per-call overrides are also supported:
+
+```dart
+router.add(
+  '/users/:id',
+  'third',
+  duplicatePolicy: DuplicatePolicy.keepFirst,
+);
+```
+
+Parameter-name drift remains a hard error under all policies. For example,
+`/users/:id` and `/users/:name` still conflict.
+
 ## Route Syntax
 
 - Static: `/users`

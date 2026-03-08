@@ -6,6 +6,8 @@ const _wildcardSpecificityRank = 0;
 const _paramSpecificityRank = 1;
 const _staticSpecificityRank = 2;
 
+enum DuplicatePolicy { reject, replace, keepFirst }
+
 /// Match result produced by [Router.match].
 class RouteMatch<T> {
   final T data;
@@ -85,9 +87,13 @@ class Router<T> {
   // Method-specific buckets keyed by normalized method token (for example GET).
   Map<String, _MethodState<T>>? _methodStates;
   final Map<String, String> _methodTokenCache = <String, String>{};
+  final DuplicatePolicy _duplicatePolicy;
 
   /// Creates a router and optionally registers initial `ANY` routes.
-  Router({Map<String, T>? routes}) {
+  Router({
+    Map<String, T>? routes,
+    DuplicatePolicy duplicatePolicy = DuplicatePolicy.reject,
+  }) : _duplicatePolicy = duplicatePolicy {
     if (routes != null && routes.isNotEmpty) {
       addAll(routes);
     }
@@ -101,13 +107,19 @@ class Router<T> {
   /// - parameters (`/users/:id`)
   /// - wildcard tail (`/assets/*`)
   /// - global fallback (`/*`)
-  void add(String path, T data, {String? method}) {
+  void add(
+    String path,
+    T data, {
+    String? method,
+    DuplicatePolicy? duplicatePolicy,
+  }) {
     final state = _stateForWrite(method);
     final normalized = _normalizePatternForCompile(path);
     _addCompiledPattern(
       state,
       normalized.path,
       data,
+      duplicatePolicy: _effectiveDuplicatePolicy(duplicatePolicy),
       hasReservedToken: normalized.hasReservedToken,
     );
   }
@@ -115,14 +127,20 @@ class Router<T> {
   /// Registers multiple routes in the same method bucket.
   ///
   /// Passing `method: null` registers all routes as `ANY`.
-  void addAll(Map<String, T> routes, {String? method}) {
+  void addAll(
+    Map<String, T> routes, {
+    String? method,
+    DuplicatePolicy? duplicatePolicy,
+  }) {
     final state = _stateForWrite(method);
+    final effectivePolicy = _effectiveDuplicatePolicy(duplicatePolicy);
     for (final entry in routes.entries) {
       final normalized = _normalizePatternForCompile(entry.key);
       _addCompiledPattern(
         state,
         normalized.path,
         entry.value,
+        duplicatePolicy: effectivePolicy,
         hasReservedToken: normalized.hasReservedToken,
       );
     }
@@ -188,6 +206,10 @@ class Router<T> {
     return <RouteMatch<T>>[
       for (final collectedMatch in collected) collectedMatch.match,
     ];
+  }
+
+  DuplicatePolicy _effectiveDuplicatePolicy(DuplicatePolicy? override) {
+    return override ?? _duplicatePolicy;
   }
 
   _MethodState<T> _stateForWrite(String? method) {
@@ -300,27 +322,57 @@ class Router<T> {
     _MethodState<T> state,
     String pattern,
     T data, {
+    required DuplicatePolicy duplicatePolicy,
     required bool hasReservedToken,
   }) {
     // Global fallback applies only when no more specific route matches.
     if (pattern == '/*') {
-      if (state.globalFallback != null) {
-        throw FormatException('Duplicate global fallback route: $pattern');
-      }
-      state.globalFallback = _Route<T>(
+      final route = _Route<T>(
         data: data,
         paramNames: const <String>[],
         hasWildcard: true,
       );
+      final existing = state.globalFallback;
+      if (existing != null) {
+        final resolved = _resolveDuplicateRoute(
+          existing: existing,
+          replacement: route,
+          pattern: pattern,
+          duplicatePolicy: duplicatePolicy,
+          rejectMessage: 'Duplicate global fallback route: $pattern',
+        );
+        if (identical(resolved, existing)) {
+          return;
+        }
+        state.globalFallback = resolved;
+        return;
+      }
+      state.globalFallback = route;
       return;
     }
 
     if (!hasReservedToken) {
       // Pure static patterns bypass trie construction and go directly to exact map.
-      if (state.staticExactRoutes[pattern] != null) {
-        throw FormatException(
-          'Duplicate route shape conflicts with existing route: $pattern',
+      final existing = state.staticExactRoutes[pattern];
+      if (existing != null) {
+        final route = _Route<T>(
+          data: data,
+          paramNames: const <String>[],
+          hasWildcard: false,
         );
+        final resolved = _resolveDuplicateRoute(
+          existing: existing,
+          replacement: route,
+          pattern: pattern,
+          duplicatePolicy: duplicatePolicy,
+          rejectMessage:
+              'Duplicate route shape conflicts with existing route: $pattern',
+        );
+        if (identical(resolved, existing)) {
+          return;
+        }
+        state.staticExactRoutes[pattern] = resolved;
+        return;
       }
       final route = _Route<T>(
         data: data,
@@ -360,16 +412,28 @@ class Router<T> {
         if (!isLastSegment) {
           throw FormatException('Wildcard must be the last segment: $pattern');
         }
-        if (node.wildcardRoute != null) {
-          throw FormatException(
-            'Duplicate wildcard route shape at prefix for pattern: $pattern',
-          );
-        }
-        node.wildcardRoute = _Route<T>(
+        final route = _Route<T>(
           data: data,
           paramNames: paramNames ?? const <String>[],
           hasWildcard: true,
         );
+        final existing = node.wildcardRoute;
+        if (existing != null) {
+          final resolved = _resolveDuplicateRoute(
+            existing: existing,
+            replacement: route,
+            pattern: pattern,
+            duplicatePolicy: duplicatePolicy,
+            rejectMessage:
+                'Duplicate wildcard route shape at prefix for pattern: $pattern',
+          );
+          if (identical(resolved, existing)) {
+            return;
+          }
+          node.wildcardRoute = resolved;
+          return;
+        }
+        node.wildcardRoute = route;
         if (paramCount > state.maxParamDepth) {
           state.maxParamDepth = paramCount;
           state.paramStackCapacity = state.maxParamDepth == 0
@@ -398,17 +462,27 @@ class Router<T> {
       cursor = segmentEnd + 1;
     }
 
-    if (node.exactRoute != null) {
-      throw FormatException(
-        'Duplicate route shape conflicts with existing route: $pattern',
-      );
-    }
-
     final route = _Route<T>(
       data: data,
       paramNames: paramNames ?? const <String>[],
       hasWildcard: false,
     );
+    final existing = node.exactRoute;
+    if (existing != null) {
+      final resolved = _resolveDuplicateRoute(
+        existing: existing,
+        replacement: route,
+        pattern: pattern,
+        duplicatePolicy: duplicatePolicy,
+        rejectMessage:
+            'Duplicate route shape conflicts with existing route: $pattern',
+      );
+      if (identical(resolved, existing)) {
+        return;
+      }
+      node.exactRoute = resolved;
+      return;
+    }
     node.exactRoute = route;
     if (paramCount == 0) {
       state.staticExactRoutes[pattern] = route;
@@ -630,6 +704,29 @@ class Router<T> {
       wildcardStart,
     );
     return RouteMatch<T>(route.data, params);
+  }
+
+  _Route<T> _resolveDuplicateRoute({
+    required _Route<T> existing,
+    required _Route<T> replacement,
+    required String pattern,
+    required DuplicatePolicy duplicatePolicy,
+    required String rejectMessage,
+  }) {
+    if (!_sameParamNames(existing.paramNames, replacement.paramNames)) {
+      throw FormatException(
+        'Duplicate route shape conflicts with existing route: $pattern',
+      );
+    }
+
+    switch (duplicatePolicy) {
+      case DuplicatePolicy.reject:
+        throw FormatException(rejectMessage);
+      case DuplicatePolicy.replace:
+        return replacement;
+      case DuplicatePolicy.keepFirst:
+        return existing;
+    }
   }
 }
 
@@ -922,6 +1019,18 @@ int _countPathSegments(String path) {
     }
   }
   return count;
+}
+
+bool _sameParamNames(List<String> a, List<String> b) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 class _ParamStack {

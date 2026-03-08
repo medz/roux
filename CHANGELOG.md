@@ -6,6 +6,8 @@
   less-specific-to-more-specific order.
 - Method-aware multi-match lookups now include both `ANY` and exact-method
   matches, with `ANY` ordered first at the same scope.
+- Add configurable duplicate route registration via `DuplicatePolicy.reject`,
+  `DuplicatePolicy.replace`, and `DuplicatePolicy.keepFirst`.
 
 ## 0.2.0
 
