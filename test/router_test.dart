@@ -229,6 +229,19 @@ void main() {
       expect(router.match('/users/all')?.data, 'first');
     });
 
+    test('supports addAll call-level override over router default', () {
+      final router = Router<String>(duplicatePolicy: DuplicatePolicy.reject);
+      router.add('/users/all', 'first');
+
+      router.addAll(
+        {'/users/all/': 'second'},
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
+
+      expect(router.match('/users/all')?.data, 'second');
+    });
+    });
+
     test('matchAll sees only the retained route entry', () {
       final router = Router<String>(duplicatePolicy: DuplicatePolicy.replace);
       router.add('/*', 'global');
