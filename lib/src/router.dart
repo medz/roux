@@ -8,15 +8,32 @@ const _dupFallback = 'Duplicate global fallback route: ';
 const _emptySegment = 'Route pattern contains empty segment: ';
 const _missingCaptures = 'Missing parameter capture stack for matched route.';
 
-enum DuplicatePolicy { reject, replace, keepFirst, append }
+/// Controls how duplicate route registrations are handled.
+enum DuplicatePolicy {
+  /// Throws when the same normalized route shape is registered again.
+  reject,
 
+  /// Replaces the existing route entry with the latest registration.
+  replace,
+
+  /// Keeps the first registered route entry and ignores later duplicates.
+  keepFirst,
+
+  /// Retains every duplicate route entry in registration order.
+  append,
+}
+
+/// The matched route payload and any captured path parameters.
 class RouteMatch<T> {
+  /// The value associated with the matched route.
   final T data;
   Map<String, String>? _params;
   final _Route<T>? _route;
   final String? _path;
   final _ParamStack? _captures;
   final int _wildcardStart;
+
+  /// Creates an eager route match with an optional prebuilt params map.
   RouteMatch(this.data, [Map<String, String>? params])
     : _params = params,
       _route = null,
@@ -30,6 +47,8 @@ class RouteMatch<T> {
     this._captures,
     this._wildcardStart,
   );
+
+  /// Captured parameter values for the matched route, if any.
   Map<String, String>? get params => switch (_route) {
     null => _params,
     final route => _params ??= _LazyParamsMap(
@@ -42,16 +61,21 @@ class RouteMatch<T> {
   };
 }
 
+/// A compact path router with support for exact, parameter, and wildcard routes.
 class Router<T> {
   final _MethodState<T> _anyState = _MethodState<T>();
   Map<String, _MethodState<T>>? _methodStates;
   final DuplicatePolicy _duplicatePolicy;
+
+  /// Creates a router and optionally preloads [routes].
   Router({
     Map<String, T>? routes,
     DuplicatePolicy duplicatePolicy = DuplicatePolicy.reject,
   }) : _duplicatePolicy = duplicatePolicy {
     if (routes != null && routes.isNotEmpty) addAll(routes);
   }
+
+  /// Registers a route payload for [path].
   void add(
     String path,
     T data, {
@@ -63,6 +87,8 @@ class Router<T> {
     data,
     duplicatePolicy: duplicatePolicy ?? _duplicatePolicy,
   );
+
+  /// Registers every entry in [routes].
   void addAll(
     Map<String, T> routes, {
     String? method,
@@ -75,6 +101,7 @@ class Router<T> {
     }
   }
 
+  /// Returns the highest-priority match for [path], or `null` if none exists.
   RouteMatch<T>? match(String path, {String? method}) {
     final normalized = _normalizeInputPath(path);
     if (normalized == null) return null;
@@ -88,6 +115,7 @@ class Router<T> {
         _matchInState(_anyState, normalized);
   }
 
+  /// Returns every matching route for [path] in router priority order.
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
     final normalized = _normalizeInputPath(path);
     if (normalized == null) return <RouteMatch<T>>[];
