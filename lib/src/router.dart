@@ -16,7 +16,6 @@ class RouteMatch<T> {
   final _Route<T>? _route;
   final String? _path;
   final _ParamStack? _paramValues;
-  final String? _wildcardValue;
   final int _wildcardStart;
 
   RouteMatch(this.data, [Map<String, String>? params])
@@ -24,7 +23,6 @@ class RouteMatch<T> {
       _route = null,
       _path = null,
       _paramValues = null,
-      _wildcardValue = null,
       _wildcardStart = 0;
 
   RouteMatch._lazy({
@@ -32,12 +30,10 @@ class RouteMatch<T> {
     required _Route<T> route,
     required String path,
     required _ParamStack? paramValues,
-    required String? wildcardValue,
     required int wildcardStart,
   }) : _route = route,
        _path = path,
        _paramValues = paramValues,
-       _wildcardValue = wildcardValue,
        _wildcardStart = wildcardStart;
 
   Map<String, String>? get params {
@@ -47,7 +43,6 @@ class RouteMatch<T> {
         : _params ??= route.paramsView(
             _path!,
             _paramValues,
-            _wildcardValue,
             _wildcardStart,
           );
   }
@@ -120,8 +115,15 @@ class Router<T> {
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
     final normalized = _normalizeInputPath(path);
     if (normalized == null) return <RouteMatch<T>>[];
-    final collected = _MatchCollector<T>(_countPathSegments(normalized));
-    _collectAllInState(_anyState, normalized, methodRank: 0, output: collected);
+    final pathDepth = _countPathSegments(normalized);
+    final collected = _MatchCollector<T>(pathDepth);
+    _collectAllInState(
+      _anyState,
+      normalized,
+      pathDepth: pathDepth,
+      methodRank: 0,
+      output: collected,
+    );
 
     if (method != null) {
       final methodToken = _normalizeMethodToken(method);
@@ -130,6 +132,7 @@ class Router<T> {
         _collectAllInState(
           methodState,
           normalized,
+          pathDepth: pathDepth,
           methodRank: 1,
           output: collected,
         );
@@ -173,27 +176,23 @@ class Router<T> {
     if (fallback == null) {
       return null;
     }
-    final wildcardValue = normalized.length == 1 ? '' : normalized.substring(1);
-    return _materializeMatch(fallback, normalized, null, wildcardValue, 0);
+    return _materializeMatch(fallback, normalized, null, 1);
   }
 
   void _collectAllInState(
     _MethodState<T> state,
     String normalized, {
+    required int pathDepth,
     required int methodRank,
     required _MatchCollector<T> output,
   }) {
     final fallback = state.globalFallback;
     if (fallback != null) {
-      final wildcardValue = normalized.length == 1
-          ? ''
-          : normalized.substring(1);
       _collectSlotMatches(
         fallback,
         normalized,
         null,
-        wildcardValue,
-        0,
+        1,
         depth: 0,
         routeKind: _wildcardSpecificityRank,
         methodRank: methodRank,
@@ -216,9 +215,8 @@ class Router<T> {
         exactStatic,
         normalized,
         null,
-        null,
         0,
-        depth: _countPathSegments(normalized),
+        depth: pathDepth,
         routeKind: _staticSpecificityRank,
         methodRank: methodRank,
         output: output,
@@ -382,12 +380,17 @@ class Router<T> {
       if (cursor >= path.length) {
         final exact = node.exactRoute;
         if (exact != null) {
-          return _materializeMatch(exact, path, stackParams, null, 0);
+          return _materializeMatch(exact, path, stackParams, 0);
         }
 
         final terminalWildcard = node.wildcardRoute;
         if (terminalWildcard != null) {
-          return _materializeMatch(terminalWildcard, path, stackParams, '', 0);
+          return _materializeMatch(
+            terminalWildcard,
+            path,
+            stackParams,
+            path.length,
+          );
         }
       } else {
         final segmentEnd = _findSegmentEnd(path, cursor);
@@ -442,7 +445,7 @@ class Router<T> {
             continue top;
           }
           if (wildcard != null) {
-            return _materializeMatch(wildcard, path, stackParams, null, cursor);
+            return _materializeMatch(wildcard, path, stackParams, cursor);
           }
         }
       }
@@ -473,7 +476,6 @@ class Router<T> {
             backtrackWildcard,
             path,
             paramStack,
-            null,
             cursor,
           );
         }
@@ -511,8 +513,7 @@ class Router<T> {
             wildcard,
             path,
             stackParams,
-            '',
-            0,
+            path.length,
             depth: depth,
             routeKind: _wildcardSpecificityRank,
             methodRank: methodRank,
@@ -526,7 +527,6 @@ class Router<T> {
             exact,
             path,
             stackParams,
-            null,
             0,
             depth: depth,
             routeKind: _paramSpecificityRank,
@@ -546,7 +546,6 @@ class Router<T> {
               wildcard,
               path,
               stackParams,
-              null,
               cursor,
               depth: depth,
               routeKind: _wildcardSpecificityRank,
@@ -614,7 +613,6 @@ class Router<T> {
     _Route<T> route,
     String path,
     _ParamStack? paramValues,
-    String? wildcardValue,
     int wildcardStart,
   ) => route.hasWildcard || route.paramNames.isNotEmpty
       ? RouteMatch<T>._lazy(
@@ -622,7 +620,6 @@ class Router<T> {
           route: route,
           path: path,
           paramValues: paramValues,
-          wildcardValue: wildcardValue,
           wildcardStart: wildcardStart,
         )
       : route.noParamsMatch;
@@ -631,7 +628,6 @@ class Router<T> {
     _Route<T> slot,
     String path,
     _ParamStack? paramValues,
-    String? wildcardValue,
     int wildcardStart, {
     required int depth,
     required int routeKind,
@@ -640,7 +636,7 @@ class Router<T> {
   }) {
     if (slot.next == null) {
       output.add(
-        _materializeMatch(slot, path, paramValues, wildcardValue, wildcardStart),
+        _materializeMatch(slot, path, paramValues, wildcardStart),
         depth: depth,
         routeKind: routeKind,
         methodRank: methodRank,
@@ -656,7 +652,6 @@ class Router<T> {
           entry,
           path,
           paramValues,
-          wildcardValue,
           wildcardStart,
         ),
         depth: depth,
@@ -760,7 +755,6 @@ class _Route<T> {
   Map<String, String>? paramsView(
     String path,
     _ParamStack? paramValues,
-    String? wildcardValue,
     int wildcardStart,
   ) {
     if (paramNames.isEmpty && !hasWildcard) {
@@ -771,7 +765,6 @@ class _Route<T> {
       hasWildcard: hasWildcard,
       path: path,
       paramValues: paramValues,
-      wildcardValue: wildcardValue,
       wildcardStart: wildcardStart,
     );
   }
@@ -791,7 +784,6 @@ class _LazyParamsMap extends MapBase<String, String> {
   final bool _hasWildcard;
   final String _path;
   final _ParamStack? _paramValues;
-  final String? _wildcardValue;
   final int _wildcardStart;
   Map<String, String>? _materialized;
 
@@ -800,13 +792,11 @@ class _LazyParamsMap extends MapBase<String, String> {
     required bool hasWildcard,
     required String path,
     required _ParamStack? paramValues,
-    required String? wildcardValue,
     required int wildcardStart,
   }) : _paramNames = paramNames,
        _hasWildcard = hasWildcard,
        _path = path,
        _paramValues = paramValues,
-       _wildcardValue = wildcardValue,
        _wildcardStart = wildcardStart;
 
   @override
@@ -819,7 +809,7 @@ class _LazyParamsMap extends MapBase<String, String> {
       return materialized[key];
     }
     if (_hasWildcard && key == 'wildcard') {
-      return _wildcardValue ?? _sliceWildcard();
+      return _sliceWildcard();
     }
     for (var i = 0; i < _paramNames.length; i++) {
       if (_paramNames[i] == key) {
@@ -883,7 +873,7 @@ class _LazyParamsMap extends MapBase<String, String> {
       }
     }
     if (_hasWildcard) {
-      params['wildcard'] = _wildcardValue ?? _sliceWildcard();
+      params['wildcard'] = _sliceWildcard();
     }
     return params;
   }
@@ -1079,13 +1069,16 @@ class _MatchCollector<T> {
     if (_count == 0) {
       return <RouteMatch<T>>[];
     }
-    final result = <RouteMatch<T>>[];
+    final result = List<RouteMatch<T>?>.filled(_count, null, growable: false);
+    var offset = 0;
     for (final bucket in _buckets) {
       if (bucket != null) {
-        result.addAll(bucket);
+        for (final match in bucket) {
+          result[offset++] = match;
+        }
       }
     }
-    return result;
+    return result.cast<RouteMatch<T>>();
   }
 }
 
