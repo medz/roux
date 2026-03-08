@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 const _slashCode = 47;
 const _asteriskCode = 42;
 const _colonCode = 58;
@@ -42,7 +44,7 @@ class RouteMatch<T> {
     final route = _route;
     return route == null
         ? _params
-        : _params ??= route.paramsFor(
+        : _params ??= route.paramsView(
             _path!,
             _paramValues,
             _wildcardValue,
@@ -162,7 +164,7 @@ class Router<T> {
     }
 
     final start = normalized.length == 1 ? normalized.length : 1;
-    final matched = _matchNodePath(state, state.root, normalized, start, null);
+    final matched = _matchNodePath(state, normalized, start);
     if (matched != null) {
       return matched;
     }
@@ -202,11 +204,8 @@ class Router<T> {
     final start = normalized.length == 1 ? normalized.length : 1;
     _collectNodeMatches(
       state,
-      state.root,
       normalized,
       start,
-      null,
-      0,
       methodRank,
       output,
     );
@@ -366,165 +365,249 @@ class Router<T> {
     }
   }
 
-  RouteMatch<T>? _matchNodePath(
-    _MethodState<T> state,
-    _Node<T> node,
-    String path,
-    int cursor,
-    _ParamStack? paramStack,
-  ) {
-    if (cursor >= path.length) {
-      final exact = node.exactRoute;
-      if (exact != null) {
-        return _materializeMatch(exact, path, paramStack, null, 0);
+  RouteMatch<T>? _matchNodePath(_MethodState<T> state, String path, int start) {
+    _ParamStack? paramStack;
+    _MatchBranch<T>? stack;
+    var node = state.root;
+    var cursor = start;
+    var paramLength = 0;
+
+    top:
+    do {
+      final params = paramStack;
+      if (params != null) {
+        params.truncate(paramLength);
+      }
+      final stackParams = paramStack;
+      if (cursor >= path.length) {
+        final exact = node.exactRoute;
+        if (exact != null) {
+          return _materializeMatch(exact, path, stackParams, null, 0);
+        }
+
+        final terminalWildcard = node.wildcardRoute;
+        if (terminalWildcard != null) {
+          return _materializeMatch(terminalWildcard, path, stackParams, '', 0);
+        }
+      } else {
+        final segmentEnd = _findSegmentEnd(path, cursor);
+        if (segmentEnd != cursor) {
+          final nextCursor = segmentEnd < path.length
+              ? segmentEnd + 1
+              : path.length;
+          final currentParamLength = stackParams?.length ?? 0;
+          final staticChild = node.lookupStaticChildSlice(
+            path,
+            cursor,
+            segmentEnd,
+          );
+          final paramChild = node.paramChild;
+          final wildcard = node.wildcardRoute;
+
+          if (staticChild != null) {
+            if (paramChild != null || wildcard != null) {
+              stack = _MatchBranch<T>(
+                node: node,
+                cursor: cursor,
+                segmentEnd: segmentEnd,
+                nextCursor: nextCursor,
+                paramLength: currentParamLength,
+                tryParam: paramChild != null,
+                prev: stack,
+              );
+            }
+            node = staticChild;
+            cursor = nextCursor;
+            paramLength = currentParamLength;
+            continue top;
+          }
+          if (paramChild != null) {
+            paramStack ??= _ParamStack(state.maxParamDepth);
+            paramStack.truncate(currentParamLength);
+            paramStack.push(cursor, segmentEnd);
+            if (wildcard != null) {
+              stack = _MatchBranch<T>(
+                node: node,
+                cursor: cursor,
+                segmentEnd: segmentEnd,
+                nextCursor: nextCursor,
+                paramLength: currentParamLength,
+                tryParam: false,
+                prev: stack,
+              );
+            }
+            node = paramChild;
+            cursor = nextCursor;
+            paramLength = paramStack.length;
+            continue top;
+          }
+          if (wildcard != null) {
+            return _materializeMatch(wildcard, path, stackParams, null, cursor);
+          }
+        }
       }
 
-      final wildcard = node.wildcardRoute;
-      if (wildcard != null) {
-        return _materializeMatch(wildcard, path, paramStack, '', 0);
+      while (stack != null) {
+        final branch = stack;
+        node = branch.node;
+        cursor = branch.cursor;
+        paramLength = branch.paramLength;
+        if (paramStack != null) {
+          paramStack.truncate(paramLength);
+        }
+        if (branch.tryParam) {
+          branch.tryParam = false;
+          paramStack ??= _ParamStack(state.maxParamDepth);
+          paramStack.truncate(paramLength);
+          paramStack.push(cursor, branch.segmentEnd);
+          node = node.paramChild!;
+          cursor = branch.nextCursor;
+          paramLength = paramStack.length;
+          continue top;
+        }
+
+        stack = branch.prev;
+        final backtrackWildcard = node.wildcardRoute;
+        if (backtrackWildcard != null) {
+          return _materializeMatch(
+            backtrackWildcard,
+            path,
+            paramStack,
+            null,
+            cursor,
+          );
+        }
       }
       return null;
-    }
-
-    final segmentEnd = _findSegmentEnd(path, cursor);
-    if (segmentEnd == cursor) {
-      return null;
-    }
-    final nextCursor = segmentEnd < path.length ? segmentEnd + 1 : path.length;
-
-    final staticChild = node.lookupStaticChildSlice(path, cursor, segmentEnd);
-    if (staticChild != null) {
-      final matched = _matchNodePath(
-        state,
-        staticChild,
-        path,
-        nextCursor,
-        paramStack,
-      );
-      if (matched != null) {
-        return matched;
-      }
-    }
-
-    final paramChild = node.paramChild;
-    if (paramChild != null) {
-      final stack = paramStack ?? _ParamStack(state.maxParamDepth);
-      stack.push(cursor, segmentEnd);
-      final matched = _matchNodePath(
-        state,
-        paramChild,
-        path,
-        nextCursor,
-        stack,
-      );
-      stack.pop();
-      if (matched != null) {
-        return matched;
-      }
-    }
-
-    final wildcard = node.wildcardRoute;
-    if (wildcard != null) {
-      return _materializeMatch(wildcard, path, paramStack, null, cursor);
-    }
-
-    return null;
+    } while (true);
   }
 
   void _collectNodeMatches(
     _MethodState<T> state,
-    _Node<T> node,
     String path,
-    int cursor,
-    _ParamStack? paramStack,
-    int depth,
+    int start,
     int methodRank,
     _MatchCollector<T> output,
   ) {
-    if (cursor >= path.length) {
-      final wildcard = node.wildcardRoute;
-      if (wildcard != null) {
-        _collectSlotMatches(
-          wildcard,
-          path,
-          paramStack,
-          '',
-          0,
-          depth: depth,
-          routeKind: _wildcardSpecificityRank,
-          methodRank: methodRank,
-          output: output,
-        );
+    _ParamStack? paramStack;
+    _CollectBranch<T>? stack;
+    var node = state.root;
+    var cursor = start;
+    var depth = 0;
+    var paramLength = 0;
+
+    top:
+    do {
+      final params = paramStack;
+      if (params != null) {
+        params.truncate(paramLength);
+      }
+      final stackParams = paramStack;
+
+      if (cursor >= path.length) {
+        final wildcard = node.wildcardRoute;
+        if (wildcard != null) {
+          _collectSlotMatches(
+            wildcard,
+            path,
+            stackParams,
+            '',
+            0,
+            depth: depth,
+            routeKind: _wildcardSpecificityRank,
+            methodRank: methodRank,
+            output: output,
+          );
+        }
+
+        final exact = node.exactRoute;
+        if (exact != null) {
+          _collectSlotMatches(
+            exact,
+            path,
+            stackParams,
+            null,
+            0,
+            depth: depth,
+            routeKind: _paramSpecificityRank,
+            methodRank: methodRank,
+            output: output,
+          );
+        }
+      } else {
+        final segmentEnd = _findSegmentEnd(path, cursor);
+        if (segmentEnd != cursor) {
+          final nextCursor = segmentEnd < path.length
+              ? segmentEnd + 1
+              : path.length;
+          final wildcard = node.wildcardRoute;
+          if (wildcard != null) {
+            _collectSlotMatches(
+              wildcard,
+              path,
+              stackParams,
+              null,
+              cursor,
+              depth: depth,
+              routeKind: _wildcardSpecificityRank,
+              methodRank: methodRank,
+              output: output,
+            );
+          }
+
+          final currentParamLength = stackParams?.length ?? 0;
+          final staticChild = node.lookupStaticChildSlice(
+            path,
+            cursor,
+            segmentEnd,
+          );
+          final paramChild = node.paramChild;
+          if (staticChild != null) {
+            if (paramChild != null) {
+              stack = _CollectBranch<T>(
+                node: paramChild,
+                cursor: nextCursor,
+                depth: depth + 1,
+                paramLength: currentParamLength,
+                paramStart: cursor,
+                paramEnd: segmentEnd,
+                prev: stack,
+              );
+            }
+            node = staticChild;
+            cursor = nextCursor;
+            depth += 1;
+            paramLength = currentParamLength;
+            continue top;
+          }
+
+          if (paramChild != null) {
+            paramStack ??= _ParamStack(state.maxParamDepth);
+            paramStack.truncate(currentParamLength);
+            paramStack.push(cursor, segmentEnd);
+            node = paramChild;
+            cursor = nextCursor;
+            depth += 1;
+            paramLength = paramStack.length;
+            continue top;
+          }
+        }
       }
 
-      final exact = node.exactRoute;
-      if (exact != null) {
-        _collectSlotMatches(
-          exact,
-          path,
-          paramStack,
-          null,
-          0,
-          depth: depth,
-          routeKind: _paramSpecificityRank,
-          methodRank: methodRank,
-          output: output,
-        );
+      while (stack != null) {
+        final branch = stack;
+        stack = branch.prev;
+        paramStack ??= _ParamStack(state.maxParamDepth);
+        paramStack.truncate(branch.paramLength);
+        paramStack.push(branch.paramStart, branch.paramEnd);
+        node = branch.node;
+        cursor = branch.cursor;
+        depth = branch.depth;
+        paramLength = paramStack.length;
+        continue top;
       }
       return;
-    }
-
-    final segmentEnd = _findSegmentEnd(path, cursor);
-    if (segmentEnd == cursor) {
-      return;
-    }
-    final nextCursor = segmentEnd < path.length ? segmentEnd + 1 : path.length;
-
-    final wildcard = node.wildcardRoute;
-    if (wildcard != null) {
-      _collectSlotMatches(
-        wildcard,
-        path,
-        paramStack,
-        null,
-        cursor,
-        depth: depth,
-        routeKind: _wildcardSpecificityRank,
-        methodRank: methodRank,
-        output: output,
-      );
-    }
-
-    final paramChild = node.paramChild;
-    if (paramChild != null) {
-      final stack = paramStack ?? _ParamStack(state.maxParamDepth);
-      stack.push(cursor, segmentEnd);
-      _collectNodeMatches(
-        state,
-        paramChild,
-        path,
-        nextCursor,
-        stack,
-        depth + 1,
-        methodRank,
-        output,
-      );
-      stack.pop();
-    }
-
-    final staticChild = node.lookupStaticChildSlice(path, cursor, segmentEnd);
-    if (staticChild != null) {
-      _collectNodeMatches(
-        state,
-        staticChild,
-        path,
-        nextCursor,
-        paramStack,
-        depth + 1,
-        methodRank,
-        output,
-      );
-    }
+    } while (true);
   }
 
   RouteMatch<T> _materializeMatch(
@@ -557,10 +640,7 @@ class Router<T> {
   }) {
     if (slot.next == null) {
       output.add(
-        RouteMatch<T>(
-          slot.data,
-          slot.paramsFor(path, paramValues, wildcardValue, wildcardStart),
-        ),
+        _materializeMatch(slot, path, paramValues, wildcardValue, wildcardStart),
         depth: depth,
         routeKind: routeKind,
         methodRank: methodRank,
@@ -572,9 +652,12 @@ class Router<T> {
     while (current != null) {
       final entry = current;
       output.add(
-        RouteMatch<T>(
-          entry.data,
-          entry.paramsFor(path, paramValues, wildcardValue, wildcardStart),
+        _materializeMatch(
+          entry,
+          path,
+          paramValues,
+          wildcardValue,
+          wildcardStart,
         ),
         depth: depth,
         routeKind: routeKind,
@@ -618,6 +701,46 @@ class _MethodState<T> {
   int maxParamDepth = 0;
 }
 
+class _MatchBranch<T> {
+  final _Node<T> node;
+  final int cursor;
+  final int segmentEnd;
+  final int nextCursor;
+  final int paramLength;
+  bool tryParam;
+  final _MatchBranch<T>? prev;
+
+  _MatchBranch({
+    required this.node,
+    required this.cursor,
+    required this.segmentEnd,
+    required this.nextCursor,
+    required this.paramLength,
+    required this.tryParam,
+    required this.prev,
+  });
+}
+
+class _CollectBranch<T> {
+  final _Node<T> node;
+  final int cursor;
+  final int depth;
+  final int paramLength;
+  final int paramStart;
+  final int paramEnd;
+  final _CollectBranch<T>? prev;
+
+  _CollectBranch({
+    required this.node,
+    required this.cursor,
+    required this.depth,
+    required this.paramLength,
+    required this.paramStart,
+    required this.paramEnd,
+    required this.prev,
+  });
+}
+
 class _Route<T> {
   final T data;
   final List<String> paramNames;
@@ -634,7 +757,7 @@ class _Route<T> {
   RouteMatch<T> get noParamsMatch =>
       _cachedNoParamsMatch ??= RouteMatch<T>(data);
 
-  Map<String, String>? paramsFor(
+  Map<String, String>? paramsView(
     String path,
     _ParamStack? paramValues,
     String? wildcardValue,
@@ -643,24 +766,14 @@ class _Route<T> {
     if (paramNames.isEmpty && !hasWildcard) {
       return null;
     }
-
-    final params = <String, String>{};
-    if (paramNames.isNotEmpty) {
-      final captured = paramValues;
-      if (captured == null) {
-        throw StateError('Missing parameter capture stack for matched route.');
-      }
-      for (var i = 0; i < paramNames.length; i++) {
-        params[paramNames[i]] = path.substring(
-          captured.startAt(i),
-          captured.endAt(i),
-        );
-      }
-    }
-    if (hasWildcard) {
-      params['wildcard'] = wildcardValue ?? path.substring(wildcardStart);
-    }
-    return params;
+    return _LazyParamsMap(
+      paramNames: paramNames,
+      hasWildcard: hasWildcard,
+      path: path,
+      paramValues: paramValues,
+      wildcardValue: wildcardValue,
+      wildcardStart: wildcardStart,
+    );
   }
 
   _Route<T> appended(_Route<T> route) {
@@ -671,6 +784,112 @@ class _Route<T> {
     current.next = route;
     return this;
   }
+}
+
+class _LazyParamsMap extends MapBase<String, String> {
+  final List<String> _paramNames;
+  final bool _hasWildcard;
+  final String _path;
+  final _ParamStack? _paramValues;
+  final String? _wildcardValue;
+  final int _wildcardStart;
+  Map<String, String>? _materialized;
+
+  _LazyParamsMap({
+    required List<String> paramNames,
+    required bool hasWildcard,
+    required String path,
+    required _ParamStack? paramValues,
+    required String? wildcardValue,
+    required int wildcardStart,
+  }) : _paramNames = paramNames,
+       _hasWildcard = hasWildcard,
+       _path = path,
+       _paramValues = paramValues,
+       _wildcardValue = wildcardValue,
+       _wildcardStart = wildcardStart;
+
+  @override
+  String? operator [](Object? key) {
+    if (key is! String) {
+      return null;
+    }
+    final materialized = _materialized;
+    if (materialized != null) {
+      return materialized[key];
+    }
+    if (_hasWildcard && key == 'wildcard') {
+      return _wildcardValue ?? _sliceWildcard();
+    }
+    for (var i = 0; i < _paramNames.length; i++) {
+      if (_paramNames[i] == key) {
+        final captured = _paramValues;
+        if (captured == null) {
+          throw StateError('Missing parameter capture stack for matched route.');
+        }
+        return _path.substring(captured.startAt(i), captured.endAt(i));
+      }
+    }
+    return null;
+  }
+
+  @override
+  void operator []=(String key, String value) {
+    (_materialized ??= _materialize())[key] = value;
+  }
+
+  @override
+  void clear() {
+    (_materialized ??= _materialize()).clear();
+  }
+
+  @override
+  Iterable<String> get keys sync* {
+    final materialized = _materialized;
+    if (materialized != null) {
+      yield* materialized.keys;
+      return;
+    }
+    yield* _paramNames;
+    if (_hasWildcard) {
+      yield 'wildcard';
+    }
+  }
+
+  @override
+  String? remove(Object? key) {
+    if (key is! String) {
+      return null;
+    }
+    return (_materialized ??= _materialize()).remove(key);
+  }
+
+  @override
+  int get length =>
+      _materialized?.length ?? _paramNames.length + (_hasWildcard ? 1 : 0);
+
+  Map<String, String> _materialize() {
+    final params = <String, String>{};
+    final captured = _paramValues;
+    if (_paramNames.isNotEmpty) {
+      if (captured == null) {
+        throw StateError('Missing parameter capture stack for matched route.');
+      }
+      for (var i = 0; i < _paramNames.length; i++) {
+        params[_paramNames[i]] = _path.substring(
+          captured.startAt(i),
+          captured.endAt(i),
+        );
+      }
+    }
+    if (_hasWildcard) {
+      params['wildcard'] = _wildcardValue ?? _sliceWildcard();
+    }
+    return params;
+  }
+
+  String _sliceWildcard() =>
+      _wildcardStart < _path.length ? _path.substring(_wildcardStart) : '';
 }
 
 class _Node<T> {
@@ -817,6 +1036,7 @@ bool _equalsPathSlice(String key, String path, int start, int end) {
   return true;
 }
 
+
 int _countPathSegments(String path) {
   var count = 0;
   for (var i = 1; i < path.length; i++) {
@@ -885,6 +1105,10 @@ class _ParamStack {
     _values[_length + 1] = end;
     _length += 2;
   }
+
+  int get length => _length;
+
+  void truncate(int length) => _length = length;
 
   void pop() => _length -= 2;
 
