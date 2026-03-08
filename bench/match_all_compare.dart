@@ -16,20 +16,13 @@ enum _Scenario {
 }
 
 class _CollectingEmitter extends ScoreEmitterV2 {
-  final Map<String, double> runtimeByName = <String, double>{};
-
   @override
   void emit(
     String testName,
     double value, {
     String metric = 'RunTime',
     String unit = 'us',
-  }) {
-    if (metric == 'RunTime') {
-      runtimeByName[testName] = value;
-    }
-    print([testName, metric, value.toStringAsFixed(1), unit].join(';'));
-  }
+  }) => print([testName, metric, value.toStringAsFixed(1), unit].join(';'));
 }
 
 abstract class _MatchAllBenchmark extends PerfBenchmarkBase {

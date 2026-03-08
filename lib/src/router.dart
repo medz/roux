@@ -557,13 +557,14 @@ class Router<T> {
     _MatchCollector<T> output,
   ) {
     if (slot.hasWildcard || slot.paramNames.isNotEmpty) {
+      final captures = paramValues?.snapshot();
       for (_Route<T>? current = slot; current != null; current = current.next) {
         output.add(
           RouteMatch<T>._lazy(
             current.data,
             current,
             path,
-            paramValues,
+            captures,
             wildcardStart,
           ),
           depth,
@@ -773,7 +774,13 @@ String? _normalizeInputPath(String path) {
     if (path.codeUnitAt(last - 1) == _slashCode) return null;
     path = path.substring(0, last);
   }
-  return path.length > 1 && path.codeUnitAt(1) == _slashCode ? null : path;
+  for (var i = 1; i < path.length; i++) {
+    if (path.codeUnitAt(i - 1) == _slashCode &&
+        path.codeUnitAt(i) == _slashCode) {
+      return null;
+    }
+  }
+  return path;
 }
 
 int _findSegmentEnd(String path, int start) {
@@ -848,6 +855,14 @@ class _ParamStack {
   void truncate(int length) => _length = length;
   int startAt(int index) => _values[index * 2];
   int endAt(int index) => _values[index * 2 + 1];
+  _ParamStack snapshot() {
+    final copy = _ParamStack(_values.length ~/ 2);
+    for (var i = 0; i < _length; i++) {
+      copy._values[i] = _values[i];
+    }
+    copy._length = _length;
+    return copy;
+  }
 }
 
 bool _isValidParamName(String name) {

@@ -622,6 +622,24 @@ void main() {
       expect(matches[3].params, isNull);
     });
 
+    test('snapshots params for each lazy match before backtracking', () {
+      final router = Router<String>(
+        routes: {
+          '/:section/*': 'section-wildcard',
+          '/users/:id': 'user-detail',
+        },
+      );
+
+      final matches = matchAll(router, '/users/42');
+
+      expect(matches.map((match) => match.data), [
+        'section-wildcard',
+        'user-detail',
+      ]);
+      expect(matches[0].params, {'section': 'users', 'wildcard': '42'});
+      expect(matches[1].params, {'id': '42'});
+    });
+
     test('includes ANY and exact method matches when method is provided', () {
       final router = Router<String>();
       router.add('/*', 'global-any');
@@ -736,6 +754,13 @@ void main() {
       expect(router.match('a'), isNull);
       expect(router.match('//a'), isNull);
       expect(router.match('/a//b'), isNull);
+    });
+
+    test('does not let invalid paths hit wildcard fallback routes', () {
+      final wildcardRouter = Router<String>(routes: {'/*': 'fallback'});
+
+      expect(wildcardRouter.match('/users//42'), isNull);
+      expect(wildcardRouter.matchAll('/users//42'), isEmpty);
     });
   });
 
