@@ -233,13 +233,11 @@ void main() {
       final router = Router<String>(duplicatePolicy: DuplicatePolicy.reject);
       router.add('/users/all', 'first');
 
-      router.addAll(
-        {'/users/all/': 'second'},
-        duplicatePolicy: DuplicatePolicy.replace,
-      );
+      router.addAll({
+        '/users/all/': 'second',
+      }, duplicatePolicy: DuplicatePolicy.replace);
 
       expect(router.match('/users/all')?.data, 'second');
-    });
     });
 
     test('matchAll sees only the retained route entry', () {
