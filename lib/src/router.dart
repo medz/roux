@@ -6,7 +6,7 @@ const _wildcardSpecificityRank = 0;
 const _paramSpecificityRank = 1;
 const _staticSpecificityRank = 2;
 
-enum DuplicatePolicy { reject, replace, keepFirst }
+enum DuplicatePolicy { reject, replace, keepFirst, append }
 
 /// Match result produced by [Router.match].
 class RouteMatch<T> {
@@ -149,7 +149,8 @@ class Router<T> {
   /// Matches [path] and returns route data with lazily materialized params.
   ///
   /// If [method] is provided, the router first checks that specific bucket and
-  /// then falls back to `ANY` when there is no hit.
+  /// then falls back to `ANY` when there is no hit. If duplicate entries are
+  /// retained in the winning slot, the earliest retained entry is returned.
   RouteMatch<T>? match(String path, {String? method}) {
     final normalized = _normalizeInputPath(path);
     if (normalized == null) {
@@ -175,7 +176,9 @@ class Router<T> {
   /// more specific.
   ///
   /// When [method] is provided, both the `ANY` bucket and the exact method
-  /// bucket participate in the result. Invalid paths return an empty list.
+  /// bucket participate in the result. Duplicate entries retained in the same
+  /// slot are expanded in registration order. Invalid paths return an empty
+  /// list.
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
     final normalized = _normalizeInputPath(path);
     if (normalized == null) {
@@ -246,7 +249,7 @@ class Router<T> {
     if (state.staticExactPathLengths.contains(normalized.length)) {
       final exactStatic = state.staticExactRoutes[normalized];
       if (exactStatic != null) {
-        return exactStatic.noParamsMatch;
+        return exactStatic.first.noParamsMatch;
       }
     }
 
@@ -261,7 +264,13 @@ class Router<T> {
       return null;
     }
     final wildcardValue = normalized.length == 1 ? '' : normalized.substring(1);
-    return _materializeMatch(fallback, normalized, null, wildcardValue, 0);
+    return _materializeMatch(
+      fallback.first,
+      normalized,
+      null,
+      wildcardValue,
+      0,
+    );
   }
 
   void _collectAllInState(
@@ -275,19 +284,16 @@ class Router<T> {
       final wildcardValue = normalized.length == 1
           ? ''
           : normalized.substring(1);
-      output.add(
-        _CollectedMatch<T>(
-          match: _materializeCollectedMatch(
-            fallback,
-            normalized,
-            null,
-            wildcardValue,
-            0,
-          ),
-          depth: 0,
-          routeKind: _wildcardSpecificityRank,
-          methodRank: methodRank,
-        ),
+      _collectSlotMatches(
+        fallback,
+        normalized,
+        null,
+        wildcardValue,
+        0,
+        depth: 0,
+        routeKind: _wildcardSpecificityRank,
+        methodRank: methodRank,
+        output: output,
       );
     }
 
@@ -306,13 +312,16 @@ class Router<T> {
     if (state.staticExactPathLengths.contains(normalized.length)) {
       final exactStatic = state.staticExactRoutes[normalized];
       if (exactStatic != null) {
-        output.add(
-          _CollectedMatch<T>(
-            match: exactStatic.noParamsMatch,
-            depth: _countPathSegments(normalized),
-            routeKind: _staticSpecificityRank,
-            methodRank: methodRank,
-          ),
+        _collectSlotMatches(
+          exactStatic,
+          normalized,
+          null,
+          null,
+          0,
+          depth: _countPathSegments(normalized),
+          routeKind: _staticSpecificityRank,
+          methodRank: methodRank,
+          output: output,
         );
       }
     }
@@ -334,7 +343,7 @@ class Router<T> {
       );
       final existing = state.globalFallback;
       if (existing != null) {
-        final resolved = _resolveDuplicateRoute(
+        final resolved = _resolveDuplicateSlot(
           existing: existing,
           replacement: route,
           pattern: pattern,
@@ -347,7 +356,7 @@ class Router<T> {
         state.globalFallback = resolved;
         return;
       }
-      state.globalFallback = route;
+      state.globalFallback = _RouteSlot<T>(route);
       return;
     }
 
@@ -360,7 +369,7 @@ class Router<T> {
           paramNames: const <String>[],
           hasWildcard: false,
         );
-        final resolved = _resolveDuplicateRoute(
+        final resolved = _resolveDuplicateSlot(
           existing: existing,
           replacement: route,
           pattern: pattern,
@@ -379,7 +388,7 @@ class Router<T> {
         paramNames: const <String>[],
         hasWildcard: false,
       );
-      state.staticExactRoutes[pattern] = route;
+      state.staticExactRoutes[pattern] = _RouteSlot<T>(route);
       state.staticExactPathLengths.add(pattern.length);
       return;
     }
@@ -419,7 +428,7 @@ class Router<T> {
         );
         final existing = node.wildcardRoute;
         if (existing != null) {
-          final resolved = _resolveDuplicateRoute(
+          final resolved = _resolveDuplicateSlot(
             existing: existing,
             replacement: route,
             pattern: pattern,
@@ -433,7 +442,7 @@ class Router<T> {
           node.wildcardRoute = resolved;
           return;
         }
-        node.wildcardRoute = route;
+        node.wildcardRoute = _RouteSlot<T>(route);
         if (paramCount > state.maxParamDepth) {
           state.maxParamDepth = paramCount;
           state.paramStackCapacity = state.maxParamDepth == 0
@@ -469,7 +478,7 @@ class Router<T> {
     );
     final existing = node.exactRoute;
     if (existing != null) {
-      final resolved = _resolveDuplicateRoute(
+      final resolved = _resolveDuplicateSlot(
         existing: existing,
         replacement: route,
         pattern: pattern,
@@ -483,9 +492,9 @@ class Router<T> {
       node.exactRoute = resolved;
       return;
     }
-    node.exactRoute = route;
+    node.exactRoute = _RouteSlot<T>(route);
     if (paramCount == 0) {
-      state.staticExactRoutes[pattern] = route;
+      state.staticExactRoutes[pattern] = node.exactRoute!;
       state.staticExactPathLengths.add(pattern.length);
     }
     if (paramCount > state.maxParamDepth) {
@@ -506,12 +515,12 @@ class Router<T> {
     if (cursor >= path.length) {
       final exact = node.exactRoute;
       if (exact != null) {
-        return _materializeMatch(exact, path, paramStack, null, 0);
+        return _materializeMatch(exact.first, path, paramStack, null, 0);
       }
 
       final wildcard = node.wildcardRoute;
       if (wildcard != null) {
-        return _materializeMatch(wildcard, path, paramStack, '', 0);
+        return _materializeMatch(wildcard.first, path, paramStack, '', 0);
       }
       return null;
     }
@@ -557,7 +566,7 @@ class Router<T> {
 
     final wildcard = node.wildcardRoute;
     if (wildcard != null) {
-      return _materializeMatch(wildcard, path, paramStack, null, cursor);
+      return _materializeMatch(wildcard.first, path, paramStack, null, cursor);
     }
 
     return null;
@@ -576,31 +585,31 @@ class Router<T> {
     if (cursor >= path.length) {
       final wildcard = node.wildcardRoute;
       if (wildcard != null) {
-        output.add(
-          _CollectedMatch<T>(
-            match: _materializeCollectedMatch(
-              wildcard,
-              path,
-              paramStack,
-              '',
-              0,
-            ),
-            depth: depth,
-            routeKind: _wildcardSpecificityRank,
-            methodRank: methodRank,
-          ),
+        _collectSlotMatches(
+          wildcard,
+          path,
+          paramStack,
+          '',
+          0,
+          depth: depth,
+          routeKind: _wildcardSpecificityRank,
+          methodRank: methodRank,
+          output: output,
         );
       }
 
       final exact = node.exactRoute;
       if (exact != null) {
-        output.add(
-          _CollectedMatch<T>(
-            match: _materializeCollectedMatch(exact, path, paramStack, null, 0),
-            depth: depth,
-            routeKind: _routeSpecificityRank(exact, isStaticExact: false),
-            methodRank: methodRank,
-          ),
+        _collectSlotMatches(
+          exact,
+          path,
+          paramStack,
+          null,
+          0,
+          depth: depth,
+          routeKind: _routeSpecificityRank(exact.first, isStaticExact: false),
+          methodRank: methodRank,
+          output: output,
         );
       }
       return;
@@ -614,19 +623,16 @@ class Router<T> {
 
     final wildcard = node.wildcardRoute;
     if (wildcard != null) {
-      output.add(
-        _CollectedMatch<T>(
-          match: _materializeCollectedMatch(
-            wildcard,
-            path,
-            paramStack,
-            null,
-            cursor,
-          ),
-          depth: depth,
-          routeKind: _wildcardSpecificityRank,
-          methodRank: methodRank,
-        ),
+      _collectSlotMatches(
+        wildcard,
+        path,
+        paramStack,
+        null,
+        cursor,
+        depth: depth,
+        routeKind: _wildcardSpecificityRank,
+        methodRank: methodRank,
+        output: output,
       );
     }
 
@@ -706,14 +712,44 @@ class Router<T> {
     return RouteMatch<T>(route.data, params);
   }
 
-  _Route<T> _resolveDuplicateRoute({
-    required _Route<T> existing,
+  void _collectSlotMatches(
+    _RouteSlot<T> slot,
+    String path,
+    _ParamStack? paramValues,
+    String? wildcardValue,
+    int wildcardStart, {
+    required int depth,
+    required int routeKind,
+    required int methodRank,
+    required List<_CollectedMatch<T>> output,
+  }) {
+    for (var i = 0; i < slot.routes.length; i++) {
+      output.add(
+        _CollectedMatch<T>(
+          match: _materializeCollectedMatch(
+            slot.routes[i],
+            path,
+            paramValues,
+            wildcardValue,
+            wildcardStart,
+          ),
+          depth: depth,
+          routeKind: routeKind,
+          methodRank: methodRank,
+          slotEntryRank: i,
+        ),
+      );
+    }
+  }
+
+  _RouteSlot<T> _resolveDuplicateSlot({
+    required _RouteSlot<T> existing,
     required _Route<T> replacement,
     required String pattern,
     required DuplicatePolicy duplicatePolicy,
     required String rejectMessage,
   }) {
-    if (!_sameParamNames(existing.paramNames, replacement.paramNames)) {
+    if (!_sameParamNames(existing.first.paramNames, replacement.paramNames)) {
       throw FormatException(
         'Duplicate route shape conflicts with existing route: $pattern',
       );
@@ -723,8 +759,11 @@ class Router<T> {
       case DuplicatePolicy.reject:
         throw FormatException(rejectMessage);
       case DuplicatePolicy.replace:
-        return replacement;
+        return _RouteSlot<T>(replacement);
       case DuplicatePolicy.keepFirst:
+        return existing;
+      case DuplicatePolicy.append:
+        existing.routes.add(replacement);
         return existing;
     }
   }
@@ -733,8 +772,9 @@ class Router<T> {
 class _MethodState<T> {
   // Each method bucket keeps an independent path index and matching metadata.
   final _Node<T> root = _Node<T>();
-  _Route<T>? globalFallback;
-  final Map<String, _Route<T>> staticExactRoutes = <String, _Route<T>>{};
+  _RouteSlot<T>? globalFallback;
+  final Map<String, _RouteSlot<T>> staticExactRoutes =
+      <String, _RouteSlot<T>>{};
   final Set<int> staticExactPathLengths = <int>{};
   int maxParamDepth = 0;
   int paramStackCapacity = 1;
@@ -745,12 +785,14 @@ class _CollectedMatch<T> {
   final int depth;
   final int routeKind;
   final int methodRank;
+  final int slotEntryRank;
 
   const _CollectedMatch({
     required this.match,
     required this.depth,
     required this.routeKind,
     required this.methodRank,
+    required this.slotEntryRank,
   });
 }
 
@@ -779,6 +821,14 @@ class _Route<T> {
   }
 }
 
+class _RouteSlot<T> {
+  final List<_Route<T>> routes;
+
+  _RouteSlot(_Route<T> route) : routes = <_Route<T>>[route];
+
+  _Route<T> get first => routes[0];
+}
+
 class _Node<T> {
   // Hybrid representation:
   // - tiny fan-out: compact parallel lists
@@ -788,8 +838,8 @@ class _Node<T> {
   Map<String, _Node<T>>? _staticMap;
 
   _Node<T>? paramChild;
-  _Route<T>? exactRoute;
-  _Route<T>? wildcardRoute;
+  _RouteSlot<T>? exactRoute;
+  _RouteSlot<T>? wildcardRoute;
 
   _Node<T> getOrCreateStaticChild(String segment) {
     final map = _staticMap;
@@ -962,7 +1012,12 @@ int _compareCollectedMatches<T>(_CollectedMatch<T> a, _CollectedMatch<T> b) {
     return kindCompare;
   }
 
-  return a.methodRank.compareTo(b.methodRank);
+  final methodCompare = a.methodRank.compareTo(b.methodRank);
+  if (methodCompare != 0) {
+    return methodCompare;
+  }
+
+  return a.slotEntryRank.compareTo(b.slotEntryRank);
 }
 
 Map<String, String>? _materializeParams<T>(

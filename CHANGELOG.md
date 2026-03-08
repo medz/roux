@@ -7,7 +7,11 @@
 - Method-aware multi-match lookups now include both `ANY` and exact-method
   matches, with `ANY` ordered first at the same scope.
 - Add configurable duplicate route registration via `DuplicatePolicy.reject`,
-  `DuplicatePolicy.replace`, and `DuplicatePolicy.keepFirst`.
+  `DuplicatePolicy.replace`, `DuplicatePolicy.keepFirst`, and
+  `DuplicatePolicy.append`.
+- Duplicate slots retained with `DuplicatePolicy.append` now preserve
+  registration order in `matchAll(...)`, while `match(...)` continues to
+  return the first retained entry in the winning slot.
 
 ## 0.2.0
 
