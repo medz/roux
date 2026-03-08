@@ -8,7 +8,6 @@ const _staticSpecificityRank = 2;
 
 enum DuplicatePolicy { reject, replace, keepFirst, append }
 
-typedef _NormalizedPattern = ({String path, bool hasReservedToken});
 typedef _CollectedMatch<T> = ({
   RouteMatch<T> match,
   int depth,
@@ -19,21 +18,23 @@ typedef _CollectedMatch<T> = ({
 
 class RouteMatch<T> {
   final T data;
-  final Map<String, String>? params;
-
-  const RouteMatch(this.data, [this.params]);
-}
-
-final class _LazyRouteMatch<T> extends RouteMatch<T> {
-  final _Route<T> _route;
-  final String _path;
+  Map<String, String>? _params;
+  final _Route<T>? _route;
+  final String? _path;
   final _ParamStack? _paramValues;
   final String? _wildcardValue;
   final int _wildcardStart;
-  Map<String, String>? _cachedParams;
 
-  _LazyRouteMatch({
-    required T data,
+  RouteMatch(this.data, [Map<String, String>? params])
+    : _params = params,
+      _route = null,
+      _path = null,
+      _paramValues = null,
+      _wildcardValue = null,
+      _wildcardStart = 0;
+
+  RouteMatch._lazy({
+    required this.data,
     required _Route<T> route,
     required String path,
     required _ParamStack? paramValues,
@@ -43,25 +44,13 @@ final class _LazyRouteMatch<T> extends RouteMatch<T> {
        _path = path,
        _paramValues = paramValues,
        _wildcardValue = wildcardValue,
-       _wildcardStart = wildcardStart,
-       super(data);
+       _wildcardStart = wildcardStart;
 
-  @override
   Map<String, String>? get params {
-    final cached = _cachedParams;
-    if (cached != null) {
-      return cached;
-    }
-
-    final params = _materializeParams(
-      _route,
-      _path,
-      _paramValues,
-      _wildcardValue,
-      _wildcardStart,
-    );
-    _cachedParams = params;
-    return params;
+    final route = _route;
+    return route == null
+        ? _params
+        : _params ??= route.paramsFor(_path!, _paramValues, _wildcardValue, _wildcardStart);
   }
 }
 
@@ -89,10 +78,10 @@ class Router<T> {
     final normalized = _normalizePatternForCompile(path);
     _addCompiledPattern(
       state,
-      normalized.path,
+      normalized.$1,
       data,
       duplicatePolicy: duplicatePolicy ?? _duplicatePolicy,
-      hasReservedToken: normalized.hasReservedToken,
+      hasReservedToken: normalized.$2,
     );
   }
 
@@ -107,40 +96,31 @@ class Router<T> {
       final normalized = _normalizePatternForCompile(entry.key);
       _addCompiledPattern(
         state,
-        normalized.path,
+        normalized.$1,
         entry.value,
         duplicatePolicy: effectivePolicy,
-        hasReservedToken: normalized.hasReservedToken,
+        hasReservedToken: normalized.$2,
       );
     }
   }
 
   RouteMatch<T>? match(String path, {String? method}) {
     final normalized = _normalizeInputPath(path);
-    if (normalized == null) {
-      return null;
-    }
-
+    if (normalized == null) return null;
     if (method != null) {
       final methodToken = _normalizeMethodToken(method);
       final methodState = _methodStates?[methodToken];
       if (methodState != null) {
         final matched = _matchInState(methodState, normalized);
-        if (matched != null) {
-          return matched;
-        }
+        if (matched != null) return matched;
       }
     }
-
     return _matchInState(_anyState, normalized);
   }
 
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
     final normalized = _normalizeInputPath(path);
-    if (normalized == null) {
-      return <RouteMatch<T>>[];
-    }
-
+    if (normalized == null) return <RouteMatch<T>>[];
     final collected = <_CollectedMatch<T>>[];
     _collectAllInState(_anyState, normalized, methodRank: 0, output: collected);
 
@@ -157,10 +137,7 @@ class Router<T> {
       }
     }
 
-    if (collected.isEmpty) {
-      return <RouteMatch<T>>[];
-    }
-
+    if (collected.isEmpty) return <RouteMatch<T>>[];
     collected.sort(_compareCollectedMatches);
     return <RouteMatch<T>>[
       for (final collectedMatch in collected) collectedMatch.match,
@@ -176,18 +153,15 @@ class Router<T> {
     return states.putIfAbsent(token, _MethodState<T>.new);
   }
 
-  String _normalizeMethodToken(String method) {
-    final trimmed = method.trim();
-    if (trimmed.isEmpty) {
-      throw ArgumentError.value(method, 'method', 'Method must not be empty.');
-    }
-    return trimmed.toUpperCase();
-  }
+  String _normalizeMethodToken(String method) => switch (method.trim()) {
+    '' => throw ArgumentError.value(method, 'method', 'Method must not be empty.'),
+    final trimmed => trimmed.toUpperCase(),
+  };
 
   RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
     final exactStatic = state.staticExactRoutes[normalized];
     if (exactStatic != null) {
-      return exactStatic.first.noParamsMatch;
+      return exactStatic.noParamsMatch;
     }
 
     final start = normalized.length == 1 ? normalized.length : 1;
@@ -201,13 +175,7 @@ class Router<T> {
       return null;
     }
     final wildcardValue = normalized.length == 1 ? '' : normalized.substring(1);
-    return _materializeMatch(
-      fallback.first,
-      normalized,
-      null,
-      wildcardValue,
-      0,
-    );
+    return _materializeMatch(fallback, normalized, null, wildcardValue, 0);
   }
 
   void _collectAllInState(
@@ -277,8 +245,8 @@ class Router<T> {
       );
       final existing = state.globalFallback;
       state.globalFallback = existing == null
-          ? _RouteSlot<T>.single(route)
-          : _resolveDuplicateSlot(
+          ? route
+          : _resolveDuplicateRoute(
               existing: existing,
               replacement: route,
               pattern: pattern,
@@ -296,8 +264,8 @@ class Router<T> {
       );
       final existing = state.staticExactRoutes[pattern];
       state.staticExactRoutes[pattern] = existing == null
-          ? _RouteSlot<T>.single(route)
-          : _resolveDuplicateSlot(
+          ? route
+          : _resolveDuplicateRoute(
               existing: existing,
               replacement: route,
               pattern: pattern,
@@ -341,8 +309,8 @@ class Router<T> {
         );
         final existing = node.wildcardRoute;
         node.wildcardRoute = existing == null
-            ? _RouteSlot<T>.single(route)
-            : _resolveDuplicateSlot(
+            ? route
+            : _resolveDuplicateRoute(
                 existing: existing,
                 replacement: route,
                 pattern: pattern,
@@ -352,7 +320,6 @@ class Router<T> {
               );
         if (paramCount > state.maxParamDepth) {
           state.maxParamDepth = paramCount;
-          state.paramStackCapacity = paramCount == 0 ? 1 : paramCount;
         }
         return;
       }
@@ -385,8 +352,8 @@ class Router<T> {
     );
     final existing = node.exactRoute;
     node.exactRoute = existing == null
-        ? _RouteSlot<T>.single(route)
-        : _resolveDuplicateSlot(
+        ? route
+        : _resolveDuplicateRoute(
             existing: existing,
             replacement: route,
             pattern: pattern,
@@ -399,7 +366,6 @@ class Router<T> {
     }
     if (paramCount > state.maxParamDepth) {
       state.maxParamDepth = paramCount;
-      state.paramStackCapacity = paramCount == 0 ? 1 : paramCount;
     }
   }
 
@@ -413,12 +379,12 @@ class Router<T> {
     if (cursor >= path.length) {
       final exact = node.exactRoute;
       if (exact != null) {
-        return _materializeMatch(exact.first, path, paramStack, null, 0);
+        return _materializeMatch(exact, path, paramStack, null, 0);
       }
 
       final wildcard = node.wildcardRoute;
       if (wildcard != null) {
-        return _materializeMatch(wildcard.first, path, paramStack, '', 0);
+        return _materializeMatch(wildcard, path, paramStack, '', 0);
       }
       return null;
     }
@@ -445,7 +411,7 @@ class Router<T> {
 
     final paramChild = node.paramChild;
     if (paramChild != null) {
-      final stack = paramStack ?? _ParamStack(state.paramStackCapacity);
+      final stack = paramStack ?? _ParamStack(state.maxParamDepth);
       stack.push(cursor, segmentEnd);
       final matched = _matchNodePath(
         state,
@@ -462,7 +428,7 @@ class Router<T> {
 
     final wildcard = node.wildcardRoute;
     if (wildcard != null) {
-      return _materializeMatch(wildcard.first, path, paramStack, null, cursor);
+      return _materializeMatch(wildcard, path, paramStack, null, cursor);
     }
 
     return null;
@@ -534,7 +500,7 @@ class Router<T> {
 
     final paramChild = node.paramChild;
     if (paramChild != null) {
-      final stack = paramStack ?? _ParamStack(state.paramStackCapacity);
+      final stack = paramStack ?? _ParamStack(state.maxParamDepth);
       stack.push(cursor, segmentEnd);
       _collectNodeMatches(
         state,
@@ -570,34 +536,19 @@ class Router<T> {
     _ParamStack? paramValues,
     String? wildcardValue,
     int wildcardStart,
-  ) {
-    if (!route.hasWildcard && route.paramNames.isEmpty) {
-      return route.noParamsMatch;
-    }
-
-    return _LazyRouteMatch<T>(
+  ) => route.hasWildcard || route.paramNames.isNotEmpty
+      ? RouteMatch<T>._lazy(
       data: route.data,
       route: route,
       path: path,
       paramValues: paramValues,
       wildcardValue: wildcardValue,
       wildcardStart: wildcardStart,
-    );
-  }
-
-  RouteMatch<T> _materializeCollectedMatch(
-    _Route<T> route,
-    String path,
-    _ParamStack? paramValues,
-    String? wildcardValue,
-    int wildcardStart,
-  ) => RouteMatch<T>(
-    route.data,
-    _materializeParams(route, path, paramValues, wildcardValue, wildcardStart),
-  );
+    )
+      : route.noParamsMatch;
 
   void _collectSlotMatches(
-    _RouteSlot<T> slot,
+    _Route<T> slot,
     String path,
     _ParamStack? paramValues,
     String? wildcardValue,
@@ -607,15 +558,11 @@ class Router<T> {
     required int methodRank,
     required List<_CollectedMatch<T>> output,
   }) {
-    final single = slot.singleOrNull;
-    if (single != null) {
+    if (slot.next == null) {
       output.add((
-        match: _materializeCollectedMatch(
-          single,
-          path,
-          paramValues,
-          wildcardValue,
-          wildcardStart,
+        match: RouteMatch<T>(
+          slot.data,
+          slot.paramsFor(path, paramValues, wildcardValue, wildcardStart),
         ),
         depth: depth,
         routeKind: routeKind,
@@ -626,16 +573,13 @@ class Router<T> {
     }
 
     var entryRank = 0;
-    _RouteSlot<T>? current = slot;
+    _Route<T>? current = slot;
     while (current != null) {
       final entry = current;
       output.add((
-        match: _materializeCollectedMatch(
-          entry.value,
-          path,
-          paramValues,
-          wildcardValue,
-          wildcardStart,
+        match: RouteMatch<T>(
+          entry.data,
+          entry.paramsFor(path, paramValues, wildcardValue, wildcardStart),
         ),
         depth: depth,
         routeKind: routeKind,
@@ -648,14 +592,17 @@ class Router<T> {
     }
   }
 
-  _RouteSlot<T> _resolveDuplicateSlot({
-    required _RouteSlot<T> existing,
+  _Route<T> _resolveDuplicateRoute({
+    required _Route<T> existing,
     required _Route<T> replacement,
     required String pattern,
     required DuplicatePolicy duplicatePolicy,
     required String rejectMessage,
   }) {
-    if (!_sameParamNames(existing.first.paramNames, replacement.paramNames)) {
+    if (!_sameParamNames(
+      existing.paramNames,
+      replacement.paramNames,
+    )) {
       throw FormatException(
         'Duplicate route shape conflicts with existing route: $pattern',
       );
@@ -665,7 +612,7 @@ class Router<T> {
       case DuplicatePolicy.reject:
         throw FormatException(rejectMessage);
       case DuplicatePolicy.replace:
-        return _RouteSlot<T>.single(replacement);
+        return replacement;
       case DuplicatePolicy.keepFirst:
         return existing;
       case DuplicatePolicy.append:
@@ -676,17 +623,16 @@ class Router<T> {
 
 class _MethodState<T> {
   final _Node<T> root = _Node<T>();
-  _RouteSlot<T>? globalFallback;
-  final Map<String, _RouteSlot<T>> staticExactRoutes =
-      <String, _RouteSlot<T>>{};
+  _Route<T>? globalFallback;
+  final Map<String, _Route<T>> staticExactRoutes = <String, _Route<T>>{};
   int maxParamDepth = 0;
-  int paramStackCapacity = 1;
 }
 
 class _Route<T> {
   final T data;
   final List<String> paramNames;
   final bool hasWildcard;
+  _Route<T>? next;
   RouteMatch<T>? _cachedNoParamsMatch;
 
   _Route({
@@ -697,27 +643,39 @@ class _Route<T> {
 
   RouteMatch<T> get noParamsMatch =>
       _cachedNoParamsMatch ??= RouteMatch<T>(data);
-}
 
-final class _RouteSlot<T> {
-  final _Route<T> value;
-  _RouteSlot<T>? next;
-  _RouteSlot<T>? tail;
-
-  _RouteSlot.single(this.value);
-
-  _Route<T> get first => value;
-
-  _Route<T>? get singleOrNull => next == null ? value : null;
-
-  _RouteSlot<T> appended(_Route<T> route) {
-    final appended = _RouteSlot<T>.single(route);
-    final currentTail = tail;
-    if (currentTail == null) {
-      next = tail = appended;
-    } else {
-      currentTail.next = tail = appended;
+  Map<String, String>? paramsFor(
+    String path,
+    _ParamStack? paramValues,
+    String? wildcardValue,
+    int wildcardStart,
+  ) {
+    if (paramNames.isEmpty && !hasWildcard) {
+      return null;
     }
+
+    final params = <String, String>{};
+    if (paramNames.isNotEmpty) {
+      final captured = paramValues;
+      if (captured == null) {
+        throw StateError('Missing parameter capture stack for matched route.');
+      }
+      for (var i = 0; i < paramNames.length; i++) {
+        params[paramNames[i]] = path.substring(captured.startAt(i), captured.endAt(i));
+      }
+    }
+    if (hasWildcard) {
+      params['wildcard'] = wildcardValue ?? path.substring(wildcardStart);
+    }
+    return params;
+  }
+
+  _Route<T> appended(_Route<T> route) {
+    _Route<T> current = this;
+    while (current.next != null) {
+      current = current.next!;
+    }
+    current.next = route;
     return this;
   }
 }
@@ -728,8 +686,8 @@ class _Node<T> {
   Map<String, _Node<T>>? _staticMap;
 
   _Node<T>? paramChild;
-  _RouteSlot<T>? exactRoute;
-  _RouteSlot<T>? wildcardRoute;
+  _Route<T>? exactRoute;
+  _Route<T>? wildcardRoute;
 
   _Node<T> getOrCreateStaticChild(String segment) {
     final map = _staticMap;
@@ -800,7 +758,7 @@ class _Node<T> {
   }
 }
 
-_NormalizedPattern _normalizePatternForCompile(String path) {
+(String, bool) _normalizePatternForCompile(String path) {
   if (path.isEmpty || path.codeUnitAt(0) != _slashCode) {
     throw FormatException('Route pattern must start with "/": $path');
   }
@@ -824,17 +782,10 @@ _NormalizedPattern _normalizePatternForCompile(String path) {
       prevSlash = true;
       continue;
     }
-
-    if (code == _colonCode || code == _asteriskCode) {
-      hasReservedToken = true;
-    }
+    if (code == _colonCode || code == _asteriskCode) hasReservedToken = true;
     prevSlash = false;
   }
-
-  if (end == path.length) {
-    return (path: path, hasReservedToken: hasReservedToken);
-  }
-  return (path: path.substring(0, end), hasReservedToken: hasReservedToken);
+  return (end == path.length ? path : path.substring(0, end), hasReservedToken);
 }
 
 String? _normalizeInputPath(String path) {
@@ -873,102 +824,49 @@ bool _equalsPathSlice(String key, String path, int start, int end) {
   return true;
 }
 
-int _compareCollectedMatches<T>(_CollectedMatch<T> a, _CollectedMatch<T> b) {
-  final depthCompare = a.depth.compareTo(b.depth);
-  if (depthCompare != 0) {
-    return depthCompare;
-  }
-
-  final kindCompare = a.routeKind.compareTo(b.routeKind);
-  if (kindCompare != 0) {
-    return kindCompare;
-  }
-
-  final methodCompare = a.methodRank.compareTo(b.methodRank);
-  if (methodCompare != 0) {
-    return methodCompare;
-  }
-
-  return a.slotEntryRank.compareTo(b.slotEntryRank);
-}
-
-Map<String, String>? _materializeParams<T>(
-  _Route<T> route,
-  String path,
-  _ParamStack? paramValues,
-  String? wildcardValue,
-  int wildcardStart,
-) {
-  if (route.paramNames.isEmpty && !route.hasWildcard) {
-    return null;
-  }
-
-  final params = <String, String>{};
-  if (route.paramNames.isNotEmpty) {
-    final captured = paramValues;
-    if (captured == null) {
-      throw StateError('Missing parameter capture stack for matched route.');
-    }
-    for (var i = 0; i < route.paramNames.length; i++) {
-      params[route.paramNames[i]] = path.substring(
-        captured.startAt(i),
-        captured.endAt(i),
-      );
-    }
-  }
-
-  if (route.hasWildcard) {
-    params['wildcard'] = wildcardValue ?? path.substring(wildcardStart);
-  }
-
-  return params;
-}
+int _compareCollectedMatches<T>(_CollectedMatch<T> a, _CollectedMatch<T> b) =>
+    a.depth != b.depth
+        ? a.depth.compareTo(b.depth)
+        : a.routeKind != b.routeKind
+        ? a.routeKind.compareTo(b.routeKind)
+        : a.methodRank != b.methodRank
+        ? a.methodRank.compareTo(b.methodRank)
+        : a.slotEntryRank.compareTo(b.slotEntryRank);
 
 int _countPathSegments(String path) {
-  if (path.length == 1) {
-    return 0;
-  }
-
-  var count = 1;
+  var count = 0;
   for (var i = 1; i < path.length; i++) {
-    if (path.codeUnitAt(i) == _slashCode) {
-      count += 1;
-    }
+    if (path.codeUnitAt(i) == _slashCode) count += 1;
   }
-  return count;
+  return path.length == 1 ? 0 : count + 1;
 }
 
 bool _sameParamNames(List<String> a, List<String> b) {
-  if (a.length != b.length) {
-    return false;
-  }
+  if (a.length != b.length) return false;
   for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) {
-      return false;
-    }
+    if (a[i] != b[i]) return false;
   }
   return true;
 }
 
 class _ParamStack {
-  final List<int> _starts;
-  final List<int> _ends;
+  final List<int> _values;
   int _length = 0;
 
   _ParamStack(int capacity)
-    : _starts = List<int>.filled(capacity, 0, growable: false),
-      _ends = List<int>.filled(capacity, 0, growable: false);
+    : _values = List<int>.filled((capacity == 0 ? 1 : capacity) * 2, 0, growable: false);
 
   void push(int start, int end) {
-    _starts[_length] = start;
-    _ends[_length++] = end;
+    _values[_length] = start;
+    _values[_length + 1] = end;
+    _length += 2;
   }
 
-  void pop() => _length -= 1;
+  void pop() => _length -= 2;
 
-  int startAt(int index) => _starts[index];
+  int startAt(int index) => _values[index * 2];
 
-  int endAt(int index) => _ends[index];
+  int endAt(int index) => _values[index * 2 + 1];
 }
 
 bool _isValidParamName(String name) {
