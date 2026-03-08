@@ -8,14 +8,6 @@ const _staticSpecificityRank = 2;
 
 enum DuplicatePolicy { reject, replace, keepFirst, append }
 
-typedef _CollectedMatch<T> = ({
-  RouteMatch<T> match,
-  int depth,
-  int routeKind,
-  int methodRank,
-  int slotEntryRank,
-});
-
 class RouteMatch<T> {
   final T data;
   Map<String, String>? _params;
@@ -50,7 +42,12 @@ class RouteMatch<T> {
     final route = _route;
     return route == null
         ? _params
-        : _params ??= route.paramsFor(_path!, _paramValues, _wildcardValue, _wildcardStart);
+        : _params ??= route.paramsFor(
+            _path!,
+            _paramValues,
+            _wildcardValue,
+            _wildcardStart,
+          );
   }
 }
 
@@ -121,7 +118,7 @@ class Router<T> {
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
     final normalized = _normalizeInputPath(path);
     if (normalized == null) return <RouteMatch<T>>[];
-    final collected = <_CollectedMatch<T>>[];
+    final collected = _MatchCollector<T>(_countPathSegments(normalized));
     _collectAllInState(_anyState, normalized, methodRank: 0, output: collected);
 
     if (method != null) {
@@ -137,11 +134,7 @@ class Router<T> {
       }
     }
 
-    if (collected.isEmpty) return <RouteMatch<T>>[];
-    collected.sort(_compareCollectedMatches);
-    return <RouteMatch<T>>[
-      for (final collectedMatch in collected) collectedMatch.match,
-    ];
+    return collected.finish();
   }
 
   _MethodState<T> _stateForWrite(String? method) {
@@ -154,7 +147,11 @@ class Router<T> {
   }
 
   String _normalizeMethodToken(String method) => switch (method.trim()) {
-    '' => throw ArgumentError.value(method, 'method', 'Method must not be empty.'),
+    '' => throw ArgumentError.value(
+      method,
+      'method',
+      'Method must not be empty.',
+    ),
     final trimmed => trimmed.toUpperCase(),
   };
 
@@ -182,7 +179,7 @@ class Router<T> {
     _MethodState<T> state,
     String normalized, {
     required int methodRank,
-    required List<_CollectedMatch<T>> output,
+    required _MatchCollector<T> output,
   }) {
     final fallback = state.globalFallback;
     if (fallback != null) {
@@ -442,7 +439,7 @@ class Router<T> {
     _ParamStack? paramStack,
     int depth,
     int methodRank,
-    List<_CollectedMatch<T>> output,
+    _MatchCollector<T> output,
   ) {
     if (cursor >= path.length) {
       final wildcard = node.wildcardRoute;
@@ -538,13 +535,13 @@ class Router<T> {
     int wildcardStart,
   ) => route.hasWildcard || route.paramNames.isNotEmpty
       ? RouteMatch<T>._lazy(
-      data: route.data,
-      route: route,
-      path: path,
-      paramValues: paramValues,
-      wildcardValue: wildcardValue,
-      wildcardStart: wildcardStart,
-    )
+          data: route.data,
+          route: route,
+          path: path,
+          paramValues: paramValues,
+          wildcardValue: wildcardValue,
+          wildcardStart: wildcardStart,
+        )
       : route.noParamsMatch;
 
   void _collectSlotMatches(
@@ -556,39 +553,35 @@ class Router<T> {
     required int depth,
     required int routeKind,
     required int methodRank,
-    required List<_CollectedMatch<T>> output,
+    required _MatchCollector<T> output,
   }) {
     if (slot.next == null) {
-      output.add((
-        match: RouteMatch<T>(
+      output.add(
+        RouteMatch<T>(
           slot.data,
           slot.paramsFor(path, paramValues, wildcardValue, wildcardStart),
         ),
         depth: depth,
         routeKind: routeKind,
         methodRank: methodRank,
-        slotEntryRank: 0,
-      ));
+      );
       return;
     }
 
-    var entryRank = 0;
     _Route<T>? current = slot;
     while (current != null) {
       final entry = current;
-      output.add((
-        match: RouteMatch<T>(
+      output.add(
+        RouteMatch<T>(
           entry.data,
           entry.paramsFor(path, paramValues, wildcardValue, wildcardStart),
         ),
         depth: depth,
         routeKind: routeKind,
         methodRank: methodRank,
-        slotEntryRank: entryRank,
-      ));
+      );
 
       current = entry.next;
-      entryRank += 1;
     }
   }
 
@@ -599,10 +592,7 @@ class Router<T> {
     required DuplicatePolicy duplicatePolicy,
     required String rejectMessage,
   }) {
-    if (!_sameParamNames(
-      existing.paramNames,
-      replacement.paramNames,
-    )) {
+    if (!_sameParamNames(existing.paramNames, replacement.paramNames)) {
       throw FormatException(
         'Duplicate route shape conflicts with existing route: $pattern',
       );
@@ -661,7 +651,10 @@ class _Route<T> {
         throw StateError('Missing parameter capture stack for matched route.');
       }
       for (var i = 0; i < paramNames.length; i++) {
-        params[paramNames[i]] = path.substring(captured.startAt(i), captured.endAt(i));
+        params[paramNames[i]] = path.substring(
+          captured.startAt(i),
+          captured.endAt(i),
+        );
       }
     }
     if (hasWildcard) {
@@ -824,15 +817,6 @@ bool _equalsPathSlice(String key, String path, int start, int end) {
   return true;
 }
 
-int _compareCollectedMatches<T>(_CollectedMatch<T> a, _CollectedMatch<T> b) =>
-    a.depth != b.depth
-        ? a.depth.compareTo(b.depth)
-        : a.routeKind != b.routeKind
-        ? a.routeKind.compareTo(b.routeKind)
-        : a.methodRank != b.methodRank
-        ? a.methodRank.compareTo(b.methodRank)
-        : a.slotEntryRank.compareTo(b.slotEntryRank);
-
 int _countPathSegments(String path) {
   var count = 0;
   for (var i = 1; i < path.length; i++) {
@@ -849,12 +833,52 @@ bool _sameParamNames(List<String> a, List<String> b) {
   return true;
 }
 
+class _MatchCollector<T> {
+  final List<List<RouteMatch<T>>?> _buckets;
+  int _count = 0;
+
+  _MatchCollector(int maxDepth)
+    : _buckets = List<List<RouteMatch<T>>?>.filled(
+        (maxDepth + 1) * 6,
+        null,
+        growable: false,
+      );
+
+  void add(
+    RouteMatch<T> match, {
+    required int depth,
+    required int routeKind,
+    required int methodRank,
+  }) {
+    final index = depth * 6 + routeKind * 2 + methodRank;
+    (_buckets[index] ??= <RouteMatch<T>>[]).add(match);
+    _count += 1;
+  }
+
+  List<RouteMatch<T>> finish() {
+    if (_count == 0) {
+      return <RouteMatch<T>>[];
+    }
+    final result = <RouteMatch<T>>[];
+    for (final bucket in _buckets) {
+      if (bucket != null) {
+        result.addAll(bucket);
+      }
+    }
+    return result;
+  }
+}
+
 class _ParamStack {
   final List<int> _values;
   int _length = 0;
 
   _ParamStack(int capacity)
-    : _values = List<int>.filled((capacity == 0 ? 1 : capacity) * 2, 0, growable: false);
+    : _values = List<int>.filled(
+        (capacity == 0 ? 1 : capacity) * 2,
+        0,
+        growable: false,
+      );
 
   void push(int start, int end) {
     _values[_length] = start;
