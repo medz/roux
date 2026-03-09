@@ -1217,7 +1217,7 @@ bool _isSimpleParamSegment(String pattern, int start, int end) =>
 
 _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   if (pattern.contains('{')) {
-    return _compileOptionalGroupRoute(pattern, data);
+    return _compileGroupedRoute(pattern, data);
   }
   var needsCompiled = false;
   var bucket = _compiledBucketHigh;
@@ -1377,7 +1377,7 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   );
 }
 
-_CompiledSlot<T> _compileOptionalGroupRoute<T>(String pattern, T data) {
+_CompiledSlot<T> _compileGroupedRoute<T>(String pattern, T data) {
   final regex = StringBuffer('^');
   final shape = StringBuffer('^');
   final paramNames = <String>[];
@@ -1392,21 +1392,19 @@ _CompiledSlot<T> _compileOptionalGroupRoute<T>(String pattern, T data) {
       final code = pattern.codeUnitAt(cursor);
       if (code == _openBraceCode) {
         final close = _findGroupEnd(pattern, cursor + 1, end);
-        if (close + 1 >= end || pattern.codeUnitAt(close + 1) != _questionCode) {
-          throw FormatException('Unsupported group syntax in route: $pattern');
-        }
+        final optional = close + 1 < end && pattern.codeUnitAt(close + 1) == _questionCode;
         final innerRegex = StringBuffer();
         final innerShape = StringBuffer();
         writeChunk(innerRegex, innerShape, cursor + 1, close);
         targetRegex
           ..write('(?:')
           ..write(innerRegex)
-          ..write(')?');
+          ..write(optional ? ')?' : ')');
         targetShape
           ..write('(?:')
           ..write(innerShape)
-          ..write(')?');
-        cursor = close + 2;
+          ..write(optional ? ')?' : ')');
+        cursor = optional ? close + 2 : close + 1;
         continue;
       }
       if (code == _asteriskCode) {
