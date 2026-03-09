@@ -1,5 +1,3 @@
-import 'types.dart';
-
 const int slashCode = 47,
     asteriskCode = 42,
     colonCode = 58,
@@ -24,6 +22,15 @@ const String dupWildcard =
     'Duplicate wildcard route shape at prefix for pattern: ';
 const String dupFallback = 'Duplicate global fallback route: ';
 const String emptySegment = 'Route pattern contains empty segment: ';
+
+enum DuplicatePolicy { reject, replace, keepFirst, append }
+
+class RouteMatch<T> {
+  final T data;
+  final Map<String, String>? params;
+
+  RouteMatch(this.data, [this.params]);
+}
 
 class RouteEntry<T> {
   final T data;
@@ -55,6 +62,71 @@ class RouteEntry<T> {
     current.next = route;
     return this;
   }
+}
+
+class MatchCollector<T> {
+  final bool sortMatches;
+  final List<(RouteMatch<T>, RouteEntry<T>, int)> items =
+      <(RouteMatch<T>, RouteEntry<T>, int)>[];
+
+  MatchCollector(this.sortMatches);
+
+  void add(RouteMatch<T> match, RouteEntry<T> route, int methodRank) =>
+      items.add((match, route, methodRank));
+
+  List<RouteMatch<T>> get matches {
+    if (sortMatches) {
+      items.sort((a, b) {
+        if (sortsBefore(a.$2, a.$3, b.$2, b.$3)) return -1;
+        if (sortsBefore(b.$2, b.$3, a.$2, a.$3)) return 1;
+        return 0;
+      });
+    }
+    return <RouteMatch<T>>[for (final item in items) item.$1];
+  }
+}
+
+bool sortsBefore<T>(
+  RouteEntry<T> a,
+  int methodRankA,
+  RouteEntry<T> b,
+  int methodRankB,
+) {
+  final rankDiff = a.rankPrefix - b.rankPrefix;
+  if (rankDiff != 0) return rankDiff < 0;
+  final methodDiff = methodRankA - methodRankB;
+  if (methodDiff != 0) return methodDiff < 0;
+  return a.registrationOrder < b.registrationOrder;
+}
+
+bool compiledSortsBefore<T>(RouteEntry<T> a, RouteEntry<T> b) {
+  final diff = b.rankPrefix - a.rankPrefix;
+  if (diff != 0) return diff < 0;
+  return a.registrationOrder < b.registrationOrder;
+}
+
+RouteEntry<T> newRoute<T>(
+  T data,
+  List<String> paramNames,
+  String? wildcardName,
+  String pattern,
+  int depth,
+  int specificity,
+  int staticChars,
+  int constraintScore,
+  int registrationOrder,
+) {
+  validateCaptureNames(paramNames, wildcardName, pattern);
+  return RouteEntry<T>(
+    data,
+    paramNames,
+    wildcardName,
+    depth,
+    specificity,
+    staticChars,
+    constraintScore,
+    registrationOrder,
+  );
 }
 
 RouteEntry<T> mergeRouteEntries<T>(
@@ -99,22 +171,8 @@ void validateCaptureNames(
   }
 }
 
-bool isValidParamName(String name) {
-  if (name.isEmpty) return false;
-  var code = name.codeUnitAt(0);
-  if (!(((code | 32) >= 97 && (code | 32) <= 122) || code == 95)) {
-    return false;
-  }
-  for (var i = 1; i < name.length; i++) {
-    code = name.codeUnitAt(i);
-    if (!(((code | 32) >= 97 && (code | 32) <= 122) ||
-        code == 95 ||
-        (code >= 48 && code <= 57))) {
-      return false;
-    }
-  }
-  return true;
-}
+bool isValidParamName(String name) =>
+    hasValidParamNameSlice(name, 0, name.length);
 
 bool hasValidParamNameSlice(String pattern, int start, int end) {
   if (start >= end) return false;

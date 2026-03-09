@@ -1,11 +1,9 @@
-export 'types.dart' show DuplicatePolicy, RouteMatch;
+export 'route_entry.dart' show DuplicatePolicy, RouteMatch;
 
 import 'input_path.dart';
 import 'pattern_engine.dart';
 import 'route_entry.dart';
 import 'simple_engine.dart';
-import 'specificity.dart';
-import 'types.dart';
 
 class Router<T> {
   Router({
@@ -231,9 +229,23 @@ class RouteSet<T> {
           registrationOrder,
         );
         if (cursor == 1 && paramCount == 0) {
-          simple.mergeFallbackRoute(route, normalized, duplicatePolicy);
+          simple.hasWildcardRoutes = true;
+          simple.globalFallback = mergeRouteEntries(
+            simple.globalFallback,
+            route,
+            normalized,
+            duplicatePolicy,
+            dupFallback,
+          );
         } else {
-          simple.mergeWildcardRoute(node, route, normalized, duplicatePolicy);
+          simple.hasWildcardRoutes = true;
+          node.wildcardRoute = mergeRouteEntries(
+            node.wildcardRoute,
+            route,
+            normalized,
+            duplicatePolicy,
+            dupWildcard,
+          );
         }
         if (paramCount > simple.maxParamDepth)
           simple.maxParamDepth = paramCount;
@@ -267,9 +279,9 @@ class RouteSet<T> {
           if (node.paramChild != null || node.wildcardRoute != null) {
             simple.hasBranchingChoices = true;
           }
-          simple.mergeLeafRoute(
-            node,
-            key,
+          final routes = node.leafRoutes ??= <String, RouteEntry<T>>{};
+          routes[key] = mergeRouteEntries(
+            routes[key],
             newRoute(
               data,
               paramNames ?? const <String>[],
@@ -283,6 +295,7 @@ class RouteSet<T> {
             ),
             normalized,
             duplicatePolicy,
+            dupShape,
           );
           if (paramCount > simple.maxParamDepth)
             simple.maxParamDepth = paramCount;
@@ -297,8 +310,8 @@ class RouteSet<T> {
       cursor = segmentEnd + 1;
     }
 
-    simple.mergeExactRoute(
-      node,
+    node.exactRoute = mergeRouteEntries(
+      node.exactRoute,
       newRoute(
         data,
         paramNames ?? const <String>[],
@@ -312,6 +325,7 @@ class RouteSet<T> {
       ),
       normalized,
       duplicatePolicy,
+      dupShape,
     );
     if (paramCount > simple.maxParamDepth) simple.maxParamDepth = paramCount;
   }
@@ -327,19 +341,12 @@ class RouteSet<T> {
           ? simple.match(normalized, caseSensitive, true)
           : simple.matchStraight(normalized, caseSensitive);
     }
-    final heads = pattern.heads;
-    final compiled = heads[compiledBucketHigh];
-    final repeated = heads[compiledBucketRepeated];
-    final late = heads[compiledBucketLate];
-    final deferred = heads[compiledBucketDeferred];
-    return (compiled == null
-            ? null
-            : pattern.matchHead(compiled, normalized)) ??
+    return pattern.matchBucket(compiledBucketHigh, normalized) ??
         simple.match(normalized, caseSensitive, false) ??
-        (late == null ? null : pattern.matchHead(late, normalized)) ??
-        (repeated == null ? null : pattern.matchHead(repeated, normalized)) ??
+        pattern.matchBucket(compiledBucketLate, normalized) ??
+        pattern.matchBucket(compiledBucketRepeated, normalized) ??
         simple.match(normalized, caseSensitive, true) ??
-        (deferred == null ? null : pattern.matchHead(deferred, normalized)) ??
+        pattern.matchBucket(compiledBucketDeferred, normalized) ??
         (simple.globalFallback == null
             ? null
             : simple.materialize(simple.globalFallback!, normalized, null, 1));
@@ -350,112 +357,61 @@ class RouteSet<T> {
     if (fallback != null) {
       simple.collectSlot(fallback, normalized, null, 1, methodRank, output);
     }
-    final heads = pattern.heads;
-    final repeated = heads[compiledBucketRepeated];
-    if (repeated != null) {
-      pattern.collectHead(repeated, normalized, methodRank, output);
-    }
+    pattern.collectBucket(
+      compiledBucketRepeated,
+      normalized,
+      methodRank,
+      output,
+    );
     simple.collect(normalized, caseSensitive, methodRank, output);
-    final compiled = heads[compiledBucketHigh];
-    if (compiled != null) {
-      pattern.collectHead(compiled, normalized, methodRank, output);
-    }
-    final late = heads[compiledBucketLate];
-    if (late != null) {
-      pattern.collectHead(late, normalized, methodRank, output);
-    }
+    pattern.collectBucket(compiledBucketHigh, normalized, methodRank, output);
+    pattern.collectBucket(compiledBucketLate, normalized, methodRank, output);
     if (exactRoutes.isNotEmpty) {
       final exact = exactRoutes[canonicalPath(normalized, caseSensitive)];
       if (exact != null) {
         simple.collectSlot(exact, normalized, null, 0, methodRank, output);
       }
     }
-    final deferred = heads[compiledBucketDeferred];
-    if (deferred != null) {
-      pattern.collectHead(deferred, normalized, methodRank, output);
-    }
+    pattern.collectBucket(
+      compiledBucketDeferred,
+      normalized,
+      methodRank,
+      output,
+    );
   }
 }
 
 class MethodTable<T> {
-  RouteSet<T>? getRoutes;
-  RouteSet<T>? postRoutes;
-  RouteSet<T>? putRoutes;
-  RouteSet<T>? patchRoutes;
-  RouteSet<T>? deleteRoutes;
-  RouteSet<T>? headRoutes;
-  RouteSet<T>? optionsRoutes;
+  final List<RouteSet<T>?> commonRoutes = List<RouteSet<T>?>.filled(7, null);
   Map<String, RouteSet<T>>? extraRoutes;
 
   RouteSet<T> forWrite(String method, bool caseSensitive) {
-    switch (method) {
-      case 'GET':
-        return getRoutes ??= RouteSet<T>(caseSensitive);
-      case 'POST':
-        return postRoutes ??= RouteSet<T>(caseSensitive);
-      case 'PUT':
-        return putRoutes ??= RouteSet<T>(caseSensitive);
-      case 'PATCH':
-        return patchRoutes ??= RouteSet<T>(caseSensitive);
-      case 'DELETE':
-        return deleteRoutes ??= RouteSet<T>(caseSensitive);
-      case 'HEAD':
-        return headRoutes ??= RouteSet<T>(caseSensitive);
-      case 'OPTIONS':
-        return optionsRoutes ??= RouteSet<T>(caseSensitive);
-      default:
-        return (extraRoutes ??= <String, RouteSet<T>>{}).putIfAbsent(
-          method,
-          () => RouteSet<T>(caseSensitive),
-        );
+    final index = commonMethodIndex(method);
+    if (index >= 0) {
+      return commonRoutes[index] ??= RouteSet<T>(caseSensitive);
     }
+    return (extraRoutes ??= <String, RouteSet<T>>{}).putIfAbsent(
+      method,
+      () => RouteSet<T>(caseSensitive),
+    );
   }
 
   RouteSet<T>? lookup(String method) {
-    switch (method) {
-      case 'GET':
-        return getRoutes;
-      case 'POST':
-        return postRoutes;
-      case 'PUT':
-        return putRoutes;
-      case 'PATCH':
-        return patchRoutes;
-      case 'DELETE':
-        return deleteRoutes;
-      case 'HEAD':
-        return headRoutes;
-      case 'OPTIONS':
-        return optionsRoutes;
-      default:
-        return extraRoutes?[method];
-    }
+    final index = commonMethodIndex(method);
+    return index >= 0 ? commonRoutes[index] : extraRoutes?[method];
   }
 }
 
-RouteEntry<T> newRoute<T>(
-  T data,
-  List<String> paramNames,
-  String? wildcardName,
-  String pattern,
-  int depth,
-  int specificity,
-  int staticChars,
-  int constraintScore,
-  int registrationOrder,
-) {
-  validateCaptureNames(paramNames, wildcardName, pattern);
-  return RouteEntry<T>(
-    data,
-    paramNames,
-    wildcardName,
-    depth,
-    specificity,
-    staticChars,
-    constraintScore,
-    registrationOrder,
-  );
-}
+int commonMethodIndex(String method) => switch (method) {
+  'GET' => 0,
+  'POST' => 1,
+  'PUT' => 2,
+  'PATCH' => 3,
+  'DELETE' => 4,
+  'HEAD' => 5,
+  'OPTIONS' => 6,
+  _ => -1,
+};
 
 String canonicalPath(String path, bool caseSensitive) =>
     caseSensitive ? path : path.toLowerCase();

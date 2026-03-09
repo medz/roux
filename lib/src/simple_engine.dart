@@ -2,8 +2,6 @@ import 'dart:collection';
 
 import 'input_path.dart';
 import 'route_entry.dart';
-import 'specificity.dart';
-import 'types.dart';
 
 class SimpleEngine<T> {
   final SimpleNode<T> root = SimpleNode<T>();
@@ -11,69 +9,6 @@ class SimpleEngine<T> {
   bool hasWildcardRoutes = false;
   RouteEntry<T>? globalFallback;
   int maxParamDepth = 0;
-
-  void mergeExactRoute(
-    SimpleNode<T> node,
-    RouteEntry<T> route,
-    String pattern,
-    DuplicatePolicy duplicatePolicy,
-  ) {
-    node.exactRoute = mergeRouteEntries(
-      node.exactRoute,
-      route,
-      pattern,
-      duplicatePolicy,
-      dupShape,
-    );
-  }
-
-  void mergeWildcardRoute(
-    SimpleNode<T> node,
-    RouteEntry<T> route,
-    String pattern,
-    DuplicatePolicy duplicatePolicy,
-  ) {
-    hasWildcardRoutes = true;
-    node.wildcardRoute = mergeRouteEntries(
-      node.wildcardRoute,
-      route,
-      pattern,
-      duplicatePolicy,
-      dupWildcard,
-    );
-  }
-
-  void mergeFallbackRoute(
-    RouteEntry<T> route,
-    String pattern,
-    DuplicatePolicy duplicatePolicy,
-  ) {
-    hasWildcardRoutes = true;
-    globalFallback = mergeRouteEntries(
-      globalFallback,
-      route,
-      pattern,
-      duplicatePolicy,
-      dupFallback,
-    );
-  }
-
-  void mergeLeafRoute(
-    SimpleNode<T> node,
-    String key,
-    RouteEntry<T> route,
-    String pattern,
-    DuplicatePolicy duplicatePolicy,
-  ) {
-    final routes = node.leafRoutes ??= <String, RouteEntry<T>>{};
-    routes[key] = mergeRouteEntries(
-      routes[key],
-      route,
-      pattern,
-      duplicatePolicy,
-      dupShape,
-    );
-  }
 
   RouteMatch<T>? matchStraight(String path, bool caseSensitive) {
     final allowWildcards = hasWildcardRoutes;
@@ -181,113 +116,7 @@ class SimpleEngine<T> {
   }
 
   RouteMatch<T>? match(String path, bool caseSensitive, bool allowWildcards) {
-    ParamStack? paramStack;
-    Branch<T>? stack;
-    var node = root;
-    var cursor = 1;
-    var paramLength = 0;
-    top:
-    do {
-      final params = paramStack;
-      if (params != null) params.truncate(paramLength);
-      final stackParams = paramStack;
-      if (cursor >= path.length) {
-        final exact = node.exactRoute;
-        if (exact != null) return materialize(exact, path, stackParams, 0);
-        final wildcard = node.wildcardRoute;
-        if (allowWildcards && wildcard != null) {
-          return materialize(wildcard, path, stackParams, path.length);
-        }
-      } else {
-        final segmentEnd = findSegmentEnd(path, cursor);
-        if (segmentEnd != cursor) {
-          final nextCursor = segmentEnd < path.length
-              ? segmentEnd + 1
-              : path.length;
-          if (nextCursor == path.length) {
-            final leaf = node.findLeafRouteSlice(
-              path,
-              cursor,
-              segmentEnd,
-              caseSensitive,
-            );
-            if (leaf != null) return materialize(leaf, path, stackParams, 0);
-          }
-          final staticChild = node.findStaticChildSlice(
-            path,
-            cursor,
-            segmentEnd,
-            caseSensitive,
-          );
-          final paramChild = node.paramChild;
-          final wildcard = allowWildcards ? node.wildcardRoute : null;
-          if (staticChild != null) {
-            if (paramChild != null || wildcard != null) {
-              stack = Branch<T>(
-                node,
-                cursor,
-                paramLength,
-                segmentEnd,
-                nextCursor,
-                0,
-                paramChild != null,
-                stack,
-              );
-            }
-            node = staticChild;
-            cursor = nextCursor;
-            continue top;
-          }
-          if (paramChild != null) {
-            paramStack ??= ParamStack(maxParamDepth);
-            paramStack.truncate(paramLength);
-            paramStack.push(cursor, segmentEnd);
-            if (wildcard != null) {
-              stack = Branch<T>(
-                node,
-                cursor,
-                paramLength,
-                segmentEnd,
-                nextCursor,
-                0,
-                false,
-                stack,
-              );
-            }
-            node = paramChild;
-            cursor = nextCursor;
-            paramLength = paramStack.length;
-            continue top;
-          }
-          if (allowWildcards && wildcard != null) {
-            return materialize(wildcard, path, stackParams, cursor);
-          }
-        }
-      }
-      while (stack != null) {
-        final branch = stack;
-        node = branch.node;
-        cursor = branch.cursor;
-        paramLength = branch.paramLength;
-        if (paramStack != null) paramStack.truncate(paramLength);
-        if (branch.pendingParam) {
-          branch.pendingParam = false;
-          paramStack ??= ParamStack(maxParamDepth);
-          paramStack.truncate(paramLength);
-          paramStack.push(cursor, branch.depthOrSegmentEnd);
-          node = node.paramChild!;
-          cursor = branch.segmentStartOrNextCursor;
-          paramLength = paramStack.length;
-          continue top;
-        }
-        stack = branch.prev;
-        final wildcard = node.wildcardRoute;
-        if (allowWildcards && wildcard != null) {
-          return materialize(wildcard, path, paramStack, cursor);
-        }
-      }
-      return null;
-    } while (true);
+    return matchNode(root, path, caseSensitive, allowWildcards, 1, 0, null);
   }
 
   void collect(
@@ -296,111 +125,7 @@ class SimpleEngine<T> {
     int methodRank,
     MatchCollector<T> output,
   ) {
-    ParamStack? paramStack;
-    Branch<T>? stack;
-    var node = root;
-    var cursor = 1;
-    var depth = 0;
-    var paramLength = 0;
-    top:
-    do {
-      final params = paramStack;
-      if (params != null) params.truncate(paramLength);
-      final stackParams = paramStack;
-      if (cursor >= path.length) {
-        final wildcard = node.wildcardRoute;
-        if (wildcard != null) {
-          collectSlot(
-            wildcard,
-            path,
-            stackParams,
-            path.length,
-            methodRank,
-            output,
-          );
-        }
-        final exact = node.exactRoute;
-        if (exact != null) {
-          collectSlot(exact, path, stackParams, 0, methodRank, output);
-        }
-      } else {
-        final segmentEnd = findSegmentEnd(path, cursor);
-        if (segmentEnd != cursor) {
-          final nextCursor = segmentEnd < path.length
-              ? segmentEnd + 1
-              : path.length;
-          final wildcard = node.wildcardRoute;
-          if (wildcard != null) {
-            collectSlot(
-              wildcard,
-              path,
-              stackParams,
-              cursor,
-              methodRank,
-              output,
-            );
-          }
-          if (nextCursor == path.length) {
-            final leaf = node.findLeafRouteSlice(
-              path,
-              cursor,
-              segmentEnd,
-              caseSensitive,
-            );
-            if (leaf != null)
-              collectSlot(leaf, path, stackParams, 0, methodRank, output);
-          }
-          final staticChild = node.findStaticChildSlice(
-            path,
-            cursor,
-            segmentEnd,
-            caseSensitive,
-          );
-          final paramChild = node.paramChild;
-          if (staticChild != null) {
-            if (paramChild != null) {
-              stack = Branch<T>(
-                paramChild,
-                nextCursor,
-                paramLength,
-                depth + 1,
-                cursor,
-                segmentEnd,
-                false,
-                stack,
-              );
-            }
-            node = staticChild;
-            cursor = nextCursor;
-            depth += 1;
-            continue top;
-          }
-          if (paramChild != null) {
-            paramStack ??= ParamStack(maxParamDepth);
-            paramStack.truncate(paramLength);
-            paramStack.push(cursor, segmentEnd);
-            node = paramChild;
-            cursor = nextCursor;
-            depth += 1;
-            paramLength = paramStack.length;
-            continue top;
-          }
-        }
-      }
-      while (stack != null) {
-        final branch = stack;
-        stack = branch.prev;
-        paramStack ??= ParamStack(maxParamDepth);
-        paramStack.truncate(branch.paramLength);
-        paramStack.push(branch.segmentStartOrNextCursor, branch.segmentEnd);
-        node = branch.node;
-        cursor = branch.cursor;
-        depth = branch.depthOrSegmentEnd;
-        paramLength = paramStack.length;
-        continue top;
-      }
-      return;
-    } while (true);
+    collectNode(root, path, caseSensitive, 1, 0, null, methodRank, output);
   }
 
   RouteMatch<T> materialize(
@@ -424,7 +149,6 @@ class SimpleEngine<T> {
     MatchCollector<T> output,
   ) {
     if (slot.wildcardName != null || slot.paramNames.isNotEmpty) {
-      final captures = paramValues?.snapshot();
       for (
         RouteEntry<T>? current = slot;
         current != null;
@@ -433,7 +157,7 @@ class SimpleEngine<T> {
         output.add(
           RouteMatch<T>(
             current.data,
-            materializeParams(current, path, captures, wildcardStart),
+            materializeParams(current, path, paramValues, wildcardStart),
           ),
           current,
           methodRank,
@@ -502,28 +226,164 @@ class SimpleEngine<T> {
     }
     return params;
   }
-}
 
-class Branch<T> {
-  final SimpleNode<T> node;
-  final int cursor;
-  final int paramLength;
-  final int depthOrSegmentEnd;
-  final int segmentStartOrNextCursor;
-  final int segmentEnd;
-  bool pendingParam;
-  final Branch<T>? prev;
+  RouteMatch<T>? matchNode(
+    SimpleNode<T> node,
+    String path,
+    bool caseSensitive,
+    bool allowWildcards,
+    int cursor,
+    int paramLength,
+    ParamStack? paramStack,
+  ) {
+    final captures = paramStack;
+    captures?.truncate(paramLength);
+    if (cursor >= path.length) {
+      final exact = node.exactRoute;
+      if (exact != null) return materialize(exact, path, captures, 0);
+      final wildcard = node.wildcardRoute;
+      if (allowWildcards && wildcard != null) {
+        return materialize(wildcard, path, captures, path.length);
+      }
+      return null;
+    }
 
-  Branch(
-    this.node,
-    this.cursor,
-    this.paramLength,
-    this.depthOrSegmentEnd,
-    this.segmentStartOrNextCursor,
-    this.segmentEnd,
-    this.pendingParam,
-    this.prev,
-  );
+    final segmentEnd = findSegmentEnd(path, cursor);
+    if (segmentEnd == cursor) return null;
+    final nextCursor = segmentEnd < path.length ? segmentEnd + 1 : path.length;
+    if (nextCursor == path.length) {
+      final leaf = node.findLeafRouteSlice(
+        path,
+        cursor,
+        segmentEnd,
+        caseSensitive,
+      );
+      if (leaf != null) return materialize(leaf, path, captures, 0);
+    }
+
+    final staticChild = node.findStaticChildSlice(
+      path,
+      cursor,
+      segmentEnd,
+      caseSensitive,
+    );
+    if (staticChild != null) {
+      final match = matchNode(
+        staticChild,
+        path,
+        caseSensitive,
+        allowWildcards,
+        nextCursor,
+        paramLength,
+        captures,
+      );
+      if (match != null) return match;
+      captures?.truncate(paramLength);
+    }
+
+    final paramChild = node.paramChild;
+    if (paramChild != null) {
+      final params = captures ?? ParamStack(maxParamDepth);
+      params.truncate(paramLength);
+      params.push(cursor, segmentEnd);
+      final match = matchNode(
+        paramChild,
+        path,
+        caseSensitive,
+        allowWildcards,
+        nextCursor,
+        params.length,
+        params,
+      );
+      if (match != null) return match;
+      params.truncate(paramLength);
+    }
+
+    final wildcard = node.wildcardRoute;
+    return allowWildcards && wildcard != null
+        ? materialize(wildcard, path, captures, cursor)
+        : null;
+  }
+
+  void collectNode(
+    SimpleNode<T> node,
+    String path,
+    bool caseSensitive,
+    int cursor,
+    int paramLength,
+    ParamStack? paramStack,
+    int methodRank,
+    MatchCollector<T> output,
+  ) {
+    final captures = paramStack;
+    captures?.truncate(paramLength);
+    if (cursor >= path.length) {
+      final wildcard = node.wildcardRoute;
+      if (wildcard != null) {
+        collectSlot(wildcard, path, captures, path.length, methodRank, output);
+      }
+      final exact = node.exactRoute;
+      if (exact != null)
+        collectSlot(exact, path, captures, 0, methodRank, output);
+      return;
+    }
+
+    final segmentEnd = findSegmentEnd(path, cursor);
+    if (segmentEnd == cursor) return;
+    final nextCursor = segmentEnd < path.length ? segmentEnd + 1 : path.length;
+    final wildcard = node.wildcardRoute;
+    if (wildcard != null) {
+      collectSlot(wildcard, path, captures, cursor, methodRank, output);
+    }
+    if (nextCursor == path.length) {
+      final leaf = node.findLeafRouteSlice(
+        path,
+        cursor,
+        segmentEnd,
+        caseSensitive,
+      );
+      if (leaf != null)
+        collectSlot(leaf, path, captures, 0, methodRank, output);
+    }
+
+    final staticChild = node.findStaticChildSlice(
+      path,
+      cursor,
+      segmentEnd,
+      caseSensitive,
+    );
+    if (staticChild != null) {
+      collectNode(
+        staticChild,
+        path,
+        caseSensitive,
+        nextCursor,
+        paramLength,
+        captures,
+        methodRank,
+        output,
+      );
+      captures?.truncate(paramLength);
+    }
+
+    final paramChild = node.paramChild;
+    if (paramChild != null) {
+      final params = captures ?? ParamStack(maxParamDepth);
+      params.truncate(paramLength);
+      params.push(cursor, segmentEnd);
+      collectNode(
+        paramChild,
+        path,
+        caseSensitive,
+        nextCursor,
+        params.length,
+        params,
+        methodRank,
+        output,
+      );
+      params.truncate(paramLength);
+    }
+  }
 }
 
 class SimpleNode<T> {
@@ -649,15 +509,6 @@ class ParamStack {
   int startAt(int index) => values[index * 2];
 
   int endAt(int index) => values[index * 2 + 1];
-
-  ParamStack snapshot() {
-    final copy = ParamStack(values.length ~/ 2);
-    for (var i = 0; i < length; i++) {
-      copy.values[i] = values[i];
-    }
-    copy.length = length;
-    return copy;
-  }
 }
 
 class SmallParamsMap extends MapBase<String, String> {

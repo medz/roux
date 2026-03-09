@@ -1,19 +1,18 @@
 import 'input_path.dart';
 import 'route_entry.dart';
-import 'specificity.dart';
-import 'types.dart';
 
 class PatternEngine<T> {
   PatternEngine(this.caseSensitive);
 
   final bool caseSensitive;
-  final List<CompiledSlot<T>?> heads = List<CompiledSlot<T>?>.filled(4, null);
+  final List<List<CompiledSlot<T>>> buckets =
+      List<List<CompiledSlot<T>>>.generate(
+        4,
+        (_) => <CompiledSlot<T>>[],
+        growable: false,
+      );
 
-  bool get hasAny =>
-      heads[0] != null ||
-      heads[1] != null ||
-      heads[2] != null ||
-      heads[3] != null;
+  bool get hasAny => buckets.any((bucket) => bucket.isNotEmpty);
 
   bool get needsSpecificitySort => hasAny;
 
@@ -35,27 +34,23 @@ class PatternEngine<T> {
     addCompiled(compiled, pattern, duplicatePolicy);
   }
 
-  RouteMatch<T>? matchHead(CompiledSlot<T> head, String path) {
-    var current = head;
-    while (true) {
+  RouteMatch<T>? matchBucket(int bucket, String path) {
+    for (final current in buckets[bucket]) {
       final match = current.regex.firstMatch(path);
       if (match != null) {
         return materializeCompiled(current.route, current.groupIndexes, match);
       }
-      final next = current.next;
-      if (next == null) return null;
-      current = next;
     }
+    return null;
   }
 
-  void collectHead(
-    CompiledSlot<T> head,
+  void collectBucket(
+    int bucket,
     String path,
     int methodRank,
     MatchCollector<T> output,
   ) {
-    var current = head;
-    while (true) {
+    for (final current in buckets[bucket]) {
       final match = current.regex.firstMatch(path);
       if (match != null) {
         for (
@@ -70,9 +65,6 @@ class PatternEngine<T> {
           );
         }
       }
-      final next = current.next;
-      if (next == null) return;
-      current = next;
     }
   }
 
@@ -82,48 +74,15 @@ class PatternEngine<T> {
     DuplicatePolicy duplicatePolicy,
   ) {
     final bucket = compiled.bucket;
-    if (bucket < 0 || bucket >= heads.length) {
+    if (bucket < 0 || bucket >= buckets.length) {
       throw StateError('Invalid compiled bucket: $bucket');
     }
-    final head = heads[bucket];
-    if (head == null) {
-      heads[bucket] = compiled;
-      return;
-    }
-    if (head.shape == compiled.shape) {
-      verifyCompiledNames(
-        head.route.paramNames,
-        compiled.route.paramNames,
-        pattern,
-      );
-      head.route = mergeRouteEntries(
-        head.route,
-        compiled.route,
-        pattern,
-        duplicatePolicy,
-        dupShape,
-      );
-      return;
-    }
-    if (compiledSortsBefore(compiled.route, head.route)) {
-      compiled.next = head;
-      heads[bucket] = compiled;
-      return;
-    }
-    for (var current = head; ; current = current.next!) {
-      final next = current.next;
-      if (next == null) {
-        current.next = compiled;
-        return;
-      }
-      if (next.shape == compiled.shape) {
-        verifyCompiledNames(
-          next.route.paramNames,
-          compiled.route.paramNames,
-          pattern,
-        );
-        next.route = mergeRouteEntries(
-          next.route,
+    final routes = buckets[bucket];
+    for (var i = 0; i < routes.length; i++) {
+      final current = routes[i];
+      if (current.shape == compiled.shape) {
+        current.route = mergeRouteEntries(
+          current.route,
           compiled.route,
           pattern,
           duplicatePolicy,
@@ -131,12 +90,12 @@ class PatternEngine<T> {
         );
         return;
       }
-      if (compiledSortsBefore(compiled.route, next.route)) {
-        compiled.next = next;
-        current.next = compiled;
+      if (compiledSortsBefore(compiled.route, current.route)) {
+        routes.insert(i, compiled);
         return;
       }
     }
+    routes.add(compiled);
   }
 }
 
@@ -146,7 +105,6 @@ class CompiledSlot<T> {
   final int bucket;
   final List<int> groupIndexes;
   RouteEntry<T> route;
-  CompiledSlot<T>? next;
 
   CompiledSlot(
     this.regex,
@@ -283,16 +241,16 @@ class _PatternCompiler<T> {
     regex.write(r'$');
     shape.write(r'$');
     if (!needsCompiled) return null;
-    validateCaptureNames(paramNames, null, pattern);
     return CompiledSlot<T>(
       RegExp(regex.toString(), caseSensitive: caseSensitive),
       shape.toString(),
       bucket,
       groupIndexes,
-      RouteEntry<T>(
+      newRoute(
         data,
         paramNames,
         null,
+        pattern,
         pathDepth(pattern),
         specificity,
         staticChars,
@@ -546,13 +504,6 @@ class _PatternCompiler<T> {
       lastWasParam = false;
     }
     return lastWasParam;
-  }
-}
-
-void verifyCompiledNames(List<String> a, List<String> b, String pattern) {
-  if (a.length != b.length) throw FormatException('$dupShape$pattern');
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) throw FormatException('$dupShape$pattern');
   }
 }
 
