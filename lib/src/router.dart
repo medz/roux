@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 const _slashCode = 47,
     _asteriskCode = 42,
     _colonCode = 58,
@@ -863,6 +865,33 @@ class Router<T> {
   ) {
     final names = route.paramNames;
     final wildcardName = route.wildcardName;
+    if (wildcardName == null) {
+      if (names.length == 1) {
+        final requiredCaptures = captures!;
+        return _SmallParamsMap1(
+          names[0],
+          path.substring(
+            requiredCaptures.startAt(0),
+            requiredCaptures.endAt(0),
+          ),
+        );
+      }
+      if (names.length == 2) {
+        final requiredCaptures = captures!;
+        return _SmallParamsMap2(
+          names[0],
+          path.substring(
+            requiredCaptures.startAt(0),
+            requiredCaptures.endAt(0),
+          ),
+          names[1],
+          path.substring(
+            requiredCaptures.startAt(1),
+            requiredCaptures.endAt(1),
+          ),
+        );
+      }
+    }
     final params = <String, String>{};
     if (names.isNotEmpty) {
       final requiredCaptures = captures!;
@@ -1338,6 +1367,48 @@ class _ParamStack {
     copy._length = _length;
     return copy;
   }
+}
+
+abstract class _SmallParamsMap extends MapBase<String, String> {
+  Map<String, String>? _promoted;
+  Map<String, String> _ensurePromoted();
+  @override
+  void operator []=(String key, String value) => _ensurePromoted()[key] = value;
+  @override
+  void clear() => _ensurePromoted().clear();
+  @override
+  Iterable<String> get keys => _promoted?.keys ?? _inlineKeys();
+  Iterable<String> _inlineKeys();
+  @override
+  String? remove(Object? key) => _ensurePromoted().remove(key);
+}
+
+class _SmallParamsMap1 extends _SmallParamsMap {
+  final String _k0;
+  final String _v0;
+  _SmallParamsMap1(this._k0, this._v0);
+  @override
+  String? operator [](Object? key) =>
+      _promoted?[key] ?? (key == _k0 ? _v0 : null);
+  @override
+  Iterable<String> _inlineKeys() => <String>[_k0];
+  @override
+  Map<String, String> _ensurePromoted() =>
+      _promoted ??= <String, String>{_k0: _v0};
+}
+
+class _SmallParamsMap2 extends _SmallParamsMap {
+  final String _k0, _k1;
+  final String _v0, _v1;
+  _SmallParamsMap2(this._k0, this._v0, this._k1, this._v1);
+  @override
+  String? operator [](Object? key) =>
+      _promoted?[key] ?? (key == _k0 ? _v0 : (key == _k1 ? _v1 : null));
+  @override
+  Iterable<String> _inlineKeys() => <String>[_k0, _k1];
+  @override
+  Map<String, String> _ensurePromoted() =>
+      _promoted ??= <String, String>{_k0: _v0, _k1: _v1};
 }
 
 bool _isValidParamName(String name) {
