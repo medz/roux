@@ -96,6 +96,7 @@ Parameter-name drift remains a hard error under all policies. For example,
 - Static: `/users`
 - Named param: `/users/:id`
 - Single-segment wildcard: `/users/*`
+- Embedded wildcard: `/files/file-*.png`, `/files/*.:ext`
 - Named repeated param: `/files/:path+`, `/files/:path*`
 - Named regex param: `/users/:id(\\d+)`
 - Embedded params: `/files/:name.:ext`

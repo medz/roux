@@ -88,6 +88,30 @@ void main() {
       expect(router.match('/users/a/b'), isNull);
       expect(router.match('/teams/core/members')?.params, {'0': 'core'});
     });
+
+    test('supports embedded wildcard segments', () {
+      final assetRouter = Router<String>();
+      assetRouter.add('/files/file-*-*.png', 'asset');
+      final genericRouter = Router<String>();
+      genericRouter.add('/files/*.:ext', 'generic');
+
+      expect(assetRouter.match('/files/file-a-b.png')?.params, {
+        '0': 'a',
+        '1': 'b',
+      });
+      expect(assetRouter.match('/files/file-a-b-c.png')?.params, {
+        '0': 'a-b',
+        '1': 'c',
+      });
+      expect(assetRouter.match('/files/file--.png')?.params, {
+        '0': '',
+        '1': '',
+      });
+      expect(genericRouter.match('/files/.png')?.params, {
+        '0': '',
+        'ext': 'png',
+      });
+    });
   });
 
   group('duplicate policy', () {
@@ -844,6 +868,15 @@ void main() {
       ]);
     });
 
+    test('matches embedded wildcard routes before plain params', () {
+      final router = Router<String>(
+        routes: {'/files/:id': 'param', '/files/file-*.png': 'wild'},
+      );
+
+      expect(router.match('/files/file-z.png')?.data, 'wild');
+      expect(router.match('/files/file-z.png')?.params, {'0': 'z'});
+    });
+
     test(
       'matches regex parameter routes before plain params in single match',
       () {
@@ -1021,6 +1054,15 @@ void main() {
       expect(
         () => Router<String>(
           routes: {'/files/:name.:ext': 'a', '/files/:base.:suffix': 'b'},
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate embedded wildcard shape', () {
+      expect(
+        () => Router<String>(
+          routes: {'/files/*.:ext': 'a', '/files/*.:type': 'b'},
         ),
         throwsFormatException,
       );

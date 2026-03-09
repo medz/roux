@@ -1277,7 +1277,16 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
     while (segmentCursor < segmentEnd) {
       final code = pattern.codeUnitAt(segmentCursor);
       if (code == _asteriskCode) {
-        throw FormatException('Unsupported segment syntax in route: $pattern');
+        regex.write('([^/]*)');
+        shape.write('([^/]*)');
+        paramNames.add('${unnamedCount++}');
+        groupCount += 1;
+        groupIndexes.add(groupCount);
+        needsCompiled = true;
+        collectRank = _wildRank;
+        segmentCursor += 1;
+        lastWasParam = false;
+        continue;
       }
       if (code == _colonCode) {
         if (lastWasParam) {
