@@ -1,6 +1,11 @@
 import 'dart:collection';
 
-const _slashCode = 47, _asteriskCode = 42, _colonCode = 58, _mapAt = 4;
+const _slashCode = 47,
+    _asteriskCode = 42,
+    _colonCode = 58,
+    _openBraceCode = 123,
+    _closeBraceCode = 125,
+    _mapAt = 4;
 const _wildRank = 0, _paramRank = 1, _staticRank = 2;
 const _compiledBucketHigh = 0,
     _compiledBucketRepeated = 1,
@@ -251,7 +256,11 @@ class Router<T> {
         prevSlash = true;
         continue;
       }
-      if (code == _colonCode || code == _asteriskCode) {
+      if (code == _colonCode ||
+          code == _asteriskCode ||
+          code == _openBraceCode ||
+          code == _closeBraceCode ||
+          code == _questionCode) {
         hasReservedToken = true;
       }
       prevSlash = false;
@@ -283,7 +292,11 @@ class Router<T> {
         if (code == _slashCode) {
           break;
         }
-        if (code == _colonCode || code == _asteriskCode) {
+        if (code == _colonCode ||
+            code == _asteriskCode ||
+            code == _openBraceCode ||
+            code == _closeBraceCode ||
+            code == _questionCode) {
           hasReservedInSegment = true;
         }
         segmentEnd += 1;
@@ -1203,6 +1216,9 @@ bool _isSimpleParamSegment(String pattern, int start, int end) =>
     start < end && _isValidParamName(pattern.substring(start, end));
 
 _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
+  if (pattern.contains('{')) {
+    return _compileOptionalGroupRoute(pattern, data);
+  }
   var needsCompiled = false;
   var bucket = _compiledBucketHigh;
   var collectRank = _paramRank;
@@ -1361,6 +1377,125 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   );
 }
 
+_CompiledSlot<T> _compileOptionalGroupRoute<T>(String pattern, T data) {
+  final regex = StringBuffer('^');
+  final shape = StringBuffer('^');
+  final paramNames = <String>[];
+  final groupIndexes = <int>[];
+  var groupCount = 0;
+  var unnamedCount = 0;
+  var hasWildcard = false;
+
+  void writeChunk(StringBuffer targetRegex, StringBuffer targetShape, int start, int end) {
+    var cursor = start;
+    while (cursor < end) {
+      final code = pattern.codeUnitAt(cursor);
+      if (code == _openBraceCode) {
+        final close = _findGroupEnd(pattern, cursor + 1, end);
+        if (close + 1 >= end || pattern.codeUnitAt(close + 1) != _questionCode) {
+          throw FormatException('Unsupported group syntax in route: $pattern');
+        }
+        final innerRegex = StringBuffer();
+        final innerShape = StringBuffer();
+        writeChunk(innerRegex, innerShape, cursor + 1, close);
+        targetRegex
+          ..write('(?:')
+          ..write(innerRegex)
+          ..write(')?');
+        targetShape
+          ..write('(?:')
+          ..write(innerShape)
+          ..write(')?');
+        cursor = close + 2;
+        continue;
+      }
+      if (code == _asteriskCode) {
+        if (cursor + 1 < end && pattern.codeUnitAt(cursor + 1) == _asteriskCode) {
+          throw FormatException('Unsupported group syntax in route: $pattern');
+        }
+        targetRegex.write('([^/]*)');
+        targetShape.write('([^/]*)');
+        paramNames.add('${unnamedCount++}');
+        groupCount += 1;
+        groupIndexes.add(groupCount);
+        hasWildcard = true;
+        cursor += 1;
+        continue;
+      }
+      if (code == _colonCode) {
+        var nameEnd = cursor + 1;
+        while (nameEnd < end &&
+            _isParamNameCode(
+              pattern.codeUnitAt(nameEnd),
+              nameEnd == cursor + 1,
+            )) {
+          nameEnd += 1;
+        }
+        final paramName = pattern.substring(cursor + 1, nameEnd);
+        if (!_isValidParamName(paramName)) {
+          throw FormatException('Invalid parameter name in route: $pattern');
+        }
+        if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {
+          final regexEnd = _findRegexEnd(pattern, nameEnd, end);
+          final body = pattern.substring(nameEnd + 1, regexEnd);
+          targetRegex
+            ..write('(')
+            ..write(body)
+            ..write(')');
+          targetShape
+            ..write('(')
+            ..write(body)
+            ..write(')');
+          groupCount += 1;
+          groupIndexes.add(groupCount);
+          groupCount += _countCapturingGroups(body);
+          cursor = regexEnd + 1;
+        } else {
+          targetRegex.write('([^/]+)');
+          targetShape.write('([^/]+)');
+          groupCount += 1;
+          groupIndexes.add(groupCount);
+          cursor = nameEnd;
+        }
+        paramNames.add(paramName);
+        continue;
+      }
+      if (code == _questionCode || code == _closeBraceCode) {
+        throw FormatException('Unsupported group syntax in route: $pattern');
+      }
+
+      final literalStart = cursor;
+      cursor += 1;
+      while (cursor < end) {
+        final literalCode = pattern.codeUnitAt(cursor);
+        if (literalCode == _openBraceCode ||
+            literalCode == _closeBraceCode ||
+            literalCode == _questionCode ||
+            literalCode == _colonCode ||
+            literalCode == _asteriskCode) {
+          break;
+        }
+        cursor += 1;
+      }
+      final literal = pattern.substring(literalStart, cursor);
+      targetRegex.write(RegExp.escape(literal));
+      targetShape.write(RegExp.escape(literal));
+    }
+  }
+
+  writeChunk(regex, shape, 0, pattern.length);
+  regex.write(r'$');
+  shape.write(r'$');
+  return _CompiledSlot<T>(
+    RegExp(regex.toString()),
+    shape.toString(),
+    _compiledBucketDeferred,
+    hasWildcard ? _wildRank : _staticRank,
+    groupIndexes,
+    _Route<T>(data, paramNames, null),
+  );
+}
+
 bool _isParamNameCode(int code, bool first) {
   if (first) {
     return ((code | 32) >= 97 && (code | 32) <= 122) || code == 95;
@@ -1402,6 +1537,41 @@ String? _readDoubleWildcardName(String pattern, int start, int end) {
   final name = pattern.substring(start + 1, end - 1);
   if (!_isValidParamName(name)) return null;
   return (name, last);
+}
+
+int _findGroupEnd(String pattern, int start, int end) {
+  var depth = 0;
+  var cursor = start;
+  while (cursor < end) {
+    final code = pattern.codeUnitAt(cursor);
+    if (code == _openBraceCode) {
+      depth += 1;
+      cursor += 1;
+      continue;
+    }
+    if (code == _closeBraceCode) {
+      if (depth == 0) return cursor;
+      depth -= 1;
+      cursor += 1;
+      continue;
+    }
+    if (code == _colonCode) {
+      var nameEnd = cursor + 1;
+      while (nameEnd < end &&
+          _isParamNameCode(
+            pattern.codeUnitAt(nameEnd),
+            nameEnd == cursor + 1,
+          )) {
+        nameEnd += 1;
+      }
+      if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {
+        cursor = _findRegexEnd(pattern, nameEnd, end) + 1;
+        continue;
+      }
+    }
+    cursor += 1;
+  }
+  throw FormatException('Unclosed group in route: $pattern');
 }
 
 int _findRegexEnd(String pattern, int start, int segmentEnd) {

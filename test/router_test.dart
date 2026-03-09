@@ -112,6 +112,25 @@ void main() {
         'ext': 'png',
       });
     });
+
+    test('supports optional non-capturing groups', () {
+      final pluralRouter = Router<String>();
+      pluralRouter.add('/book{s}?', 'plural');
+      final userRouter = Router<String>();
+      userRouter.add('/users{/:id}?', 'user');
+      final blogRouter = Router<String>();
+      blogRouter.add('/blog/:id(\\d+){-:title}?', 'blog');
+
+      expect(pluralRouter.match('/book')?.data, 'plural');
+      expect(pluralRouter.match('/books')?.data, 'plural');
+      expect(userRouter.match('/users')?.params, isEmpty);
+      expect(userRouter.match('/users/42')?.params, {'id': '42'});
+      expect(blogRouter.match('/blog/123')?.params, {'id': '123'});
+      expect(blogRouter.match('/blog/123-post')?.params, {
+        'id': '123',
+        'title': 'post',
+      });
+    });
   });
 
   group('duplicate policy', () {
@@ -877,6 +896,28 @@ void main() {
       expect(router.match('/files/file-z.png')?.params, {'0': 'z'});
     });
 
+    test('matches exact and plain params before optional group routes', () {
+      final router = Router<String>(
+        routes: {
+          '/book': 'exact-book',
+          '/book{s}?': 'group-book',
+          '/users/:id': 'param-user',
+          '/users{/:id}?': 'group-user',
+        },
+      );
+
+      expect(router.match('/book')?.data, 'exact-book');
+      expect(router.matchAll('/book').map((match) => match.data), [
+        'exact-book',
+        'group-book',
+      ]);
+      expect(router.match('/users/42')?.data, 'param-user');
+      expect(router.matchAll('/users/42').map((match) => match.data), [
+        'param-user',
+        'group-user',
+      ]);
+    });
+
     test(
       'matches regex parameter routes before plain params in single match',
       () {
@@ -1064,6 +1105,20 @@ void main() {
         () => Router<String>(
           routes: {'/files/*.:ext': 'a', '/files/*.:type': 'b'},
         ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects unsupported bare group syntax', () {
+      expect(
+        () => Router<String>(routes: {'/foo{bar}': 'bad'}),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects unclosed optional groups', () {
+      expect(
+        () => Router<String>(routes: {'/users{/:id?': 'bad'}),
         throwsFormatException,
       );
     });
