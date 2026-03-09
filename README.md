@@ -5,10 +5,6 @@
 
 Lightweight, fast router for Dart with rou3-style pathname syntax.
 
-`roux` focuses on pathname routing. It supports exact routes, named params,
-single-segment wildcards, remainder wildcards, embedded segment patterns,
-group syntax, and configurable input preprocessing.
-
 ## Install
 
 ```bash
@@ -60,9 +56,9 @@ router.add('/posts/**:rest', 'post-fallback');
 Method-specific routes are supported through `method:` on `add`, `addAll`,
 `match`, and `matchAll`.
 
-## Pathname Syntax
+## Route Patterns
 
-The router accepts the following route shapes:
+`roux` focuses on pathname routing. It accepts the following route shapes:
 
 | Syntax | Meaning | Example |
 | --- | --- | --- |
@@ -87,14 +83,12 @@ Rules:
 - Route patterns must start with `/`.
 - `*` matches exactly one segment.
 - `**` and `**:name` match the remaining path and must be the final segment.
-- Trailing slash on lookup input is ignored, so `/users` and `/users/` match
-  the same route.
 - `roux` routes pathnames only. It does not parse `protocol`, `hostname`,
   `search`, or `hash`.
 
-## Input Options
+## Input Processing
 
-Input preprocessing is conservative by default:
+Path preprocessing is conservative by default:
 
 ```dart
 final router = Router<String>(
@@ -110,8 +104,6 @@ final router = Router<String>(
 | `decodePath` | `false` | Leave `%xx` sequences untouched. |
 | `normalizePath` | `false` | Leave repeated `/`, `.` and `..` untouched. |
 
-When enabled:
-
 - `caseSensitive: false` ignores case for static and compiled matching while
   preserving original parameter values.
 - `decodePath: true` decodes `%xx` sequences before matching. Invalid encodings
@@ -119,7 +111,7 @@ When enabled:
 - `normalizePath: true` collapses repeated `/`, removes `.` segments, resolves
   `..`, and rejects paths that would escape above `/`.
 
-Lookup processing order is:
+Lookup processing order:
 
 1. URL decoding, if enabled
 2. Path normalization, if enabled
@@ -128,33 +120,26 @@ Lookup processing order is:
 Because decoding runs first, `decodePath: true` can change segment boundaries.
 For example, `/a%2Fb` becomes `/a/b` before matching.
 
-## Matching Behavior
+`match(...)` returns the highest-priority route: exact, param, single-segment
+wildcard, double wildcard, then global fallback.
 
-For `match(...)`, `roux` returns the highest-priority route:
+`matchAll(...)` returns every matching route from less specific to more
+specific. Broadly: remainder routes, single-segment dynamic routes,
+structured dynamic routes, then exact static routes.
 
-1. Exact route
-2. Parameter route
-3. Single-segment wildcard
-4. Double wildcard route
-5. Global fallback
+## Differences from URLPattern
 
-For `matchAll(...)`, `roux` returns every matching route from less specific to
-more specific:
-
-1. Remainder routes like `/**:wildcard`, `/files/:path*`, `/files/:path+`
-2. Single-segment dynamic routes like `/users/:id`, `/users/*`
-3. Structured dynamic routes like `/files/:name.:ext`, `/book{s}?`,
-   `/foo{bar}`
-4. Exact static routes like `/users/all`
-
-At the same specificity level:
-
-- Shallower routes come first.
-- Routes with less literal structure come first.
-- Routes with fewer extra constraints come first.
-- `ANY` method routes come before exact-method routes.
-- Entries retained through `DuplicatePolicy.append` stay in registration order
-  inside the same slot.
+- `roux` routes pathname only. There is no `protocol`, `hostname`, `port`,
+  `search`, `hash`, or `baseURL` matching.
+- Patterns must start with `/`.
+- `*` matches exactly one segment. `**` and `**:name` match the remaining path.
+  This differs from `URLPattern`, where `*` is more permissive.
+- URL decoding is configurable and off by default with `decodePath: false`.
+- Path normalization is configurable and off by default with
+  `normalizePath: false`.
+- Case sensitivity is configurable through `caseSensitive`.
+- Trailing slash on lookup input is ignored, so `/users` and `/users/` match
+  the same route.
 
 ## Duplicate Policy
 
