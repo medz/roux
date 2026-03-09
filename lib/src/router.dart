@@ -193,7 +193,9 @@ class Router<T> {
         state.staticExactRoutes[_canonicalPath(normalized)]?.noParamsMatch;
     if (exact != null) return exact;
     if (!state.hasSlowMatchPath) {
-      return _matchNodePathFast(state, normalized);
+      return state.hasBranchingChoices
+          ? _matchNodePathFast(state, normalized)
+          : _matchNodePathStraight(state, normalized);
     }
     final fallback = state.globalFallback,
         compiled = state.compiledRoutes,
@@ -376,6 +378,9 @@ class Router<T> {
           _addCompiledPattern(state, normalized, data, duplicatePolicy);
           return;
         }
+        if (node._staticChild != null || node._staticMap != null) {
+          state.hasBranchingChoices = true;
+        }
         final paramName = pattern.substring(cursor + 1, segmentEnd);
         node = node.paramChild ??= _Node<T>();
         (paramNames ??= <String>[]).add(paramName);
@@ -384,6 +389,9 @@ class Router<T> {
         if (hasReservedInSegment) {
           _addCompiledPattern(state, normalized, data, duplicatePolicy);
           return;
+        }
+        if (node.paramChild != null) {
+          state.hasBranchingChoices = true;
         }
         node = node.getOrCreateStaticChildSlice(
           _canonicalLiteral(pattern.substring(cursor, segmentEnd)),
@@ -556,6 +564,41 @@ class Router<T> {
       }
       return null;
     } while (true);
+  }
+
+  RouteMatch<T>? _matchNodePathStraight(_MethodState<T> state, String path) {
+    _ParamStack? paramStack;
+    var node = state.root;
+    var cursor = 1;
+    while (true) {
+      if (cursor >= path.length) {
+        final exact = node.exactRoute;
+        return exact == null ? null : _materialize(exact, path, paramStack, 0);
+      }
+      final segmentEnd = _findSegmentEnd(path, cursor);
+      if (segmentEnd == cursor) return null;
+      final nextCursor = segmentEnd < path.length
+          ? segmentEnd + 1
+          : path.length;
+      final staticChild = node._findStaticChildSlice(
+        path,
+        cursor,
+        segmentEnd,
+        _caseSensitive,
+      );
+      if (staticChild != null) {
+        node = staticChild;
+        cursor = nextCursor;
+        continue;
+      }
+      final paramChild = node.paramChild;
+      if (paramChild == null) return null;
+      (paramStack ??= _ParamStack(
+        state.maxParamDepth,
+      )).push(cursor, segmentEnd);
+      node = paramChild;
+      cursor = nextCursor;
+    }
   }
 
   RouteMatch<T>? _matchNodePath(
@@ -818,8 +861,9 @@ class Router<T> {
     _ParamStack? captures,
     int wildcardStart,
   ) {
-    final params = <String, String>{};
     final names = route.paramNames;
+    final wildcardName = route.wildcardName;
+    final params = <String, String>{};
     if (names.isNotEmpty) {
       final requiredCaptures = captures!;
       for (var i = 0; i < names.length; i++) {
@@ -829,7 +873,6 @@ class Router<T> {
         );
       }
     }
-    final wildcardName = route.wildcardName;
     if (wildcardName != null) {
       params[wildcardName] = wildcardStart < path.length
           ? path.substring(wildcardStart)
@@ -972,6 +1015,7 @@ class Router<T> {
 class _MethodState<T> {
   final _Node<T> root = _Node<T>();
   bool hasSlowMatchPath = false;
+  bool hasBranchingChoices = false;
   _Route<T>? globalFallback;
   _CompiledSlot<T>? compiledRoutes;
   _CompiledSlot<T>? repeatedCompiledRoutes;
