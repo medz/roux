@@ -142,23 +142,29 @@ class Router<T> {
     T data,
     List<String> paramNames,
     String? wildcardName,
+    String pattern,
     int depth,
     int specificity,
     int staticChars,
     int constraintScore,
-  ) => _Route<T>(
-    data,
-    paramNames,
-    wildcardName,
-    depth,
-    specificity,
-    staticChars,
-    constraintScore,
-    _nextRegistrationOrder++,
-  );
+  ) {
+    _validateCaptureNames(paramNames, wildcardName, pattern);
+    return _Route<T>(
+      data,
+      paramNames,
+      wildcardName,
+      depth,
+      specificity,
+      staticChars,
+      constraintScore,
+      _nextRegistrationOrder++,
+    );
+  }
 
   bool _needsSpecificitySort(_MethodState<T> state) =>
+      state.hasBranchingChoices ||
       state.root.paramChild != null ||
+      state.repeatedCompiledRoutes != null ||
       state.compiledRoutes != null ||
       state.lateCompiledRoutes != null ||
       state.deferredCompiledRoutes != null;
@@ -298,6 +304,7 @@ class Router<T> {
           data,
           const <String>[],
           null,
+          normalized,
           _pathDepth(normalized),
           _exactSpecificity,
           _literalCharCount(normalized),
@@ -347,6 +354,7 @@ class Router<T> {
           data,
           paramNames ?? const <String>[],
           doubleWildcardName,
+          normalized,
           depth,
           _remainderSpecificity,
           staticChars,
@@ -410,6 +418,7 @@ class Router<T> {
         data,
         paramNames ?? const <String>[],
         null,
+        normalized,
         depth,
         paramCount == 0 ? _exactSpecificity : _singleDynamicSpecificity,
         staticChars,
@@ -1750,6 +1759,7 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
   regex.write(r'$');
   shape.write(r'$');
   if (!needsCompiled) return null;
+  _validateCaptureNames(paramNames, null, pattern);
   return _CompiledSlot<T>(
     RegExp(regex.toString(), caseSensitive: caseSensitive),
     shape.toString(),
@@ -1893,6 +1903,7 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
   writeChunk(regex, shape, 0, pattern.length);
   regex.write(r'$');
   shape.write(r'$');
+  _validateCaptureNames(paramNames, null, pattern);
   return _CompiledSlot<T>(
     RegExp(regex.toString(), caseSensitive: caseSensitive),
     shape.toString(),
@@ -1910,6 +1921,34 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
       registrationOrder,
     ),
   );
+}
+
+void _validateCaptureNames(
+  List<String> paramNames,
+  String? wildcardName,
+  String pattern,
+) {
+  final count = paramNames.length;
+  if (count == 2) {
+    if (paramNames[0] == paramNames[1]) {
+      throw FormatException('Duplicate parameter name in route: $pattern');
+    }
+  } else if (count > 2) {
+    for (var i = 0; i < count; i++) {
+      final current = paramNames[i];
+      for (var j = i + 1; j < count; j++) {
+        if (current == paramNames[j]) {
+          throw FormatException('Duplicate parameter name in route: $pattern');
+        }
+      }
+    }
+  }
+  if (wildcardName == null) return;
+  for (var i = 0; i < count; i++) {
+    if (paramNames[i] == wildcardName) {
+      throw FormatException('Duplicate parameter name in route: $pattern');
+    }
+  }
 }
 
 bool _isParamNameCode(int code, bool first) {

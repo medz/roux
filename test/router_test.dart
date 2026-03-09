@@ -1101,6 +1101,36 @@ void main() {
         );
       },
     );
+
+    test(
+      'sorts branching trie matches from less specific to more specific',
+      () {
+        final router = Router<String>(
+          routes: {
+            '/users/:id/:tab': 'generic-tab',
+            '/users/:id/details': 'details',
+          },
+        );
+
+        expect(router.match('/users/42/details')?.data, 'details');
+        expect(
+          router.matchAll('/users/42/details').map((match) => match.data),
+          ['generic-tab', 'details'],
+        );
+      },
+    );
+
+    test('sorts repeated-only compiled matches by specificity', () {
+      final router = Router<String>();
+      router.add('/:all+', 'global-plus');
+      router.add('/files/:path+', 'files-plus');
+
+      expect(router.match('/files/a/b')?.data, 'files-plus');
+      expect(router.matchAll('/files/a/b').map((match) => match.data), [
+        'global-plus',
+        'files-plus',
+      ]);
+    });
   });
 
   group('normalization and invalid input', () {
@@ -1330,6 +1360,24 @@ void main() {
         () => Router<String>(
           routes: {'/files/:path+': 'a', '/files/:rest+': 'b'},
         ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate capture names in trie routes', () {
+      expect(
+        () => Router<String>(routes: {'/users/:id/:id': 'dup'}),
+        throwsFormatException,
+      );
+      expect(
+        () => Router<String>(routes: {'/:id/**:id': 'dup'}),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate capture names in compiled routes', () {
+      expect(
+        () => Router<String>(routes: {'/files/:name.:name': 'dup'}),
         throwsFormatException,
       );
     });

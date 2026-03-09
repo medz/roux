@@ -102,12 +102,14 @@ final router = Router<String>(
 | --- | --- | --- |
 | `caseSensitive` | `true` | Match paths with case sensitivity. |
 | `decodePath` | `false` | Leave `%xx` sequences untouched. |
-| `normalizePath` | `false` | Leave repeated `/`, `.` and `..` untouched. |
+| `normalizePath` | `false` | Repeated `/`, `.` and `..` are not normalized; empty segments are rejected. |
 
 - `caseSensitive: false` ignores case for static and compiled matching while
   preserving original parameter values.
 - `decodePath: true` decodes `%xx` sequences before matching. Invalid encodings
   fail closed and return no match.
+- With `normalizePath: false`, repeated `/` create empty segments and fail
+  closed. For example, `match('/a//b')` returns no match.
 - `normalizePath: true` collapses repeated `/`, removes `.` segments, resolves
   `..`, and rejects paths that would escape above `/`.
 
