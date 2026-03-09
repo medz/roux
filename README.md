@@ -111,16 +111,43 @@ Notes:
 - Paths must start with `/`.
 - `*` matches exactly one segment.
 - `**` and `**:name` match the remaining path and must be the final segment.
-- Matching is case-sensitive by default. Set `caseSensitive: false` to ignore
-  path casing.
-- Input is not URL-decoded by default. Set `decodePath: true` to decode `%xx`
-  sequences before matching.
-- Input path normalization is off by default. Set `normalizePath: true` to
-  collapse repeated `/`, remove `.` segments, resolve `..`, and ignore extra
-  trailing slashes.
 - Trailing slash on input is ignored (`/users` equals `/users/`).
 - You can register routes via constructor (`Router(routes: {...})`) or
   incrementally (`add` / `addAll`).
+
+## Input Options
+
+Input preprocessing is conservative by default:
+
+```dart
+final router = Router<String>(
+  caseSensitive: true,
+  decodePath: false,
+  normalizePath: false,
+);
+```
+
+- `caseSensitive: true` keeps path matching case-sensitive.
+- `decodePath: false` keeps `%xx` sequences untouched.
+- `normalizePath: false` keeps repeated `/`, `.` and `..` untouched.
+
+When enabled:
+
+- `caseSensitive: false` ignores casing for static and pattern matching while
+  preserving original parameter values.
+- `decodePath: true` decodes `%xx` sequences before matching. Invalid encodings
+  fail closed and return no match.
+- `normalizePath: true` collapses repeated `/`, removes `.` segments, resolves
+  `..`, and rejects paths that would escape above `/`.
+
+Processing order for lookups is:
+
+1. URL decoding, if enabled
+2. Path normalization, if enabled
+3. Route matching
+
+This means `decodePath: true` can change segment boundaries. For example,
+`/a%2Fb` becomes `/a/b` before matching.
 
 ## Matching Order
 
