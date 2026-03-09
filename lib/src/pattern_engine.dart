@@ -1,10 +1,11 @@
-import 'input_path.dart';
-import 'route_entry.dart';
+import 'route_model.dart';
+import 'route_path.dart';
 
 class PatternEngine<T> {
   PatternEngine(this.caseSensitive);
 
   final bool caseSensitive;
+  bool hasRoutes = false;
   final List<List<CompiledSlot<T>>> buckets =
       List<List<CompiledSlot<T>>>.generate(
         4,
@@ -12,22 +13,18 @@ class PatternEngine<T> {
         growable: false,
       );
 
-  bool get hasAny => buckets.any((bucket) => bucket.isNotEmpty);
-
-  bool get needsSpecificitySort => hasAny;
-
   void add(
     String pattern,
     T data,
     DuplicatePolicy duplicatePolicy,
     int registrationOrder,
   ) {
-    final compiled = compilePatternRoute(
+    final compiled = _PatternCompiler<T>(
       pattern,
       data,
       caseSensitive,
       registrationOrder,
-    );
+    ).compile();
     if (compiled == null) {
       throw FormatException('Unsupported segment syntax in route: $pattern');
     }
@@ -48,7 +45,7 @@ class PatternEngine<T> {
     int bucket,
     String path,
     int methodRank,
-    MatchCollector<T> output,
+    MatchAccumulator<T> output,
   ) {
     for (final current in buckets[bucket]) {
       final match = current.regex.firstMatch(path);
@@ -73,11 +70,8 @@ class PatternEngine<T> {
     String pattern,
     DuplicatePolicy duplicatePolicy,
   ) {
-    final bucket = compiled.bucket;
-    if (bucket < 0 || bucket >= buckets.length) {
-      throw StateError('Invalid compiled bucket: $bucket');
-    }
-    final routes = buckets[bucket];
+    hasRoutes = true;
+    final routes = buckets[compiled.bucket];
     for (var i = 0; i < routes.length; i++) {
       final current = routes[i];
       if (current.shape == compiled.shape) {
@@ -90,7 +84,10 @@ class PatternEngine<T> {
         );
         return;
       }
-      if (compiledSortsBefore(compiled.route, current.route)) {
+      if (compiled.route.sortKey > current.route.sortKey ||
+          (compiled.route.sortKey == current.route.sortKey &&
+              compiled.route.registrationOrder <
+                  current.route.registrationOrder)) {
         routes.insert(i, compiled);
         return;
       }
@@ -131,18 +128,6 @@ RouteMatch<T> materializeCompiled<T>(
   return RouteMatch<T>(route.data, params);
 }
 
-CompiledSlot<T>? compilePatternRoute<T>(
-  String pattern,
-  T data,
-  bool caseSensitive,
-  int registrationOrder,
-) => _PatternCompiler<T>(
-  pattern,
-  data,
-  caseSensitive,
-  registrationOrder,
-).compile();
-
 class _PatternCompiler<T> {
   _PatternCompiler(
     this.pattern,
@@ -170,12 +155,9 @@ class _PatternCompiler<T> {
   CompiledSlot<T>? compile() {
     if (pattern.contains('{')) {
       writeGrouped(0, pattern.length, false, regex, shape);
-      return finish(
-        needsCompiled: true,
-        bucket: compiledBucketDeferred,
-        specificity: structuredDynamicSpecificity,
-        constraintScore: 1,
-      );
+      regex.write(r'$');
+      shape.write(r'$');
+      return finish(compiledBucketDeferred, structuredDynamicSpecificity, 1);
     }
     for (
       var cursor = pattern.length == 1 ? pattern.length : 1;
@@ -186,120 +168,132 @@ class _PatternCompiler<T> {
       if (segmentEnd == cursor) throw FormatException('$emptySegment$pattern');
       if (firstCode == colonCode &&
           hasValidParamNameSlice(pattern, cursor + 1, segmentEnd)) {
-        addCapture('([^/]+)', pattern.substring(cursor + 1, segmentEnd));
+        writeCapture(
+          regex,
+          shape,
+          '([^/]+)',
+          pattern.substring(cursor + 1, segmentEnd),
+          slashPrefixed: true,
+        );
         cursor = segmentEnd + 1;
         continue;
       }
       if (segmentEnd - cursor == 1 && firstCode == asteriskCode) {
-        addCapture('([^/]+)', '${unnamedCount++}');
+        writeCapture(
+          regex,
+          shape,
+          '([^/]+)',
+          '${unnamedCount++}',
+          slashPrefixed: true,
+        );
         needsCompiled = true;
         bucket = compiledBucketLate;
         constraintScore = 1;
         cursor = segmentEnd + 1;
         continue;
       }
-      final repeated = readRepeatedParam(pattern, cursor, segmentEnd);
-      if (repeated != null) {
-        final plus = repeated.$2 == plusCode;
-        addCapture(plus ? '(.+(?:/.+)*)' : '(.*)', repeated.$1, wrap: !plus);
-        needsCompiled = true;
-        bucket = compiledBucketRepeated;
-        specificity = remainderSpecificity;
-        constraintScore = 1;
-        cursor = segmentEnd + 1;
-        continue;
-      }
-      final optional = readOptionalParamName(pattern, cursor, segmentEnd);
-      if (optional != null) {
-        addCapture('([^/]+)', optional, wrap: true);
-        needsCompiled = true;
-        bucket = compiledBucketDeferred;
-        specificity = structuredDynamicSpecificity;
-        constraintScore = 1;
-        cursor = segmentEnd + 1;
-        continue;
+      if (firstCode == colonCode) {
+        final quantifier = pattern.codeUnitAt(segmentEnd - 1);
+        if (quantifier == questionCode ||
+            quantifier == plusCode ||
+            quantifier == asteriskCode) {
+          final name = pattern.substring(cursor + 1, segmentEnd - 1);
+          if (!isValidParamName(name)) {
+            throw FormatException('Invalid parameter name in route: $pattern');
+          }
+          if (quantifier == questionCode) {
+            writeCapture(
+              regex,
+              shape,
+              '([^/]+)',
+              name,
+              slashPrefixed: true,
+              optional: true,
+            );
+            needsCompiled = true;
+            bucket = compiledBucketDeferred;
+            specificity = structuredDynamicSpecificity;
+            constraintScore = 1;
+          } else {
+            writeCapture(
+              regex,
+              shape,
+              quantifier == plusCode ? '(.+(?:/.+)*)' : '(.*)',
+              name,
+              slashPrefixed: true,
+              optional: quantifier != plusCode,
+            );
+            needsCompiled = true;
+            bucket = compiledBucketRepeated;
+            specificity = remainderSpecificity;
+            constraintScore = 1;
+          }
+          cursor = segmentEnd + 1;
+          continue;
+        }
       }
       regex.write('/');
       shape.write('/');
       writeSegment(cursor, segmentEnd);
       cursor = segmentEnd + 1;
     }
-    return finish(
-      needsCompiled: needsCompiled,
-      bucket: bucket,
-      specificity: specificity,
-      constraintScore: constraintScore,
-    );
-  }
-
-  CompiledSlot<T>? finish({
-    required bool needsCompiled,
-    required int bucket,
-    required int specificity,
-    required int constraintScore,
-  }) {
     regex.write(r'$');
     shape.write(r'$');
     if (!needsCompiled) return null;
-    return CompiledSlot<T>(
-      RegExp(regex.toString(), caseSensitive: caseSensitive),
-      shape.toString(),
-      bucket,
-      groupIndexes,
-      newRoute(
-        data,
-        paramNames,
-        null,
-        pattern,
-        pathDepth(pattern),
-        specificity,
-        staticChars,
-        constraintScore,
-        registrationOrder,
-      ),
-    );
+    return finish(bucket, specificity, constraintScore);
   }
 
-  void addCapture(String capture, String name, {bool wrap = false}) {
-    if (wrap) {
-      regex
-        ..write('(?:/')
-        ..write(capture)
-        ..write(')?');
-      shape
-        ..write('(?:/')
-        ..write(capture)
-        ..write(')?');
-    } else {
-      regex
-        ..write('/')
-        ..write(capture);
-      shape
-        ..write('/')
-        ..write(capture);
-    }
-    paramNames.add(name);
-    groupCount += 1;
-    groupIndexes.add(groupCount);
-  }
+  CompiledSlot<T> finish(int bucket, int specificity, int constraintScore) =>
+      CompiledSlot<T>(
+        RegExp(regex.toString(), caseSensitive: caseSensitive),
+        shape.toString(),
+        bucket,
+        groupIndexes,
+        newRoute(
+          data,
+          paramNames,
+          null,
+          pattern,
+          segmentCount(pattern),
+          specificity,
+          staticChars,
+          constraintScore,
+          registrationOrder,
+        ),
+      );
 
-  void writeInlineCapture(
+  void writeCapture(
     StringBuffer outRegex,
     StringBuffer outShape,
     String capture,
     String name, {
     int extraGroups = 0,
+    bool slashPrefixed = false,
+    bool optional = false,
   }) {
-    outRegex.write(capture);
-    outShape.write(capture);
+    if (optional) {
+      outRegex
+        ..write('(?:')
+        ..write(slashPrefixed ? '/' : '')
+        ..write(capture)
+        ..write(')?');
+      outShape
+        ..write('(?:')
+        ..write(slashPrefixed ? '/' : '')
+        ..write(capture)
+        ..write(')?');
+    } else {
+      if (slashPrefixed) {
+        outRegex.write('/');
+        outShape.write('/');
+      }
+      outRegex.write(capture);
+      outShape.write(capture);
+    }
     paramNames.add(name);
     groupCount += 1;
     groupIndexes.add(groupCount);
     groupCount += extraGroups;
-  }
-
-  void writeWildcardCapture(StringBuffer outRegex, StringBuffer outShape) {
-    writeInlineCapture(outRegex, outShape, '([^/]*)', '${unnamedCount++}');
   }
 
   void writeLiteral(
@@ -307,7 +301,7 @@ class _PatternCompiler<T> {
     StringBuffer outRegex,
     StringBuffer outShape,
   ) {
-    staticChars += literalCharCount(literal);
+    staticChars += staticCharCount(literal);
     outRegex.write(RegExp.escape(literal));
     outShape.write(
       RegExp.escape(caseSensitive ? literal : literal.toLowerCase()),
@@ -322,7 +316,7 @@ class _PatternCompiler<T> {
     while (cursor < end) {
       final code = pattern.codeUnitAt(cursor);
       if (code == asteriskCode) {
-        writeWildcardCapture(regex, shape);
+        writeCapture(regex, shape, '([^/]*)', '${unnamedCount++}');
         needsCompiled = true;
         if (constraintScore < 1) constraintScore = 1;
         if (segmentHasLiteral || ++captureCount > 1) {
@@ -333,15 +327,7 @@ class _PatternCompiler<T> {
         continue;
       }
       if (code == colonCode) {
-        final capture = writeNamedCapture(
-          cursor,
-          end,
-          lastWasParam,
-          regex,
-          shape,
-        );
-        cursor = capture.$1;
-        if (capture.$2 && constraintScore < 2) constraintScore = 2;
+        cursor = writeNamedCapture(cursor, end, lastWasParam, regex, shape);
         needsCompiled = true;
         if (segmentHasLiteral || ++captureCount > 1) {
           specificity = structuredDynamicSpecificity;
@@ -424,7 +410,7 @@ class _PatternCompiler<T> {
             'Unsupported segment syntax in route: $pattern',
           );
         }
-        writeWildcardCapture(outRegex, outShape);
+        writeCapture(outRegex, outShape, '([^/]*)', '${unnamedCount++}');
         cursor += 1;
         lastWasParam = false;
         continue;
@@ -436,7 +422,7 @@ class _PatternCompiler<T> {
           lastWasParam,
           outRegex,
           outShape,
-        ).$1;
+        );
         lastWasParam = true;
         continue;
       }
@@ -459,7 +445,7 @@ class _PatternCompiler<T> {
     return lastWasParam;
   }
 
-  (int, bool) writeNamedCapture(
+  int writeNamedCapture(
     int cursor,
     int end,
     bool lastWasParam,
@@ -481,54 +467,27 @@ class _PatternCompiler<T> {
     if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {
       final regexEnd = findRegexEnd(pattern, nameEnd, end);
       final body = pattern.substring(nameEnd + 1, regexEnd);
-      writeInlineCapture(
+      if (constraintScore < 2) constraintScore = 2;
+      writeCapture(
         outRegex,
         outShape,
         '($body)',
         name,
         extraGroups: countCapturingGroups(body),
       );
-      return (regexEnd + 1, true);
+      return regexEnd + 1;
     }
-    writeInlineCapture(outRegex, outShape, '([^/]+)', name);
-    return (nameEnd, false);
+    writeCapture(outRegex, outShape, '([^/]+)', name);
+    return nameEnd;
   }
-}
-
-String? readOptionalParamName(String pattern, int start, int end) {
-  if (pattern.codeUnitAt(start) != colonCode ||
-      pattern.codeUnitAt(end - 1) != questionCode) {
-    return null;
-  }
-  final name = pattern.substring(start + 1, end - 1);
-  return isValidParamName(name) ? name : null;
-}
-
-(String, int)? readRepeatedParam(String pattern, int start, int end) {
-  if (pattern.codeUnitAt(start) != colonCode) return null;
-  final quantifier = pattern.codeUnitAt(end - 1);
-  if (quantifier != questionCode &&
-      quantifier != plusCode &&
-      quantifier != asteriskCode) {
-    return null;
-  }
-  if (quantifier == questionCode) return null;
-  final name = pattern.substring(start + 1, end - 1);
-  return isValidParamName(name) ? (name, quantifier) : null;
 }
 
 int findGroupEnd(String pattern, int start) {
   var depth = 0;
   for (var i = start; i < pattern.length; i++) {
     final code = pattern.codeUnitAt(i);
-    if (code == openBraceCode) {
-      depth += 1;
-      continue;
-    }
-    if (code == closeBraceCode) {
-      depth -= 1;
-      if (depth == 0) return i;
-    }
+    if (code == openBraceCode) depth += 1;
+    if (code == closeBraceCode && --depth == 0) return i;
   }
   throw FormatException('Unclosed group in route: $pattern');
 }
@@ -540,19 +499,12 @@ int findRegexEnd(String pattern, int start, int segmentEnd) {
     final code = pattern.codeUnitAt(i);
     if (escaped) {
       escaped = false;
-      continue;
-    }
-    if (code == 92) {
+    } else if (code == 92) {
       escaped = true;
-      continue;
-    }
-    if (code == 40) {
+    } else if (code == 40) {
       depth += 1;
-      continue;
-    }
-    if (code == 41) {
-      depth -= 1;
-      if (depth == 0) return i;
+    } else if (code == 41 && --depth == 0) {
+      return i;
     }
   }
   throw FormatException('Unclosed regex in route: $pattern');
@@ -565,17 +517,12 @@ int countCapturingGroups(String body) {
     final code = body.codeUnitAt(i);
     if (escaped) {
       escaped = false;
-      continue;
-    }
-    if (code == 92) {
+    } else if (code == 92) {
       escaped = true;
-      continue;
+    } else if (code == 40 &&
+        (i + 1 >= body.length || body.codeUnitAt(i + 1) != questionCode)) {
+      count += 1;
     }
-    if (code != 40) continue;
-    if (i + 1 < body.length && body.codeUnitAt(i + 1) == questionCode) {
-      continue;
-    }
-    count += 1;
   }
   return count;
 }

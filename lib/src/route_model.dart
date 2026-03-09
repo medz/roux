@@ -37,7 +37,7 @@ class RouteEntry<T> {
   final List<String> paramNames;
   final String? wildcardName;
   final int registrationOrder;
-  final int rankPrefix;
+  final int sortKey;
   RouteEntry<T>? next;
   late final RouteMatch<T> noParamsMatch = RouteMatch<T>(data);
 
@@ -50,7 +50,7 @@ class RouteEntry<T> {
     int staticChars,
     int constraintScore,
     this.registrationOrder,
-  ) : rankPrefix =
+  ) : sortKey =
           (((specificity * 256) + depth) * 4096 + staticChars) * 4 +
           constraintScore;
 
@@ -64,45 +64,28 @@ class RouteEntry<T> {
   }
 }
 
-class MatchCollector<T> {
-  final bool sortMatches;
+class MatchAccumulator<T> {
+  final bool sortBySpecificity;
   final List<(RouteMatch<T>, RouteEntry<T>, int)> items =
       <(RouteMatch<T>, RouteEntry<T>, int)>[];
 
-  MatchCollector(this.sortMatches);
+  MatchAccumulator(this.sortBySpecificity);
 
   void add(RouteMatch<T> match, RouteEntry<T> route, int methodRank) =>
       items.add((match, route, methodRank));
 
   List<RouteMatch<T>> get matches {
-    if (sortMatches) {
+    if (sortBySpecificity) {
       items.sort((a, b) {
-        if (sortsBefore(a.$2, a.$3, b.$2, b.$3)) return -1;
-        if (sortsBefore(b.$2, b.$3, a.$2, a.$3)) return 1;
-        return 0;
+        final rankDiff = a.$2.sortKey - b.$2.sortKey;
+        if (rankDiff != 0) return rankDiff;
+        final methodDiff = a.$3 - b.$3;
+        if (methodDiff != 0) return methodDiff;
+        return a.$2.registrationOrder - b.$2.registrationOrder;
       });
     }
     return <RouteMatch<T>>[for (final item in items) item.$1];
   }
-}
-
-bool sortsBefore<T>(
-  RouteEntry<T> a,
-  int methodRankA,
-  RouteEntry<T> b,
-  int methodRankB,
-) {
-  final rankDiff = a.rankPrefix - b.rankPrefix;
-  if (rankDiff != 0) return rankDiff < 0;
-  final methodDiff = methodRankA - methodRankB;
-  if (methodDiff != 0) return methodDiff < 0;
-  return a.registrationOrder < b.registrationOrder;
-}
-
-bool compiledSortsBefore<T>(RouteEntry<T> a, RouteEntry<T> b) {
-  final diff = b.rankPrefix - a.rankPrefix;
-  if (diff != 0) return diff < 0;
-  return a.registrationOrder < b.registrationOrder;
 }
 
 RouteEntry<T> newRoute<T>(

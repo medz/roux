@@ -1,22 +1,11 @@
-import 'route_entry.dart';
+import 'route_model.dart';
 
-String? normalizeInputPath(String path) {
+String? sanitizeRoutePath(String path) {
   if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
-  final last = path.length - 1;
-  if (path.length > 1 && path.codeUnitAt(last) == slashCode) {
-    if (path.codeUnitAt(last - 1) == slashCode) return null;
-    path = path.substring(0, last);
-  }
-  for (var i = 1; i < path.length; i++) {
-    if (path.codeUnitAt(i - 1) == slashCode &&
-        path.codeUnitAt(i) == slashCode) {
-      return null;
-    }
-  }
-  return path;
+  return trimTrailingSlash(path);
 }
 
-String? normalizePathInput(String path) {
+String? normalizeRoutePath(String path) {
   if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
   final segments = <String>[];
   var cursor = 1;
@@ -44,6 +33,18 @@ String? normalizePathInput(String path) {
   return '/${segments.join('/')}';
 }
 
+String trimTrailingSlash(String path) {
+  final last = path.length - 1;
+  if (path.length > 1 && path.codeUnitAt(last) == slashCode) {
+    if (path.codeUnitAt(last - 1) == slashCode) return path;
+    return path.substring(0, last);
+  }
+  return path;
+}
+
+String canonicalizeRoutePath(String path, bool caseSensitive) =>
+    caseSensitive ? path : path.toLowerCase();
+
 int findSegmentEnd(String path, int start) {
   var i = start;
   while (i < path.length && path.codeUnitAt(i) != slashCode) {
@@ -52,7 +53,17 @@ int findSegmentEnd(String path, int start) {
   return i;
 }
 
-int pathDepth(String path) {
+bool containsEmptySegments(String path) {
+  for (var i = 1; i < path.length; i++) {
+    if (path.codeUnitAt(i - 1) == slashCode &&
+        path.codeUnitAt(i) == slashCode) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int segmentCount(String path) {
   var count = path.length == 1 ? 0 : 1;
   for (var i = 1; i < path.length; i++) {
     if (path.codeUnitAt(i) == slashCode) count += 1;
@@ -60,7 +71,7 @@ int pathDepth(String path) {
   return count;
 }
 
-int literalCharCount(String path) {
+int staticCharCount(String path) {
   var count = 0;
   for (var i = 0; i < path.length; i++) {
     if (path.codeUnitAt(i) != slashCode) count += 1;

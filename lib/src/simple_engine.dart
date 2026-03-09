@@ -1,12 +1,17 @@
 import 'dart:collection';
 
-import 'input_path.dart';
-import 'route_entry.dart';
+import 'route_model.dart';
+import 'route_path.dart';
 
 class SimpleEngine<T> {
+  SimpleEngine(this.caseSensitive);
+
+  final bool caseSensitive;
+  final Map<String, RouteEntry<T>> exactRoutes = <String, RouteEntry<T>>{};
   final SimpleNode<T> root = SimpleNode<T>();
   bool hasBranchingChoices = false;
   bool hasWildcardRoutes = false;
+  bool needsStrictPathValidation = false;
   RouteEntry<T>? globalFallback;
   int maxParamDepth = 0;
   bool straightDirty = false;
@@ -15,6 +20,243 @@ class SimpleEngine<T> {
       <Map<String, RouteEntry<T>>?>[];
   List<RouteEntry<T>?> straightExacts = <RouteEntry<T>?>[];
   List<RouteEntry<T>?> straightWildcards = <RouteEntry<T>?>[];
+  Map<String, RouteEntry<T>>? straightTailLeaves;
+  int straightParamCount = 0;
+  String? straightParam0;
+  String? straightParam1;
+
+  bool add(
+    String path,
+    T data,
+    DuplicatePolicy duplicatePolicy,
+    int registrationOrder,
+  ) {
+    var hasReservedToken = false;
+    var prevSlash = true;
+    var exactDepth = 0;
+    var exactStaticChars = 0;
+    for (var i = 1; i < path.length; i++) {
+      final code = path.codeUnitAt(i);
+      if (code == slashCode) {
+        if (prevSlash) throw FormatException('$emptySegment$path');
+        exactDepth += 1;
+        prevSlash = true;
+        continue;
+      }
+      if (code == colonCode ||
+          code == asteriskCode ||
+          code == openBraceCode ||
+          code == closeBraceCode ||
+          code == questionCode) {
+        hasReservedToken = true;
+        break;
+      }
+      exactStaticChars += 1;
+      prevSlash = false;
+    }
+    if (!hasReservedToken && path.length > 1 && !prevSlash) exactDepth += 1;
+    if (!hasReservedToken) {
+      addExact(
+        path,
+        data,
+        duplicatePolicy,
+        registrationOrder,
+        exactDepth,
+        exactStaticChars,
+      );
+      return true;
+    }
+
+    List<String>? paramNames;
+    var paramCount = 0;
+    var staticChars = 0;
+    var depth = 0;
+    var node = root;
+    RouteEntry<T> buildRoute(
+      String? wildcardName,
+      int routeDepth,
+      int routeSpecificity,
+      int routeStaticChars,
+      int constraintScore,
+    ) => newRoute(
+      data,
+      paramNames ?? const <String>[],
+      wildcardName,
+      path,
+      routeDepth,
+      routeSpecificity,
+      routeStaticChars,
+      constraintScore,
+      registrationOrder,
+    );
+
+    void finishSimple() {
+      if (paramCount > maxParamDepth) maxParamDepth = paramCount;
+      straightDirty = true;
+    }
+
+    for (
+      var cursor = path.length == 1 ? path.length : 1;
+      cursor < path.length;
+    ) {
+      var segmentEnd = cursor;
+      var hasReservedInSegment = false;
+      while (segmentEnd < path.length) {
+        final code = path.codeUnitAt(segmentEnd);
+        if (code == slashCode) break;
+        if (code == colonCode ||
+            code == asteriskCode ||
+            code == openBraceCode ||
+            code == closeBraceCode ||
+            code == questionCode) {
+          hasReservedInSegment = true;
+        }
+        segmentEnd += 1;
+      }
+      if (segmentEnd == cursor) throw FormatException('$emptySegment$path');
+
+      final firstCode = path.codeUnitAt(cursor);
+      final doubleWildcardName = firstCode == asteriskCode
+          ? readDoubleWildcardName(path, cursor, segmentEnd)
+          : null;
+      if (doubleWildcardName != null) {
+        if (segmentEnd != path.length) {
+          throw FormatException(
+            'Double wildcard must be the last segment: $path',
+          );
+        }
+        final route = buildRoute(
+          doubleWildcardName,
+          depth,
+          remainderSpecificity,
+          staticChars,
+          0,
+        );
+        if (cursor == 1 && paramCount == 0) {
+          hasWildcardRoutes = true;
+          needsStrictPathValidation = true;
+          globalFallback = mergeRouteEntries(
+            globalFallback,
+            route,
+            path,
+            duplicatePolicy,
+            dupFallback,
+          );
+        } else {
+          hasWildcardRoutes = true;
+          node.wildcardRoute = mergeRouteEntries(
+            node.wildcardRoute,
+            route,
+            path,
+            duplicatePolicy,
+            dupWildcard,
+          );
+        }
+        finishSimple();
+        return true;
+      }
+
+      if (firstCode == colonCode) {
+        if (!hasValidParamNameSlice(path, cursor + 1, segmentEnd)) return false;
+        if (node.staticChild != null ||
+            node.staticMap != null ||
+            node.leafRoutes != null) {
+          hasBranchingChoices = true;
+        }
+        final paramName = path.substring(cursor + 1, segmentEnd);
+        node = node.paramChild ??= SimpleNode<T>();
+        (paramNames ??= <String>[]).add(paramName);
+        paramCount += 1;
+      } else {
+        if (hasReservedInSegment) return false;
+        final key = canonicalizeRoutePath(
+          path.substring(cursor, segmentEnd),
+          caseSensitive,
+        );
+        if (segmentEnd == path.length) {
+          if (node.paramChild != null || node.wildcardRoute != null) {
+            hasBranchingChoices = true;
+          }
+          final routes = node.leafRoutes ??= <String, RouteEntry<T>>{};
+          routes[key] = mergeRouteEntries(
+            routes[key],
+            buildRoute(
+              null,
+              depth + 1,
+              paramCount == 0 ? exactSpecificity : singleDynamicSpecificity,
+              staticChars + segmentEnd - cursor,
+              0,
+            ),
+            path,
+            duplicatePolicy,
+            dupShape,
+          );
+          finishSimple();
+          return true;
+        }
+        if (node.paramChild != null) hasBranchingChoices = true;
+        node = node.getOrCreateStaticChildSlice(key);
+        staticChars += segmentEnd - cursor;
+      }
+
+      depth += 1;
+      cursor = segmentEnd + 1;
+    }
+
+    node.exactRoute = mergeRouteEntries(
+      node.exactRoute,
+      buildRoute(
+        null,
+        depth,
+        paramCount == 0 ? exactSpecificity : singleDynamicSpecificity,
+        staticChars,
+        0,
+      ),
+      path,
+      duplicatePolicy,
+      dupShape,
+    );
+    finishSimple();
+    return true;
+  }
+
+  void addExact(
+    String path,
+    T data,
+    DuplicatePolicy duplicatePolicy,
+    int registrationOrder,
+    int depth,
+    int staticChars,
+  ) {
+    final canonical = canonicalizeRoutePath(path, caseSensitive);
+    exactRoutes[canonical] = mergeRouteEntries(
+      exactRoutes[canonical],
+      newRoute(
+        data,
+        const <String>[],
+        null,
+        path,
+        depth,
+        exactSpecificity,
+        staticChars,
+        0,
+        registrationOrder,
+      ),
+      path,
+      duplicatePolicy,
+      dupShape,
+    );
+  }
+
+  RouteMatch<T>? matchExact(String path) => exactRoutes.isEmpty
+      ? null
+      : exactRoutes[canonicalizeRoutePath(path, caseSensitive)]?.noParamsMatch;
+
+  void collectExact(String path, int methodRank, MatchAccumulator<T> output) {
+    if (exactRoutes.isEmpty) return;
+    final exact = exactRoutes[canonicalizeRoutePath(path, caseSensitive)];
+    if (exact != null) collectSlot(exact, path, null, 0, methodRank, output);
+  }
 
   void rebuildStraightPlan() {
     straightSegments = <String?>[];
@@ -37,13 +279,148 @@ class SimpleEngine<T> {
       straightExacts.add(node.exactRoute);
       straightWildcards.add(node.wildcardRoute);
     }
+    final last = straightLeaves.length - 1;
+    var tailOnly =
+        last >= 0 &&
+        straightLeaves[last] != null &&
+        straightExacts[last] == null &&
+        straightWildcards[last] == null;
+    for (var i = 0; tailOnly && i < last; i++) {
+      if (straightLeaves[i] != null ||
+          straightExacts[i] != null ||
+          straightWildcards[i] != null) {
+        tailOnly = false;
+      }
+    }
+    final tailLeaves = tailOnly ? straightLeaves[last] : null;
+    straightTailLeaves = tailLeaves;
+    if (tailLeaves == null || tailLeaves.isEmpty) {
+      straightParamCount = 0;
+      straightParam0 = null;
+      straightParam1 = null;
+      return;
+    }
+    final sample = tailLeaves.values.first;
+    straightParamCount = sample.paramNames.length;
+    straightParam0 = straightParamCount > 0 ? sample.paramNames[0] : null;
+    straightParam1 = straightParamCount > 1 ? sample.paramNames[1] : null;
   }
 
-  RouteMatch<T>? matchStraight(String path, bool caseSensitive) {
+  RouteMatch<T>? matchStraight(String path) {
     if (straightDirty || straightExacts.isEmpty) {
       rebuildStraightPlan();
       straightDirty = false;
     }
+    if (caseSensitive && !hasWildcardRoutes && maxParamDepth <= 2) {
+      final tailLeaves = straightTailLeaves;
+      if (tailLeaves != null) {
+        return matchStraightTailLeaf(path, tailLeaves);
+      }
+      return matchStraightFast(path);
+    }
+    return matchStraightGeneric(path);
+  }
+
+  RouteMatch<T>? matchStraightTailLeaf(
+    String path,
+    Map<String, RouteEntry<T>> tailLeaves,
+  ) {
+    final segments = straightSegments;
+    var cursor = 1;
+    var depth = 0;
+    var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
+
+    while (depth < segments.length) {
+      if (cursor >= path.length) return null;
+      final segmentEnd = findSegmentEnd(path, cursor);
+      if (segmentEnd == cursor) return null;
+      final staticKey = segments[depth];
+      if (staticKey != null) {
+        if (!equalsPathSlice(staticKey, path, cursor, segmentEnd)) return null;
+      } else if (p0End == 0) {
+        p0Start = cursor;
+        p0End = segmentEnd;
+      } else {
+        p1Start = cursor;
+        p1End = segmentEnd;
+      }
+      depth += 1;
+      cursor = segmentEnd < path.length ? segmentEnd + 1 : path.length;
+    }
+
+    if (cursor >= path.length) return null;
+    final segmentEnd = findSegmentEnd(path, cursor);
+    if (segmentEnd == cursor || segmentEnd != path.length) return null;
+    final leaf = tailLeaves[path.substring(cursor, segmentEnd)];
+    if (leaf == null) return null;
+    switch (straightParamCount) {
+      case 0:
+        return leaf.noParamsMatch;
+      case 1:
+        return RouteMatch<T>(
+          leaf.data,
+          CompactParamsMap.one(straightParam0!, path.substring(p0Start, p0End)),
+        );
+      case 2:
+        return RouteMatch<T>(
+          leaf.data,
+          CompactParamsMap.two(
+            straightParam0!,
+            path.substring(p0Start, p0End),
+            straightParam1!,
+            path.substring(p1Start, p1End),
+          ),
+        );
+    }
+    return buildSmallMatch(leaf, path, p0Start, p0End, p1Start, p1End);
+  }
+
+  RouteMatch<T>? matchStraightFast(String path) {
+    final segments = straightSegments;
+    final leaves = straightLeaves;
+    final exacts = straightExacts;
+    var cursor = 1;
+    var depth = 0;
+    var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
+
+    while (true) {
+      if (cursor >= path.length) {
+        final exact = exacts[depth];
+        return exact == null
+            ? null
+            : buildSmallMatch(exact, path, p0Start, p0End, p1Start, p1End);
+      }
+      final segmentEnd = findSegmentEnd(path, cursor);
+      if (segmentEnd == cursor) return null;
+      final nextCursor = segmentEnd < path.length
+          ? segmentEnd + 1
+          : path.length;
+      if (nextCursor == path.length) {
+        final leafRoutes = leaves[depth];
+        final leaf = leafRoutes == null
+            ? null
+            : leafRoutes[path.substring(cursor, segmentEnd)];
+        if (leaf != null) {
+          return buildSmallMatch(leaf, path, p0Start, p0End, p1Start, p1End);
+        }
+      }
+      if (depth >= segments.length) return null;
+      final staticKey = segments[depth];
+      if (staticKey != null) {
+        if (!equalsPathSlice(staticKey, path, cursor, segmentEnd)) return null;
+      } else if (p0End == 0) {
+        p0Start = cursor;
+        p0End = segmentEnd;
+      } else {
+        p1Start = cursor;
+        p1End = segmentEnd;
+      }
+      depth += 1;
+      cursor = nextCursor;
+    }
+  }
+
+  RouteMatch<T>? matchStraightGeneric(String path) {
     final allowWildcards = hasWildcardRoutes;
     final smallParams = maxParamDepth <= 2;
     ParamStack? paramStack;
@@ -61,31 +438,18 @@ class SimpleEngine<T> {
     }
 
     RouteMatch<T> buildMatch(RouteEntry<T> route, int wildcardStart) {
-      if (!smallParams) {
-        return materialize(route, path, paramStack, wildcardStart);
-      }
-      final names = route.paramNames;
-      if (route.wildcardName == null) {
-        if (names.isEmpty) return route.noParamsMatch;
-        if (names.length == 1) {
-          return RouteMatch<T>(
-            route.data,
-            CompactParamsMap.one(names[0], path.substring(p0Start, p0End)),
-          );
-        }
-        if (names.length == 2) {
-          return RouteMatch<T>(
-            route.data,
-            CompactParamsMap.two(
-              names[0],
-              path.substring(p0Start, p0End),
-              names[1],
-              path.substring(p1Start, p1End),
-            ),
-          );
-        }
-      }
-      return materialize(route, path, captureStack(), wildcardStart);
+      return !smallParams
+          ? materialize(route, path, paramStack, wildcardStart)
+          : buildSmallMatch(
+              route,
+              path,
+              p0Start,
+              p0End,
+              p1Start,
+              p1End,
+              captures: captureStack(),
+              wildcardStart: wildcardStart,
+            );
     }
 
     while (true) {
@@ -154,17 +518,47 @@ class SimpleEngine<T> {
     }
   }
 
-  RouteMatch<T>? match(String path, bool caseSensitive, bool allowWildcards) {
-    return walkNode(root, path, caseSensitive, allowWildcards, 1, 0, null);
+  RouteMatch<T> buildSmallMatch(
+    RouteEntry<T> route,
+    String path,
+    int p0Start,
+    int p0End,
+    int p1Start,
+    int p1End, {
+    ParamStack? captures,
+    int wildcardStart = 0,
+  }) {
+    if (route.wildcardName != null) {
+      return materialize(route, path, captures, wildcardStart);
+    }
+    final names = route.paramNames;
+    if (names.isEmpty) return route.noParamsMatch;
+    if (names.length == 1) {
+      return RouteMatch<T>(
+        route.data,
+        CompactParamsMap.one(names[0], path.substring(p0Start, p0End)),
+      );
+    }
+    if (names.length == 2) {
+      return RouteMatch<T>(
+        route.data,
+        CompactParamsMap.two(
+          names[0],
+          path.substring(p0Start, p0End),
+          names[1],
+          path.substring(p1Start, p1End),
+        ),
+      );
+    }
+    return materialize(route, path, captures, wildcardStart);
   }
 
-  void collect(
-    String path,
-    bool caseSensitive,
-    int methodRank,
-    MatchCollector<T> output,
-  ) {
-    walkNode(root, path, caseSensitive, true, 1, 0, null, methodRank, output);
+  RouteMatch<T>? match(String path, bool allowWildcards) {
+    return walkNode(root, path, allowWildcards, 1, 0, null);
+  }
+
+  void collect(String path, int methodRank, MatchAccumulator<T> output) {
+    walkNode(root, path, true, 1, 0, null, methodRank, output);
   }
 
   RouteMatch<T> materialize(
@@ -185,31 +579,18 @@ class SimpleEngine<T> {
     ParamStack? paramValues,
     int wildcardStart,
     int methodRank,
-    MatchCollector<T> output,
+    MatchAccumulator<T> output,
   ) {
-    if (slot.wildcardName != null || slot.paramNames.isNotEmpty) {
-      for (
-        RouteEntry<T>? current = slot;
-        current != null;
-        current = current.next
-      ) {
-        output.add(
-          RouteMatch<T>(
-            current.data,
-            materializeParams(current, path, paramValues, wildcardStart),
-          ),
-          current,
-          methodRank,
-        );
-      }
-      return;
-    }
     for (
       RouteEntry<T>? current = slot;
       current != null;
       current = current.next
     ) {
-      output.add(current.noParamsMatch, current, methodRank);
+      output.add(
+        materialize(current, path, paramValues, wildcardStart),
+        current,
+        methodRank,
+      );
     }
   }
 
@@ -269,13 +650,12 @@ class SimpleEngine<T> {
   RouteMatch<T>? walkNode(
     SimpleNode<T> node,
     String path,
-    bool caseSensitive,
     bool allowWildcards,
     int cursor,
     int paramLength,
     ParamStack? paramStack, [
     int? methodRank,
-    MatchCollector<T>? output,
+    MatchAccumulator<T>? output,
   ]) {
     final collecting = output != null;
     final captures = paramStack;
@@ -338,7 +718,6 @@ class SimpleEngine<T> {
       final match = walkNode(
         staticChild,
         path,
-        caseSensitive,
         allowWildcards,
         nextCursor,
         paramLength,
@@ -358,7 +737,6 @@ class SimpleEngine<T> {
       final match = walkNode(
         paramChild,
         path,
-        caseSensitive,
         allowWildcards,
         nextCursor,
         params.length,
@@ -413,19 +791,14 @@ class SimpleNode<T> {
     int end,
     bool caseSensitive,
   ) {
-    if (!caseSensitive)
-      return findStaticChild(path.substring(start, end).toLowerCase());
+    if (!caseSensitive) return findStaticChild(sliceKey(path, start, end));
     final map = staticMap;
     if (map != null) return map[path.substring(start, end)];
     SimpleNode<T>? prev;
     var child = staticChild;
     while (child != null) {
       if (equalsPathSlice(child.staticKey!, path, start, end)) {
-        if (prev != null) {
-          prev.staticNext = child.staticNext;
-          child.staticNext = staticChild;
-          staticChild = child;
-        }
+        promoteStaticChild(prev, child);
         return child;
       }
       prev = child;
@@ -441,11 +814,7 @@ class SimpleNode<T> {
     var child = staticChild;
     while (child != null) {
       if (child.staticKey == key) {
-        if (prev != null) {
-          prev.staticNext = child.staticNext;
-          child.staticNext = staticChild;
-          staticChild = child;
-        }
+        promoteStaticChild(prev, child);
         return child;
       }
       prev = child;
@@ -462,10 +831,16 @@ class SimpleNode<T> {
   ) {
     final routes = leafRoutes;
     if (routes == null) return null;
-    final key = caseSensitive
+    return routes[caseSensitive
         ? path.substring(start, end)
-        : path.substring(start, end).toLowerCase();
-    return routes[key];
+        : sliceKey(path, start, end)];
+  }
+
+  void promoteStaticChild(SimpleNode<T>? prev, SimpleNode<T> child) {
+    if (prev == null) return;
+    prev.staticNext = child.staticNext;
+    child.staticNext = staticChild;
+    staticChild = child;
   }
 }
 
@@ -486,6 +861,9 @@ bool equalsFoldedPathSlice(String key, String path, int start, int end) {
   }
   return true;
 }
+
+String sliceKey(String path, int start, int end) =>
+    path.substring(start, end).toLowerCase();
 
 class ParamStack {
   final List<int> values;

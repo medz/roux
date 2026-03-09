@@ -1,8 +1,8 @@
-export 'route_entry.dart' show DuplicatePolicy, RouteMatch;
+export 'route_model.dart' show DuplicatePolicy, RouteMatch;
 
-import 'input_path.dart';
+import 'route_path.dart';
 import 'pattern_engine.dart';
-import 'route_entry.dart';
+import 'route_model.dart';
 import 'simple_engine.dart';
 
 class Router<T> {
@@ -16,16 +16,17 @@ class Router<T> {
        _caseSensitive = caseSensitive,
        _decodePath = decodePath,
        _normalizePath = normalizePath,
-       _anyRoutes = RouteSet<T>(caseSensitive) {
+       _sharedRoutes = RouteSet<T>(caseSensitive) {
     if (routes != null && routes.isNotEmpty) addAll(routes);
   }
 
-  final RouteSet<T> _anyRoutes;
+  final RouteSet<T> _sharedRoutes;
   final MethodTable<T> _methodRoutes = MethodTable<T>();
   final DuplicatePolicy _duplicatePolicy;
   final bool _caseSensitive;
   final bool _decodePath;
   final bool _normalizePath;
+  bool _hasSharedRoutes = false;
   int _nextRegistrationOrder = 0;
 
   void add(
@@ -34,7 +35,8 @@ class Router<T> {
     String? method,
     DuplicatePolicy? duplicatePolicy,
   }) {
-    routeSetForWrite(method).addPattern(
+    if (method == null) _hasSharedRoutes = true;
+    _routeSetFor(method).addRoute(
       path,
       data,
       duplicatePolicy ?? _duplicatePolicy,
@@ -47,10 +49,11 @@ class Router<T> {
     String? method,
     DuplicatePolicy? duplicatePolicy,
   }) {
-    final routeSet = routeSetForWrite(method);
+    if (method == null && routes.isNotEmpty) _hasSharedRoutes = true;
+    final routeSet = _routeSetFor(method);
     final policy = duplicatePolicy ?? _duplicatePolicy;
     for (final entry in routes.entries) {
-      routeSet.addPattern(
+      routeSet.addRoute(
         entry.key,
         entry.value,
         policy,
@@ -60,32 +63,77 @@ class Router<T> {
   }
 
   RouteMatch<T>? match(String path, {String? method}) {
-    final normalized = prepareInputPath(path);
-    if (normalized == null) return null;
+    if (!_hasSharedRoutes && !_decodePath && !_normalizePath) {
+      RouteSet<T>? routeSet;
+      switch (method) {
+        case 'GET':
+          routeSet = _methodRoutes.commonRoutes[0];
+        case 'POST':
+          routeSet = _methodRoutes.commonRoutes[1];
+        case 'PUT':
+          routeSet = _methodRoutes.commonRoutes[2];
+        case 'PATCH':
+          routeSet = _methodRoutes.commonRoutes[3];
+        case 'DELETE':
+          routeSet = _methodRoutes.commonRoutes[4];
+        case 'HEAD':
+          routeSet = _methodRoutes.commonRoutes[5];
+        case 'OPTIONS':
+          routeSet = _methodRoutes.commonRoutes[6];
+      }
+      if (routeSet != null && !routeSet.needsStrictPathValidation) {
+        if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
+        final last = path.length - 1;
+        if (path.length > 1 &&
+            path.codeUnitAt(last) == slashCode &&
+            path.codeUnitAt(last - 1) != slashCode) {
+          path = path.substring(0, last);
+        }
+        return routeSet.matchBest(path);
+      }
+    }
     final routeSet = method == null ? null : _methodRoutes.lookupMethod(method);
-    return (routeSet == null ? null : routeSet.match(normalized)) ??
-        _anyRoutes.match(normalized);
+    final strict =
+        _sharedRoutes.needsStrictPathValidation ||
+        (routeSet?.needsStrictPathValidation ?? false);
+    final normalized = _preparePath(path, strict);
+    if (normalized == null) {
+      return null;
+    }
+    return routeSet?.matchBest(normalized) ??
+        _sharedRoutes.matchBest(normalized);
   }
 
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
-    final normalized = prepareInputPath(path);
-    if (normalized == null) return <RouteMatch<T>>[];
     final routeSet = method == null ? null : _methodRoutes.lookupMethod(method);
-    final collected = MatchCollector<T>(
+    final strict =
+        _sharedRoutes.needsStrictPathValidation ||
+        (routeSet?.needsStrictPathValidation ?? false);
+    final normalized = _preparePath(path, strict);
+    if (normalized == null) {
+      return <RouteMatch<T>>[];
+    }
+    final collected = MatchAccumulator<T>(
       routeSet != null ||
-          _anyRoutes.needsSpecificitySort ||
-          (routeSet != null && routeSet.needsSpecificitySort),
+          _sharedRoutes.needsSpecificitySort ||
+          routeSet?.needsSpecificitySort == true,
     );
-    _anyRoutes.collect(normalized, 0, collected);
-    if (routeSet != null) routeSet.collect(normalized, 1, collected);
+    _sharedRoutes.collectMatches(normalized, 0, collected);
+    if (routeSet != null) routeSet.collectMatches(normalized, 1, collected);
     return collected.matches;
   }
 
-  RouteSet<T> routeSetForWrite(String? method) => method == null
-      ? _anyRoutes
+  RouteSet<T> _routeSetFor(String? method) => method == null
+      ? _sharedRoutes
       : _methodRoutes.forWriteMethod(method, _caseSensitive);
 
-  String? prepareInputPath(String path) {
+  String? _preparePath(String path, bool strict) {
+    if (!_decodePath && !_normalizePath) {
+      if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
+      if (!strict) return trimTrailingSlash(path);
+      final trimmed = trimTrailingSlash(path);
+      return containsEmptySegments(trimmed) ? null : trimmed;
+    }
     if (_decodePath && path.contains('%')) {
       try {
         path = Uri.decodeFull(path);
@@ -93,26 +141,34 @@ class Router<T> {
         return null;
       }
     }
-    return _normalizePath ? normalizePathInput(path) : normalizeInputPath(path);
+    final normalized = _normalizePath
+        ? normalizeRoutePath(path)
+        : sanitizeRoutePath(path);
+    if (normalized == null || !strict) return normalized;
+    return containsEmptySegments(normalized) ? null : normalized;
   }
 }
 
 class RouteSet<T> {
-  RouteSet(this.caseSensitive)
-    : simple = SimpleEngine<T>(),
-      pattern = PatternEngine<T>(caseSensitive);
+  RouteSet(bool caseSensitive)
+    : simple = SimpleEngine<T>(caseSensitive),
+      patterns = PatternEngine<T>(caseSensitive);
 
-  final bool caseSensitive;
-  final Map<String, RouteEntry<T>> exactRoutes = <String, RouteEntry<T>>{};
+  static const int _hybridMode = 0, _simpleMode = 1, _straightMode = 2;
+
   final SimpleEngine<T> simple;
-  final PatternEngine<T> pattern;
+  final PatternEngine<T> patterns;
+  int _matchMode = _straightMode;
 
   bool get needsSpecificitySort =>
       simple.hasBranchingChoices ||
       simple.root.paramChild != null ||
-      pattern.needsSpecificitySort;
+      patterns.hasRoutes;
 
-  void addPattern(
+  bool get needsStrictPathValidation =>
+      simple.needsStrictPathValidation || patterns.hasRoutes;
+
+  void addRoute(
     String patternPath,
     T data,
     DuplicatePolicy duplicatePolicy,
@@ -122,264 +178,67 @@ class RouteSet<T> {
       throw FormatException('Route pattern must start with "/": $patternPath');
     }
 
-    var end = patternPath.length;
-    if (end > 1 && patternPath.codeUnitAt(end - 1) == slashCode) {
-      if (patternPath.codeUnitAt(end - 2) == slashCode) {
-        throw FormatException('$emptySegment$patternPath');
-      }
-      end -= 1;
-    }
-
-    var hasReservedToken = false;
-    var prevSlash = true;
-    var exactDepth = 0;
-    var exactStaticChars = 0;
-    for (var i = 1; i < end; i++) {
-      final code = patternPath.codeUnitAt(i);
-      if (code == slashCode) {
-        if (prevSlash) throw FormatException('$emptySegment$patternPath');
-        exactDepth += 1;
-        prevSlash = true;
-        continue;
-      }
-      if (code == colonCode ||
-          code == asteriskCode ||
-          code == openBraceCode ||
-          code == closeBraceCode ||
-          code == questionCode) {
-        hasReservedToken = true;
-        break;
-      }
-      exactStaticChars += 1;
-      prevSlash = false;
-    }
-    if (!hasReservedToken && end > 1 && !prevSlash) exactDepth += 1;
-
-    final normalized = end == patternPath.length
-        ? patternPath
-        : patternPath.substring(0, end);
-    final canonical = canonicalPath(normalized, caseSensitive);
-    if (!hasReservedToken) {
-      exactRoutes[canonical] = mergeRouteEntries(
-        exactRoutes[canonical],
-        newRoute(
-          data,
-          const <String>[],
-          null,
-          normalized,
-          exactDepth,
-          exactSpecificity,
-          exactStaticChars,
-          0,
-          registrationOrder,
-        ),
-        normalized,
-        duplicatePolicy,
-        dupShape,
-      );
+    final normalized = trimTrailingSlash(patternPath);
+    if (simple.add(normalized, data, duplicatePolicy, registrationOrder)) {
+      _refreshMatchMode();
       return;
     }
-
-    List<String>? paramNames;
-    var paramCount = 0;
-    var staticChars = 0;
-    var depth = 0;
-    var node = simple.root;
-    RouteEntry<T> buildRoute(
-      String? wildcardName,
-      int routeDepth,
-      int routeSpecificity,
-      int routeStaticChars,
-      int constraintScore,
-    ) => newRoute(
-      data,
-      paramNames ?? const <String>[],
-      wildcardName,
-      normalized,
-      routeDepth,
-      routeSpecificity,
-      routeStaticChars,
-      constraintScore,
-      registrationOrder,
-    );
-
-    void finishSimple() {
-      if (paramCount > simple.maxParamDepth) {
-        simple.maxParamDepth = paramCount;
-      }
-      simple.straightDirty = true;
-    }
-
-    for (var cursor = end == 1 ? end : 1; cursor < end;) {
-      var segmentEnd = cursor;
-      var hasReservedInSegment = false;
-      while (segmentEnd < end) {
-        final code = patternPath.codeUnitAt(segmentEnd);
-        if (code == slashCode) break;
-        if (code == colonCode ||
-            code == asteriskCode ||
-            code == openBraceCode ||
-            code == closeBraceCode ||
-            code == questionCode) {
-          hasReservedInSegment = true;
-        }
-        segmentEnd += 1;
-      }
-      if (segmentEnd == cursor)
-        throw FormatException('$emptySegment$patternPath');
-
-      final firstCode = patternPath.codeUnitAt(cursor);
-      final doubleWildcardName = firstCode == asteriskCode
-          ? readDoubleWildcardName(patternPath, cursor, segmentEnd)
-          : null;
-      if (doubleWildcardName != null) {
-        if (segmentEnd != end) {
-          throw FormatException(
-            'Double wildcard must be the last segment: $normalized',
-          );
-        }
-        final route = buildRoute(
-          doubleWildcardName,
-          depth,
-          remainderSpecificity,
-          staticChars,
-          0,
-        );
-        if (cursor == 1 && paramCount == 0) {
-          simple.hasWildcardRoutes = true;
-          simple.globalFallback = mergeRouteEntries(
-            simple.globalFallback,
-            route,
-            normalized,
-            duplicatePolicy,
-            dupFallback,
-          );
-        } else {
-          simple.hasWildcardRoutes = true;
-          node.wildcardRoute = mergeRouteEntries(
-            node.wildcardRoute,
-            route,
-            normalized,
-            duplicatePolicy,
-            dupWildcard,
-          );
-        }
-        finishSimple();
-        return;
-      }
-
-      if (firstCode == colonCode) {
-        if (!hasValidParamNameSlice(patternPath, cursor + 1, segmentEnd)) {
-          pattern.add(normalized, data, duplicatePolicy, registrationOrder);
-          return;
-        }
-        if (node.staticChild != null ||
-            node.staticMap != null ||
-            node.leafRoutes != null) {
-          simple.hasBranchingChoices = true;
-        }
-        final paramName = patternPath.substring(cursor + 1, segmentEnd);
-        node = node.paramChild ??= SimpleNode<T>();
-        (paramNames ??= <String>[]).add(paramName);
-        paramCount += 1;
-      } else {
-        if (hasReservedInSegment) {
-          pattern.add(normalized, data, duplicatePolicy, registrationOrder);
-          return;
-        }
-        final key = canonicalPath(
-          patternPath.substring(cursor, segmentEnd),
-          caseSensitive,
-        );
-        if (segmentEnd == end) {
-          if (node.paramChild != null || node.wildcardRoute != null) {
-            simple.hasBranchingChoices = true;
-          }
-          final routes = node.leafRoutes ??= <String, RouteEntry<T>>{};
-          routes[key] = mergeRouteEntries(
-            routes[key],
-            buildRoute(
-              null,
-              depth + 1,
-              paramCount == 0 ? exactSpecificity : singleDynamicSpecificity,
-              staticChars + segmentEnd - cursor,
-              0,
-            ),
-            normalized,
-            duplicatePolicy,
-            dupShape,
-          );
-          finishSimple();
-          return;
-        }
-        if (node.paramChild != null) simple.hasBranchingChoices = true;
-        node = node.getOrCreateStaticChildSlice(key);
-        staticChars += segmentEnd - cursor;
-      }
-
-      depth += 1;
-      cursor = segmentEnd + 1;
-    }
-
-    node.exactRoute = mergeRouteEntries(
-      node.exactRoute,
-      buildRoute(
-        null,
-        depth,
-        paramCount == 0 ? exactSpecificity : singleDynamicSpecificity,
-        staticChars,
-        0,
-      ),
-      normalized,
-      duplicatePolicy,
-      dupShape,
-    );
-    finishSimple();
+    patterns.add(normalized, data, duplicatePolicy, registrationOrder);
+    _refreshMatchMode();
   }
 
-  RouteMatch<T>? match(String normalized) {
-    if (exactRoutes.isNotEmpty) {
-      final exact =
-          exactRoutes[canonicalPath(normalized, caseSensitive)]?.noParamsMatch;
-      if (exact != null) return exact;
+  RouteMatch<T>? matchBest(String normalized) {
+    switch (_matchMode) {
+      case _straightMode:
+        return simple.matchStraight(normalized);
+      case _simpleMode:
+        final exact = simple.matchExact(normalized);
+        if (exact != null) return exact;
+        return simple.match(normalized, true);
     }
-    if (!pattern.hasAny && simple.globalFallback == null) {
-      return simple.hasBranchingChoices
-          ? simple.match(normalized, caseSensitive, true)
-          : simple.matchStraight(normalized, caseSensitive);
-    }
-    return pattern.matchBucket(compiledBucketHigh, normalized) ??
-        simple.match(normalized, caseSensitive, false) ??
-        pattern.matchBucket(compiledBucketLate, normalized) ??
-        pattern.matchBucket(compiledBucketRepeated, normalized) ??
-        simple.match(normalized, caseSensitive, true) ??
-        pattern.matchBucket(compiledBucketDeferred, normalized) ??
+    final exact = simple.matchExact(normalized);
+    if (exact != null) return exact;
+    return patterns.matchBucket(compiledBucketHigh, normalized) ??
+        simple.match(normalized, false) ??
+        patterns.matchBucket(compiledBucketLate, normalized) ??
+        patterns.matchBucket(compiledBucketRepeated, normalized) ??
+        simple.match(normalized, true) ??
+        patterns.matchBucket(compiledBucketDeferred, normalized) ??
         (simple.globalFallback == null
             ? null
             : simple.materialize(simple.globalFallback!, normalized, null, 1));
   }
 
-  void collect(String normalized, int methodRank, MatchCollector<T> output) {
+  void _refreshMatchMode() {
+    if (patterns.hasRoutes || simple.globalFallback != null) {
+      _matchMode = _hybridMode;
+      return;
+    }
+    _matchMode = simple.exactRoutes.isEmpty && !simple.hasBranchingChoices
+        ? _straightMode
+        : _simpleMode;
+  }
+
+  void collectMatches(
+    String normalized,
+    int methodRank,
+    MatchAccumulator<T> output,
+  ) {
     final fallback = simple.globalFallback;
     if (fallback != null) {
       simple.collectSlot(fallback, normalized, null, 1, methodRank, output);
     }
-    pattern.collectBucket(
+    patterns.collectBucket(
       compiledBucketRepeated,
       normalized,
       methodRank,
       output,
     );
-    simple.collect(normalized, caseSensitive, methodRank, output);
-    pattern.collectBucket(compiledBucketHigh, normalized, methodRank, output);
-    pattern.collectBucket(compiledBucketLate, normalized, methodRank, output);
-    if (exactRoutes.isNotEmpty) {
-      final exact = exactRoutes[canonicalPath(normalized, caseSensitive)];
-      if (exact != null) {
-        simple.collectSlot(exact, normalized, null, 0, methodRank, output);
-      }
-    }
-    pattern.collectBucket(
+    simple.collect(normalized, methodRank, output);
+    patterns.collectBucket(compiledBucketHigh, normalized, methodRank, output);
+    patterns.collectBucket(compiledBucketLate, normalized, methodRank, output);
+    simple.collectExact(normalized, methodRank, output);
+    patterns.collectBucket(
       compiledBucketDeferred,
       normalized,
       methodRank,
@@ -393,6 +252,10 @@ class MethodTable<T> {
   Map<String, RouteSet<T>>? extraRoutes;
 
   RouteSet<T> forWriteMethod(String method, bool caseSensitive) {
+    final commonIndex = commonMethodIndex(method);
+    if (commonIndex >= 0) {
+      return commonRoutes[commonIndex] ??= RouteSet<T>(caseSensitive);
+    }
     final (index, normalized) = classifyMethod(method);
     if (index >= 0) {
       return commonRoutes[index] ??= RouteSet<T>(caseSensitive);
@@ -404,57 +267,92 @@ class MethodTable<T> {
   }
 
   RouteSet<T>? lookupMethod(String method) {
+    final commonIndex = commonMethodIndex(method);
+    if (commonIndex >= 0) return commonRoutes[commonIndex];
     final (index, normalized) = classifyMethod(method);
     return index >= 0 ? commonRoutes[index] : extraRoutes?[normalized!];
   }
 }
 
-String canonicalPath(String path, bool caseSensitive) =>
-    caseSensitive ? path : path.toLowerCase();
-
-(int, String?) classifyMethod(String method) {
-  var start = 0;
-  var end = method.length;
-  while (start < end && method.codeUnitAt(start) <= 32) start += 1;
-  while (end > start && method.codeUnitAt(end - 1) <= 32) end -= 1;
-  if (start == end) {
-    throw ArgumentError.value(method, 'method', 'Method must not be empty.');
-  }
-  final length = end - start;
-  final common = commonMethodIndex(method, start, end, length);
-  if (common >= 0) return (common, null);
-  final buffer = StringBuffer();
-  for (var i = start; i < end; i++) {
-    final code = method.codeUnitAt(i);
-    buffer.writeCharCode(code >= 97 && code <= 122 ? code - 32 : code);
-  }
-  return (-1, buffer.toString());
-}
-
-int commonMethodIndex(String method, int start, int end, int length) {
-  for (var i = 0; i < commonMethods.length; i++) {
-    final candidate = commonMethods[i];
-    if (candidate.length != length) continue;
-    var matched = true;
-    for (var j = 0; j < length; j++) {
-      final code = method.codeUnitAt(start + j);
-      final upper = code >= 97 && code <= 122 ? code - 32 : code;
-      if (upper != candidate.codeUnitAt(j)) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) return i;
+int commonMethodIndex(String method) {
+  switch (method.length) {
+    case 3:
+      if (method == 'GET') return 0;
+      if (method == 'PUT') return 2;
+    case 4:
+      if (method == 'POST') return 1;
+      if (method == 'HEAD') return 5;
+    case 5:
+      if (method == 'PATCH') return 3;
+    case 6:
+      if (method == 'DELETE') return 4;
+    case 7:
+      if (method == 'OPTIONS') return 6;
   }
   return -1;
 }
 
-const List<String> commonMethods = <String>[
-  'GET',
-  'POST',
-  'PUT',
-  'PATCH',
-  'DELETE',
-  'HEAD',
-  'OPTIONS',
-];
+(int, String?) classifyMethod(String method) {
+  var start = 0;
+  var end = method.length;
+  while (start < end && method.codeUnitAt(start) <= 32) {
+    start += 1;
+  }
+  while (end > start && method.codeUnitAt(end - 1) <= 32) {
+    end -= 1;
+  }
+  if (start == end) {
+    throw ArgumentError.value(method, 'method', 'Method must not be empty.');
+  }
+  final length = end - start;
+  if (length <= 7) {
+    final a = upperAsciiCode(method.codeUnitAt(start));
+    switch (length) {
+      case 3:
+        final b = upperAsciiCode(method.codeUnitAt(start + 1));
+        final c = upperAsciiCode(method.codeUnitAt(start + 2));
+        if (a == 71 && b == 69 && c == 84) return (0, null);
+        if (a == 80 && b == 85 && c == 84) return (2, null);
+      case 4:
+        final b = upperAsciiCode(method.codeUnitAt(start + 1));
+        final c = upperAsciiCode(method.codeUnitAt(start + 2));
+        final d = upperAsciiCode(method.codeUnitAt(start + 3));
+        if (a == 80 && b == 79 && c == 83 && d == 84) return (1, null);
+        if (a == 72 && b == 69 && c == 65 && d == 68) return (5, null);
+      case 5:
+        if (a == 80 &&
+            upperAsciiCode(method.codeUnitAt(start + 1)) == 65 &&
+            upperAsciiCode(method.codeUnitAt(start + 2)) == 84 &&
+            upperAsciiCode(method.codeUnitAt(start + 3)) == 67 &&
+            upperAsciiCode(method.codeUnitAt(start + 4)) == 72) {
+          return (3, null);
+        }
+      case 6:
+        if (a == 68 &&
+            upperAsciiCode(method.codeUnitAt(start + 1)) == 69 &&
+            upperAsciiCode(method.codeUnitAt(start + 2)) == 76 &&
+            upperAsciiCode(method.codeUnitAt(start + 3)) == 69 &&
+            upperAsciiCode(method.codeUnitAt(start + 4)) == 84 &&
+            upperAsciiCode(method.codeUnitAt(start + 5)) == 69) {
+          return (4, null);
+        }
+      case 7:
+        if (a == 79 &&
+            upperAsciiCode(method.codeUnitAt(start + 1)) == 80 &&
+            upperAsciiCode(method.codeUnitAt(start + 2)) == 84 &&
+            upperAsciiCode(method.codeUnitAt(start + 3)) == 73 &&
+            upperAsciiCode(method.codeUnitAt(start + 4)) == 79 &&
+            upperAsciiCode(method.codeUnitAt(start + 5)) == 78 &&
+            upperAsciiCode(method.codeUnitAt(start + 6)) == 83) {
+          return (6, null);
+        }
+    }
+  }
+  final buffer = StringBuffer();
+  for (var i = start; i < end; i++) {
+    buffer.writeCharCode(upperAsciiCode(method.codeUnitAt(i)));
+  }
+  return (-1, buffer.toString());
+}
+
+int upperAsciiCode(int code) => code >= 97 && code <= 122 ? code - 32 : code;
