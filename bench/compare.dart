@@ -13,11 +13,30 @@ late final List<String> _dynamicPatterns;
 late final Map<int, _ScenarioQueries> _queriesByScale;
 var _sink = 0;
 
+void _consumeStringParams(Map<String, String>? params) {
+  if (params == null) return;
+  _sink ^= params.length;
+  for (final entry in params.entries) {
+    _sink ^= entry.key.length;
+    _sink ^= entry.value.length;
+  }
+}
+
+void _consumeSymbolParams(Map<Symbol, String> params) {
+  _sink ^= params.length;
+  for (final entry in params.entries) {
+    _sink ^= entry.key.hashCode;
+    _sink ^= entry.value.length;
+  }
+}
+
 enum _LookupScenario {
   staticRoundRobin('Lookup;Static;RoundRobin'),
   staticHot('Lookup;Static;Hot'),
   dynamicRoundRobin('Lookup;Dynamic;RoundRobin'),
-  dynamicHot('Lookup;Dynamic;Hot');
+  dynamicHot('Lookup;Dynamic;Hot'),
+  dynamicRoundRobinParams('Lookup+Params;Dynamic;RoundRobin'),
+  dynamicHotParams('Lookup+Params;Dynamic;Hot');
 
   const _LookupScenario(this.label);
   final String label;
@@ -43,8 +62,10 @@ class _ScenarioQueries {
       case _LookupScenario.staticHot:
         return staticHot;
       case _LookupScenario.dynamicRoundRobin:
+      case _LookupScenario.dynamicRoundRobinParams:
         return dynamicRoundRobin;
       case _LookupScenario.dynamicHot:
+      case _LookupScenario.dynamicHotParams:
         return dynamicHot;
     }
   }
@@ -85,7 +106,18 @@ class _RouxLookupBenchmark extends _LookupBenchmark {
   @override
   void run() {
     for (final path in queries) {
-      _sink ^= _router.match(path)?.data ?? 0;
+      final match = _router.match(path);
+      _sink ^= match?.data ?? 0;
+      switch (scenario) {
+        case _LookupScenario.dynamicRoundRobinParams:
+        case _LookupScenario.dynamicHotParams:
+          _consumeStringParams(match?.params);
+        case _LookupScenario.staticRoundRobin:
+        case _LookupScenario.staticHot:
+        case _LookupScenario.dynamicRoundRobin:
+        case _LookupScenario.dynamicHot:
+          break;
+      }
     }
   }
 }
@@ -108,7 +140,18 @@ class _RoutingkitLookupBenchmark extends _LookupBenchmark {
   @override
   void run() {
     for (final path in queries) {
-      _sink ^= _router.find('GET', path)?.data ?? 0;
+      final match = _router.find('GET', path);
+      _sink ^= match?.data ?? 0;
+      switch (scenario) {
+        case _LookupScenario.dynamicRoundRobinParams:
+        case _LookupScenario.dynamicHotParams:
+          _consumeStringParams(match?.params);
+        case _LookupScenario.staticRoundRobin:
+        case _LookupScenario.staticHot:
+        case _LookupScenario.dynamicRoundRobin:
+        case _LookupScenario.dynamicHot:
+          break;
+      }
     }
   }
 }
@@ -131,7 +174,18 @@ class _RelicLookupBenchmark extends _LookupBenchmark {
   @override
   void run() {
     for (final path in queries) {
-      _sink ^= _router.lookup(relic.Method.get, path).asMatch.value;
+      final match = _router.lookup(relic.Method.get, path).asMatch;
+      _sink ^= match.value;
+      switch (scenario) {
+        case _LookupScenario.dynamicRoundRobinParams:
+        case _LookupScenario.dynamicHotParams:
+          _consumeSymbolParams(match.parameters);
+        case _LookupScenario.staticRoundRobin:
+        case _LookupScenario.staticHot:
+        case _LookupScenario.dynamicRoundRobin:
+        case _LookupScenario.dynamicHot:
+          break;
+      }
     }
   }
 }
