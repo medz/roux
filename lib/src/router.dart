@@ -183,11 +183,14 @@ class Router<T> {
         return null;
       }
     }
-    return _normalizePath ? _normalizePathInput(path) : _normalizeInputPath(path);
+    return _normalizePath
+        ? _normalizePathInput(path)
+        : _normalizeInputPath(path);
   }
 
   RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
-    final exact = state.staticExactRoutes[_canonicalPath(normalized)]?.noParamsMatch;
+    final exact =
+        state.staticExactRoutes[_canonicalPath(normalized)]?.noParamsMatch;
     if (exact != null) return exact;
     if (!state.hasSlowMatchPath) {
       return _matchNodePathFast(state, normalized);
@@ -215,14 +218,7 @@ class Router<T> {
   ) {
     final fallback = state.globalFallback;
     if (fallback != null) {
-      _collectSlot(
-        fallback,
-        normalized,
-        null,
-        1,
-        methodRank,
-        output,
-      );
+      _collectSlot(fallback, normalized, null, 1, methodRank, output);
     }
     final repeated = state.repeatedCompiledRoutes;
     if (repeated != null) {
@@ -239,14 +235,7 @@ class Router<T> {
     }
     final exactStatic = state.staticExactRoutes[_canonicalPath(normalized)];
     if (exactStatic != null) {
-      _collectSlot(
-        exactStatic,
-        normalized,
-        null,
-        0,
-        methodRank,
-        output,
-      );
+      _collectSlot(exactStatic, normalized, null, 0, methodRank, output);
     }
     final deferred = state.deferredCompiledRoutes;
     if (deferred != null) {
@@ -341,11 +330,9 @@ class Router<T> {
       }
 
       final firstCode = pattern.codeUnitAt(cursor);
-      final doubleWildcardName = _readDoubleWildcardName(
-        pattern,
-        cursor,
-        segmentEnd,
-      );
+      final doubleWildcardName = firstCode == _asteriskCode
+          ? _readDoubleWildcardName(pattern, cursor, segmentEnd)
+          : null;
       if (doubleWildcardName != null) {
         if (segmentEnd != end) {
           throw FormatException(
@@ -385,50 +372,17 @@ class Router<T> {
       }
 
       if (firstCode == _colonCode) {
-        if (!_isSimpleParamSegment(pattern, cursor + 1, segmentEnd)) {
-          final compiled = _compilePatternRoute(
-            normalized,
-            data,
-            _caseSensitive,
-            _nextRegistrationOrder++,
-          );
-          if (compiled == null) {
-            throw FormatException(
-              'Unsupported segment syntax in route: $normalized',
-            );
-          }
-          state.hasSlowMatchPath = true;
-          _addCompiled(state, compiled, normalized, duplicatePolicy);
-          if (compiled.route.paramNames.length > state.maxParamDepth) {
-            state.maxParamDepth = compiled.route.paramNames.length;
-          }
+        if (!_hasValidParamNameSlice(pattern, cursor + 1, segmentEnd)) {
+          _addCompiledPattern(state, normalized, data, duplicatePolicy);
           return;
         }
         final paramName = pattern.substring(cursor + 1, segmentEnd);
-        if (!_isValidParamName(paramName)) {
-          throw FormatException('Invalid parameter name in route: $normalized');
-        }
         node = node.paramChild ??= _Node<T>();
         (paramNames ??= <String>[]).add(paramName);
         paramCount += 1;
       } else {
         if (hasReservedInSegment) {
-          final compiled = _compilePatternRoute(
-            normalized,
-            data,
-            _caseSensitive,
-            _nextRegistrationOrder++,
-          );
-          if (compiled == null) {
-            throw FormatException(
-              'Unsupported segment syntax in route: $normalized',
-            );
-          }
-          state.hasSlowMatchPath = true;
-          _addCompiled(state, compiled, normalized, duplicatePolicy);
-          if (compiled.route.paramNames.length > state.maxParamDepth) {
-            state.maxParamDepth = compiled.route.paramNames.length;
-          }
+          _addCompiledPattern(state, normalized, data, duplicatePolicy);
           return;
         }
         node = node.getOrCreateStaticChildSlice(
@@ -748,14 +702,7 @@ class Router<T> {
         }
         final exact = node.exactRoute;
         if (exact != null) {
-          _collectSlot(
-            exact,
-            path,
-            stackParams,
-            0,
-            methodRank,
-            output,
-          );
+          _collectSlot(exact, path, stackParams, 0, methodRank, output);
         }
       } else {
         final segmentEnd = _findSegmentEnd(path, cursor);
@@ -985,6 +932,28 @@ class Router<T> {
     }
   }
 
+  void _addCompiledPattern(
+    _MethodState<T> state,
+    String normalized,
+    T data,
+    DuplicatePolicy duplicatePolicy,
+  ) {
+    final compiled = _compilePatternRoute(
+      normalized,
+      data,
+      _caseSensitive,
+      _nextRegistrationOrder++,
+    );
+    if (compiled == null) {
+      throw FormatException('Unsupported segment syntax in route: $normalized');
+    }
+    state.hasSlowMatchPath = true;
+    _addCompiled(state, compiled, normalized, duplicatePolicy);
+    if (compiled.route.paramNames.length > state.maxParamDepth) {
+      state.maxParamDepth = compiled.route.paramNames.length;
+    }
+  }
+
   RouteMatch<T> _materializeCompiled(
     _Route<T> route,
     List<int> groupIndexes,
@@ -1055,8 +1024,8 @@ class _Route<T> {
     this.constraintScore,
     this.registrationOrder,
   ) : rankPrefix =
-           (((specificity * 256) + depth) * 4096 + staticChars) * 4 +
-           constraintScore;
+          (((specificity * 256) + depth) * 4096 + staticChars) * 4 +
+          constraintScore;
   _Route<T> appended(_Route<T> route) {
     var current = this;
     while (current.next != null) {
@@ -1250,7 +1219,12 @@ class _MatchCollector<T> {
     }
     final index = _matches.length;
     if (index == 0 ||
-        !_sortsBefore(route, methodRank, _routes[index - 1], _methodRanks[index - 1])) {
+        !_sortsBefore(
+          route,
+          methodRank,
+          _routes[index - 1],
+          _methodRanks[index - 1],
+        )) {
       _matches.add(match);
       _routes.add(route);
       _methodRanks.add(methodRank);
@@ -1337,8 +1311,13 @@ bool _isValidParamName(String name) {
   return true;
 }
 
-bool _isSimpleParamSegment(String pattern, int start, int end) =>
-    start < end && _isValidParamName(pattern.substring(start, end));
+bool _hasValidParamNameSlice(String pattern, int start, int end) {
+  if (start >= end) return false;
+  for (var i = start; i < end; i++) {
+    if (!_isParamNameCode(pattern.codeUnitAt(i), i == start)) return false;
+  }
+  return true;
+}
 
 _CompiledSlot<T>? _compilePatternRoute<T>(
   String pattern,
@@ -1373,7 +1352,7 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
       throw FormatException('$_emptySegment$pattern');
     }
     if (firstCode == _colonCode &&
-        _isSimpleParamSegment(pattern, cursor + 1, segmentEnd)) {
+        _hasValidParamNameSlice(pattern, cursor + 1, segmentEnd)) {
       cursor = segmentEnd + 1;
       continue;
     }
@@ -1558,13 +1537,19 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
   var staticChars = 0;
   var constraintScore = 1;
 
-  void writeChunk(StringBuffer targetRegex, StringBuffer targetShape, int start, int end) {
+  void writeChunk(
+    StringBuffer targetRegex,
+    StringBuffer targetShape,
+    int start,
+    int end,
+  ) {
     var cursor = start;
     while (cursor < end) {
       final code = pattern.codeUnitAt(cursor);
       if (code == _openBraceCode) {
         final close = _findGroupEnd(pattern, cursor + 1, end);
-        final optional = close + 1 < end && pattern.codeUnitAt(close + 1) == _questionCode;
+        final optional =
+            close + 1 < end && pattern.codeUnitAt(close + 1) == _questionCode;
         final innerRegex = StringBuffer();
         final innerShape = StringBuffer();
         writeChunk(innerRegex, innerShape, cursor + 1, close);
@@ -1580,7 +1565,8 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
         continue;
       }
       if (code == _asteriskCode) {
-        if (cursor + 1 < end && pattern.codeUnitAt(cursor + 1) == _asteriskCode) {
+        if (cursor + 1 < end &&
+            pattern.codeUnitAt(cursor + 1) == _asteriskCode) {
           throw FormatException('Unsupported group syntax in route: $pattern');
         }
         targetRegex.write('([^/]*)');
