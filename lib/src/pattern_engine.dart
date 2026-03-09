@@ -283,10 +283,6 @@ class _PatternCompiler<T> {
     groupIndexes.add(groupCount);
   }
 
-  void addInlineCapture(String capture, String name, {int extraGroups = 0}) {
-    writeInlineCapture(regex, shape, capture, name, extraGroups: extraGroups);
-  }
-
   void writeInlineCapture(
     StringBuffer outRegex,
     StringBuffer outShape,
@@ -300,6 +296,10 @@ class _PatternCompiler<T> {
     groupCount += 1;
     groupIndexes.add(groupCount);
     groupCount += extraGroups;
+  }
+
+  void writeWildcardCapture(StringBuffer outRegex, StringBuffer outShape) {
+    writeInlineCapture(outRegex, outShape, '([^/]*)', '${unnamedCount++}');
   }
 
   void writeLiteral(
@@ -322,7 +322,7 @@ class _PatternCompiler<T> {
     while (cursor < end) {
       final code = pattern.codeUnitAt(cursor);
       if (code == asteriskCode) {
-        addInlineCapture('([^/]*)', '${unnamedCount++}');
+        writeWildcardCapture(regex, shape);
         needsCompiled = true;
         if (constraintScore < 1) constraintScore = 1;
         if (segmentHasLiteral || ++captureCount > 1) {
@@ -333,37 +333,15 @@ class _PatternCompiler<T> {
         continue;
       }
       if (code == colonCode) {
-        if (lastWasParam) {
-          throw FormatException(
-            'Unsupported segment syntax in route: $pattern',
-          );
-        }
-        var nameEnd = cursor + 1;
-        while (nameEnd < end &&
-            isParamNameCode(
-              pattern.codeUnitAt(nameEnd),
-              nameEnd == cursor + 1,
-            )) {
-          nameEnd += 1;
-        }
-        final name = pattern.substring(cursor + 1, nameEnd);
-        if (!isValidParamName(name)) {
-          throw FormatException('Invalid parameter name in route: $pattern');
-        }
-        if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {
-          final regexEnd = findRegexEnd(pattern, nameEnd, end);
-          final body = pattern.substring(nameEnd + 1, regexEnd);
-          addInlineCapture(
-            '($body)',
-            name,
-            extraGroups: countCapturingGroups(body),
-          );
-          if (constraintScore < 2) constraintScore = 2;
-          cursor = regexEnd + 1;
-        } else {
-          addInlineCapture('([^/]+)', name);
-          cursor = nameEnd;
-        }
+        final capture = writeNamedCapture(
+          cursor,
+          end,
+          lastWasParam,
+          regex,
+          shape,
+        );
+        cursor = capture.$1;
+        if (capture.$2 && constraintScore < 2) constraintScore = 2;
         needsCompiled = true;
         if (segmentHasLiteral || ++captureCount > 1) {
           specificity = structuredDynamicSpecificity;
@@ -446,44 +424,19 @@ class _PatternCompiler<T> {
             'Unsupported segment syntax in route: $pattern',
           );
         }
-        writeInlineCapture(outRegex, outShape, '([^/]*)', '${unnamedCount++}');
+        writeWildcardCapture(outRegex, outShape);
         cursor += 1;
         lastWasParam = false;
         continue;
       }
       if (code == colonCode) {
-        if (lastWasParam) {
-          throw FormatException(
-            'Unsupported segment syntax in route: $pattern',
-          );
-        }
-        var nameEnd = cursor + 1;
-        while (nameEnd < end &&
-            isParamNameCode(
-              pattern.codeUnitAt(nameEnd),
-              nameEnd == cursor + 1,
-            )) {
-          nameEnd += 1;
-        }
-        final name = pattern.substring(cursor + 1, nameEnd);
-        if (!isValidParamName(name)) {
-          throw FormatException('Invalid parameter name in route: $pattern');
-        }
-        if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {
-          final regexEnd = findRegexEnd(pattern, nameEnd, end);
-          final body = pattern.substring(nameEnd + 1, regexEnd);
-          writeInlineCapture(
-            outRegex,
-            outShape,
-            '($body)',
-            name,
-            extraGroups: countCapturingGroups(body),
-          );
-          cursor = regexEnd + 1;
-        } else {
-          writeInlineCapture(outRegex, outShape, '([^/]+)', name);
-          cursor = nameEnd;
-        }
+        cursor = writeNamedCapture(
+          cursor,
+          end,
+          lastWasParam,
+          outRegex,
+          outShape,
+        ).$1;
         lastWasParam = true;
         continue;
       }
@@ -504,6 +457,41 @@ class _PatternCompiler<T> {
       lastWasParam = false;
     }
     return lastWasParam;
+  }
+
+  (int, bool) writeNamedCapture(
+    int cursor,
+    int end,
+    bool lastWasParam,
+    StringBuffer outRegex,
+    StringBuffer outShape,
+  ) {
+    if (lastWasParam) {
+      throw FormatException('Unsupported segment syntax in route: $pattern');
+    }
+    var nameEnd = cursor + 1;
+    while (nameEnd < end &&
+        isParamNameCode(pattern.codeUnitAt(nameEnd), nameEnd == cursor + 1)) {
+      nameEnd += 1;
+    }
+    final name = pattern.substring(cursor + 1, nameEnd);
+    if (!isValidParamName(name)) {
+      throw FormatException('Invalid parameter name in route: $pattern');
+    }
+    if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {
+      final regexEnd = findRegexEnd(pattern, nameEnd, end);
+      final body = pattern.substring(nameEnd + 1, regexEnd);
+      writeInlineCapture(
+        outRegex,
+        outShape,
+        '($body)',
+        name,
+        extraGroups: countCapturingGroups(body),
+      );
+      return (regexEnd + 1, true);
+    }
+    writeInlineCapture(outRegex, outShape, '([^/]+)', name);
+    return (nameEnd, false);
   }
 }
 
