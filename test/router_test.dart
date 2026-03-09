@@ -908,7 +908,7 @@ void main() {
       expect(router.match('/files/file-z.png')?.params, {'0': 'z'});
     });
 
-    test('matches exact and plain params before grouped routes', () {
+    test('orders grouped routes before exact routes but after plain params', () {
       final router = Router<String>(
         routes: {
           '/book': 'exact-book',
@@ -920,8 +920,8 @@ void main() {
 
       expect(router.match('/book')?.data, 'exact-book');
       expect(router.matchAll('/book').map((match) => match.data), [
-        'exact-book',
         'group-book',
+        'exact-book',
       ]);
       expect(router.match('/users/42')?.data, 'param-user');
       expect(router.matchAll('/users/42').map((match) => match.data), [
@@ -930,15 +930,15 @@ void main() {
       ]);
     });
 
-    test('matches exact routes before mandatory group routes', () {
+    test('orders mandatory group routes before exact routes', () {
       final router = Router<String>(
         routes: {'/foobar': 'exact', '/foo{bar}': 'group'},
       );
 
       expect(router.match('/foobar')?.data, 'exact');
       expect(router.matchAll('/foobar').map((match) => match.data), [
-        'exact',
         'group',
+        'exact',
       ]);
     });
 
@@ -958,7 +958,7 @@ void main() {
     );
 
     test(
-      'matches exact routes before optional params when param is missing',
+      'orders optional params before exact routes when param is missing',
       () {
         final router = Router<String>(
           routes: {'/users': 'exact', '/users/:id?': 'optional'},
@@ -966,8 +966,8 @@ void main() {
 
         expect(router.match('/users')?.data, 'exact');
         expect(router.matchAll('/users').map((match) => match.data), [
-          'exact',
           'optional',
+          'exact',
         ]);
       },
     );
@@ -1040,6 +1040,27 @@ void main() {
           'double',
           'param',
           'star',
+        ]);
+      },
+    );
+
+    test(
+      'orders single params before structured patterns before shell wildcards before exact',
+      () {
+        final router = Router<String>(
+          routes: {
+            '/files/:id': 'param',
+            '/files/:name.:ext': 'pattern',
+            '/files/file-*.png': 'wild',
+            '/files/file-a.png': 'exact',
+          },
+        );
+
+        expect(router.matchAll('/files/file-a.png').map((match) => match.data), [
+          'param',
+          'pattern',
+          'wild',
+          'exact',
         ]);
       },
     );
