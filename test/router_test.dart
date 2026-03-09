@@ -113,13 +113,17 @@ void main() {
       });
     });
 
-    test('supports optional non-capturing groups', () {
+    test('supports grouped pathname syntax', () {
       final pluralRouter = Router<String>();
       pluralRouter.add('/book{s}?', 'plural');
       final userRouter = Router<String>();
       userRouter.add('/users{/:id}?', 'user');
       final blogRouter = Router<String>();
       blogRouter.add('/blog/:id(\\d+){-:title}?', 'blog');
+      final nestedRouter = Router<String>();
+      nestedRouter.add('/docs{/:section}{/:page}?', 'docs');
+      final mandatoryRouter = Router<String>();
+      mandatoryRouter.add('/foo{bar}', 'foobar');
 
       expect(pluralRouter.match('/book')?.data, 'plural');
       expect(pluralRouter.match('/books')?.data, 'plural');
@@ -130,6 +134,14 @@ void main() {
         'id': '123',
         'title': 'post',
       });
+      expect(nestedRouter.match('/docs'), isNull);
+      expect(nestedRouter.match('/docs/api')?.params, {'section': 'api'});
+      expect(nestedRouter.match('/docs/api/intro')?.params, {
+        'section': 'api',
+        'page': 'intro',
+      });
+      expect(mandatoryRouter.match('/foo'), isNull);
+      expect(mandatoryRouter.match('/foobar')?.data, 'foobar');
     });
   });
 
@@ -896,7 +908,7 @@ void main() {
       expect(router.match('/files/file-z.png')?.params, {'0': 'z'});
     });
 
-    test('matches exact and plain params before optional group routes', () {
+    test('matches exact and plain params before grouped routes', () {
       final router = Router<String>(
         routes: {
           '/book': 'exact-book',
@@ -915,6 +927,18 @@ void main() {
       expect(router.matchAll('/users/42').map((match) => match.data), [
         'param-user',
         'group-user',
+      ]);
+    });
+
+    test('matches exact routes before mandatory group routes', () {
+      final router = Router<String>(
+        routes: {'/foobar': 'exact', '/foo{bar}': 'group'},
+      );
+
+      expect(router.match('/foobar')?.data, 'exact');
+      expect(router.matchAll('/foobar').map((match) => match.data), [
+        'exact',
+        'group',
       ]);
     });
 
@@ -1105,13 +1129,6 @@ void main() {
         () => Router<String>(
           routes: {'/files/*.:ext': 'a', '/files/*.:type': 'b'},
         ),
-        throwsFormatException,
-      );
-    });
-
-    test('rejects unsupported bare group syntax', () {
-      expect(
-        () => Router<String>(routes: {'/foo{bar}': 'bad'}),
         throwsFormatException,
       );
     });
