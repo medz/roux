@@ -344,7 +344,9 @@ class Router<T> {
   RouteMatch<T>? _matchCompiled(_CompiledSlot<T> current, String path) {
     while (true) {
       final match = current.regex.firstMatch(path);
-      if (match != null) return _materializeCompiled(current.route, match);
+      if (match != null) {
+        return _materializeCompiled(current.route, current.groupIndexes, match);
+      }
       final next = current.next;
       if (next == null) return null;
       current = next;
@@ -367,7 +369,7 @@ class Router<T> {
           route = route.next
         ) {
           output.add(
-            _materializeCompiled(route, match),
+            _materializeCompiled(route, current.groupIndexes, match),
             pathDepth,
             _staticRank,
             methodRank,
@@ -720,11 +722,15 @@ class Router<T> {
     }
   }
 
-  RouteMatch<T> _materializeCompiled(_Route<T> route, RegExpMatch match) {
+  RouteMatch<T> _materializeCompiled(
+    _Route<T> route,
+    List<int> groupIndexes,
+    RegExpMatch match,
+  ) {
     if (route.paramNames.isEmpty) return route.noParamsMatch;
     final params = <String, String>{};
     for (var i = 0; i < route.paramNames.length; i++) {
-      final value = match.group(i + 1);
+      final value = match.group(groupIndexes[i]);
       if (value != null) params[route.paramNames[i]] = value;
     }
     return RouteMatch<T>(route.data, params);
@@ -780,9 +786,10 @@ class _Route<T> {
 class _CompiledSlot<T> {
   final RegExp regex;
   final String shape;
+  final List<int> groupIndexes;
   _Route<T> route;
   _CompiledSlot<T>? next;
-  _CompiledSlot(this.regex, this.shape, this.route);
+  _CompiledSlot(this.regex, this.shape, this.groupIndexes, this.route);
 }
 
 class _LazyParamsMap extends MapBase<String, String> {
@@ -1018,6 +1025,8 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   final regex = StringBuffer('^');
   final shape = StringBuffer('^');
   final paramNames = <String>[];
+  final groupIndexes = <int>[];
+  var groupCount = 0;
   var cursor = pattern.length == 1 ? pattern.length : 1;
   while (cursor < pattern.length) {
     regex.write('/');
@@ -1061,10 +1070,29 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
         if (!_isValidParamName(paramName)) {
           throw FormatException('Invalid parameter name in route: $pattern');
         }
-        regex.write('([^/]+)');
-        shape.write('([^/]+)');
+        if (nameEnd < segmentEnd && pattern.codeUnitAt(nameEnd) == 40) {
+          final regexEnd = _findRegexEnd(pattern, nameEnd, segmentEnd);
+          final body = pattern.substring(nameEnd + 1, regexEnd);
+          regex
+            ..write('(')
+            ..write(body)
+            ..write(')');
+          shape
+            ..write('(')
+            ..write(body)
+            ..write(')');
+          groupCount += 1;
+          groupIndexes.add(groupCount);
+          groupCount += _countCapturingGroups(body);
+          segmentCursor = regexEnd + 1;
+        } else {
+          regex.write('([^/]+)');
+          shape.write('([^/]+)');
+          groupCount += 1;
+          groupIndexes.add(groupCount);
+          segmentCursor = nameEnd;
+        }
         paramNames.add(paramName);
-        segmentCursor = nameEnd;
         lastWasParam = true;
         needsCompiled = true;
         continue;
@@ -1090,6 +1118,7 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   return _CompiledSlot<T>(
     RegExp(regex.toString()),
     shape.toString(),
+    groupIndexes,
     _Route<T>(data, paramNames, false),
   );
 }
@@ -1101,4 +1130,75 @@ bool _isParamNameCode(int code, bool first) {
   return ((code | 32) >= 97 && (code | 32) <= 122) ||
       code == 95 ||
       (code >= 48 && code <= 57);
+}
+
+int _findRegexEnd(String pattern, int start, int segmentEnd) {
+  var depth = 0;
+  var escaped = false;
+  var inCharClass = false;
+  for (var i = start; i < segmentEnd; i++) {
+    final code = pattern.codeUnitAt(i);
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (code == 92) {
+      escaped = true;
+      continue;
+    }
+    if (inCharClass) {
+      if (code == 93) inCharClass = false;
+      continue;
+    }
+    if (code == 91) {
+      inCharClass = true;
+      continue;
+    }
+    if (code == 40) {
+      depth += 1;
+      continue;
+    }
+    if (code == 41) {
+      depth -= 1;
+      if (depth == 0) return i;
+    }
+  }
+  throw FormatException('Unterminated regex in route: $pattern');
+}
+
+int _countCapturingGroups(String pattern) {
+  var count = 0;
+  var escaped = false;
+  var inCharClass = false;
+  for (var i = 0; i < pattern.length; i++) {
+    final code = pattern.codeUnitAt(i);
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (code == 92) {
+      escaped = true;
+      continue;
+    }
+    if (inCharClass) {
+      if (code == 93) inCharClass = false;
+      continue;
+    }
+    if (code == 91) {
+      inCharClass = true;
+      continue;
+    }
+    if (code != 40) continue;
+    if (i + 1 >= pattern.length || pattern.codeUnitAt(i + 1) != 63) {
+      count += 1;
+      continue;
+    }
+    if (i + 2 < pattern.length && pattern.codeUnitAt(i + 2) == 60) {
+      if (i + 3 < pattern.length) {
+        final next = pattern.codeUnitAt(i + 3);
+        if (next != 61 && next != 33) count += 1;
+      }
+    }
+  }
+  return count;
 }

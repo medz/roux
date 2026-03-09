@@ -48,6 +48,15 @@ void main() {
         'ext': 'md',
       });
     });
+
+    test('supports named regex parameter segments', () {
+      final router = Router<String>();
+      router.add('/users/:id(\\d+)', 'numeric-user');
+
+      expect(router.match('/users/42')?.data, 'numeric-user');
+      expect(router.match('/users/42')?.params, {'id': '42'});
+      expect(router.match('/users/nope'), isNull);
+    });
   });
 
   group('duplicate policy', () {
@@ -755,6 +764,21 @@ void main() {
         'pattern',
       ]);
     });
+
+    test(
+      'matches regex parameter routes before plain params in single match',
+      () {
+        final router = Router<String>(
+          routes: {'/users/:id': 'param', '/users/:id(\\d+)': 'regex'},
+        );
+
+        expect(router.match('/users/42')?.data, 'regex');
+        expect(router.matchAll('/users/42').map((match) => match.data), [
+          'param',
+          'regex',
+        ]);
+      },
+    );
   });
 
   group('normalization and invalid input', () {
