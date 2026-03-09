@@ -76,14 +76,17 @@ class Router<T> {
   Map<String, _MethodState<T>>? _methodStates;
   final DuplicatePolicy _duplicatePolicy;
   final bool _caseSensitive;
+  final bool _decodePath;
 
   /// Creates a router and optionally preloads [routes].
   Router({
     Map<String, T>? routes,
     DuplicatePolicy duplicatePolicy = DuplicatePolicy.reject,
     bool caseSensitive = true,
+    bool decodePath = false,
   }) : _duplicatePolicy = duplicatePolicy,
-       _caseSensitive = caseSensitive {
+       _caseSensitive = caseSensitive,
+       _decodePath = decodePath {
     if (routes != null && routes.isNotEmpty) addAll(routes);
   }
 
@@ -115,7 +118,7 @@ class Router<T> {
 
   /// Returns the highest-priority match for [path], or `null` if none exists.
   RouteMatch<T>? match(String path, {String? method}) {
-    final normalized = _normalizeInputPath(path);
+    final normalized = _prepareInputPath(path);
     if (normalized == null) return null;
     final methodToken = method == null ? null : _methodToken(method);
     final methodState = methodToken == null
@@ -129,7 +132,7 @@ class Router<T> {
 
   /// Returns every matching route for [path] in router priority order.
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
-    final normalized = _normalizeInputPath(path);
+    final normalized = _prepareInputPath(path);
     if (normalized == null) return <RouteMatch<T>>[];
     final pathDepth = _pathDepth(normalized);
     final collected = _MatchCollector<T>(pathDepth);
@@ -163,6 +166,17 @@ class Router<T> {
 
   String _canonicalLiteral(String literal) =>
       _caseSensitive ? literal : literal.toLowerCase();
+
+  String? _prepareInputPath(String path) {
+    if (_decodePath && path.contains('%')) {
+      try {
+        path = Uri.decodeFull(path);
+      } on ArgumentError {
+        return null;
+      }
+    }
+    return _normalizeInputPath(path);
+  }
 
   RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
     final exact = state.staticExactRoutes[_canonicalPath(normalized)]?.noParamsMatch;
