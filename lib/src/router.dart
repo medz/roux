@@ -1373,6 +1373,8 @@ abstract class _SmallParamsMap extends MapBase<String, String> {
   Map<String, String>? _promoted;
   Map<String, String> _ensurePromoted();
   @override
+  bool containsKey(Object? key) => this[key] != null;
+  @override
   void operator []=(String key, String value) => _ensurePromoted()[key] = value;
   @override
   void clear() => _ensurePromoted().clear();
@@ -1386,10 +1388,18 @@ abstract class _SmallParamsMap extends MapBase<String, String> {
 class _SmallParamsMap1 extends _SmallParamsMap {
   final String _k0;
   final String _v0;
+  late final Iterable<MapEntry<String, String>> _entries = _MapEntryIterable1(
+    MapEntry<String, String>(_k0, _v0),
+  );
   _SmallParamsMap1(this._k0, this._v0);
+  @override
+  int get length => _promoted?.length ?? 1;
   @override
   String? operator [](Object? key) =>
       _promoted?[key] ?? (key == _k0 ? _v0 : null);
+  @override
+  Iterable<MapEntry<String, String>> get entries =>
+      _promoted?.entries ?? _entries;
   @override
   Iterable<String> _inlineKeys() => <String>[_k0];
   @override
@@ -1400,15 +1410,69 @@ class _SmallParamsMap1 extends _SmallParamsMap {
 class _SmallParamsMap2 extends _SmallParamsMap {
   final String _k0, _k1;
   final String _v0, _v1;
+  late final Iterable<MapEntry<String, String>> _entries = _MapEntryIterable2(
+    MapEntry<String, String>(_k0, _v0),
+    MapEntry<String, String>(_k1, _v1),
+  );
   _SmallParamsMap2(this._k0, this._v0, this._k1, this._v1);
+  @override
+  int get length => _promoted?.length ?? 2;
   @override
   String? operator [](Object? key) =>
       _promoted?[key] ?? (key == _k0 ? _v0 : (key == _k1 ? _v1 : null));
+  @override
+  Iterable<MapEntry<String, String>> get entries =>
+      _promoted?.entries ?? _entries;
   @override
   Iterable<String> _inlineKeys() => <String>[_k0, _k1];
   @override
   Map<String, String> _ensurePromoted() =>
       _promoted ??= <String, String>{_k0: _v0, _k1: _v1};
+}
+
+class _MapEntryIterable1 extends Iterable<MapEntry<String, String>> {
+  final MapEntry<String, String> _entry;
+  _MapEntryIterable1(this._entry);
+  @override
+  Iterator<MapEntry<String, String>> get iterator => _MapEntryIterator1(_entry);
+}
+
+class _MapEntryIterator1 implements Iterator<MapEntry<String, String>> {
+  final MapEntry<String, String> _entry;
+  bool _seen = false;
+  _MapEntryIterator1(this._entry);
+  @override
+  MapEntry<String, String> get current => _entry;
+  @override
+  bool moveNext() {
+    if (_seen) return false;
+    _seen = true;
+    return true;
+  }
+}
+
+class _MapEntryIterable2 extends Iterable<MapEntry<String, String>> {
+  final MapEntry<String, String> _first;
+  final MapEntry<String, String> _second;
+  _MapEntryIterable2(this._first, this._second);
+  @override
+  Iterator<MapEntry<String, String>> get iterator =>
+      _MapEntryIterator2(_first, _second);
+}
+
+class _MapEntryIterator2 implements Iterator<MapEntry<String, String>> {
+  final MapEntry<String, String> _first;
+  final MapEntry<String, String> _second;
+  int _index = -1;
+  _MapEntryIterator2(this._first, this._second);
+  @override
+  MapEntry<String, String> get current => _index == 0 ? _first : _second;
+  @override
+  bool moveNext() {
+    if (_index >= 1) return false;
+    _index += 1;
+    return true;
+  }
 }
 
 bool _isValidParamName(String name) {
