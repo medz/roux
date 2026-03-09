@@ -77,6 +77,7 @@ class Router<T> {
   final DuplicatePolicy _duplicatePolicy;
   final bool _caseSensitive;
   final bool _decodePath;
+  final bool _normalizePath;
 
   /// Creates a router and optionally preloads [routes].
   Router({
@@ -84,9 +85,11 @@ class Router<T> {
     DuplicatePolicy duplicatePolicy = DuplicatePolicy.reject,
     bool caseSensitive = true,
     bool decodePath = false,
+    bool normalizePath = false,
   }) : _duplicatePolicy = duplicatePolicy,
        _caseSensitive = caseSensitive,
-       _decodePath = decodePath {
+       _decodePath = decodePath,
+       _normalizePath = normalizePath {
     if (routes != null && routes.isNotEmpty) addAll(routes);
   }
 
@@ -175,7 +178,7 @@ class Router<T> {
         return null;
       }
     }
-    return _normalizeInputPath(path);
+    return _normalizePath ? _normalizePathInput(path) : _normalizeInputPath(path);
   }
 
   RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
@@ -1177,6 +1180,34 @@ String? _normalizeInputPath(String path) {
     }
   }
   return path;
+}
+
+String? _normalizePathInput(String path) {
+  if (path.isEmpty || path.codeUnitAt(0) != _slashCode) return null;
+  final segments = <String>[];
+  var cursor = 1;
+  while (cursor < path.length) {
+    while (cursor < path.length && path.codeUnitAt(cursor) == _slashCode) {
+      cursor += 1;
+    }
+    if (cursor >= path.length) break;
+    final segmentEnd = _findSegmentEnd(path, cursor);
+    final segment = path.substring(cursor, segmentEnd);
+    if (segment == '.') {
+      cursor = segmentEnd + 1;
+      continue;
+    }
+    if (segment == '..') {
+      if (segments.isEmpty) return null;
+      segments.removeLast();
+      cursor = segmentEnd + 1;
+      continue;
+    }
+    segments.add(segment);
+    cursor = segmentEnd + 1;
+  }
+  if (segments.isEmpty) return '/';
+  return '/${segments.join('/')}';
 }
 
 int _findSegmentEnd(String path, int start) {

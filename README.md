@@ -53,6 +53,7 @@ final router = Router<String>(
   duplicatePolicy: DuplicatePolicy.replace,
   caseSensitive: false,
   decodePath: true,
+  normalizePath: true,
   routes: {'/users/:id': 'first'},
 );
 
@@ -114,6 +115,9 @@ Notes:
   path casing.
 - Input is not URL-decoded by default. Set `decodePath: true` to decode `%xx`
   sequences before matching.
+- Input path normalization is off by default. Set `normalizePath: true` to
+  collapse repeated `/`, remove `.` segments, resolve `..`, and ignore extra
+  trailing slashes.
 - Trailing slash on input is ignored (`/users` equals `/users/`).
 - You can register routes via constructor (`Router(routes: {...})`) or
   incrementally (`add` / `addAll`).

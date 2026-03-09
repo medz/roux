@@ -1115,6 +1115,31 @@ void main() {
       });
     });
 
+    test('supports path normalization when configured', () {
+      final local = Router<String>(
+        normalizePath: true,
+        routes: {'/a/b': 'ab', '/users/:id': 'user'},
+      );
+
+      expect(local.match('/a/b/')?.data, 'ab');
+      expect(local.match('/a//b')?.data, 'ab');
+      expect(local.match('/a/./b')?.data, 'ab');
+      expect(local.match('/a/c/../b')?.data, 'ab');
+      expect(local.match('/users//42')?.params, {'id': '42'});
+    });
+
+    test('supports combining decodePath with path normalization', () {
+      final local = Router<String>(
+        decodePath: true,
+        normalizePath: true,
+        routes: {'/files/:name': 'file'},
+      );
+
+      expect(local.match('/files/%2E/Read%20Me')?.params, {
+        'name': 'Read Me',
+      });
+    });
+
     test('returns null for invalid lookup path', () {
       expect(router.match(''), isNull);
       expect(router.match('a'), isNull);
@@ -1130,6 +1155,16 @@ void main() {
 
       expect(local.match('/files/%ZZ'), isNull);
       expect(local.matchAll('/files/%ZZ'), isEmpty);
+    });
+
+    test('returns null for root-escaping paths when normalization is enabled', () {
+      final local = Router<String>(
+        normalizePath: true,
+        routes: {'/files/:name': 'file', '/**:wildcard': 'fallback'},
+      );
+
+      expect(local.match('/files/../../readme'), isNull);
+      expect(local.matchAll('/files/../../readme'), isEmpty);
     });
 
     test('does not let invalid paths hit wildcard fallback routes', () {
