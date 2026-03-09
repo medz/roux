@@ -37,13 +37,13 @@ class SimpleEngine<T> {
         if (names.length == 1) {
           return RouteMatch<T>(
             route.data,
-            SmallParamsMap.one(names[0], path.substring(p0Start, p0End)),
+            CompactParamsMap.one(names[0], path.substring(p0Start, p0End)),
           );
         }
         if (names.length == 2) {
           return RouteMatch<T>(
             route.data,
-            SmallParamsMap.two(
+            CompactParamsMap.two(
               names[0],
               path.substring(p0Start, p0End),
               names[1],
@@ -185,7 +185,7 @@ class SimpleEngine<T> {
     if (wildcardName == null) {
       if (names.length == 1) {
         final requiredCaptures = captures!;
-        return SmallParamsMap.one(
+        return CompactParamsMap.one(
           names[0],
           path.substring(
             requiredCaptures.startAt(0),
@@ -195,7 +195,7 @@ class SimpleEngine<T> {
       }
       if (names.length == 2) {
         final requiredCaptures = captures!;
-        return SmallParamsMap.two(
+        return CompactParamsMap.two(
           names[0],
           path.substring(
             requiredCaptures.startAt(0),
@@ -511,87 +511,87 @@ class ParamStack {
   int endAt(int index) => values[index * 2 + 1];
 }
 
-class SmallParamsMap extends MapBase<String, String> {
-  SmallParamsMap.one(this.k0, this.v0) : k1 = null, v1 = null, count = 1;
+class CompactParamsMap extends MapBase<String, String> {
+  CompactParamsMap.one(this._k0, this._v0) : _k1 = null, _v1 = null, _count = 1;
 
-  SmallParamsMap.two(this.k0, this.v0, this.k1, this.v1) : count = 2;
+  CompactParamsMap.two(this._k0, this._v0, this._k1, this._v1) : _count = 2;
 
-  final String k0;
-  final String v0;
-  final String? k1;
-  final String? v1;
-  final int count;
-  Map<String, String>? promoted;
-  late final Iterable<MapEntry<String, String>> inlineEntries = _InlineEntries(
-    k0,
-    v0,
-    k1,
-    v1,
-  );
+  final String _k0;
+  final String _v0;
+  final String? _k1;
+  final String? _v1;
+  final int _count;
+  Map<String, String>? _backing;
+  late final Iterable<MapEntry<String, String>> _inlineEntries =
+      _CompactEntries(_k0, _v0, _k1, _v1);
 
-  @override
-  bool containsKey(Object? key) => this[key] != null;
-
-  Map<String, String> ensurePromoted() => switch (count) {
-    1 => promoted ??= <String, String>{k0: v0},
-    _ => promoted ??= <String, String>{k0: v0, k1!: v1!},
+  Map<String, String> _promote() => switch (_count) {
+    1 => _backing ??= <String, String>{_k0: _v0},
+    _ => _backing ??= <String, String>{_k0: _v0, _k1!: _v1!},
   };
 
   @override
-  void operator []=(String key, String value) => ensurePromoted()[key] = value;
-
-  @override
-  void clear() => ensurePromoted().clear();
+  int get length => _backing?.length ?? _count;
 
   @override
   Iterable<String> get keys =>
-      promoted?.keys ?? (count == 1 ? <String>[k0] : <String>[k0, k1!]);
+      _backing?.keys ?? (_count == 1 ? <String>[_k0] : <String>[_k0, _k1!]);
 
   @override
-  String? remove(Object? key) => ensurePromoted().remove(key);
+  String? operator [](Object? key) {
+    final backing = _backing;
+    if (backing != null) return backing[key];
+    if (key == _k0) return _v0;
+    if (key == _k1) return _v1;
+    return null;
+  }
 
   @override
-  int get length => promoted?.length ?? count;
+  void operator []=(String key, String value) => _promote()[key] = value;
 
   @override
-  String? operator [](Object? key) =>
-      promoted?[key] ?? (key == k0 ? v0 : (key == k1 ? v1 : null));
+  void clear() => _backing = <String, String>{};
+
+  @override
+  String? remove(Object? key) => _promote().remove(key);
 
   @override
   Iterable<MapEntry<String, String>> get entries =>
-      promoted?.entries ?? inlineEntries;
+      _backing?.entries ?? _inlineEntries;
 }
 
-class _InlineEntries extends Iterable<MapEntry<String, String>> {
-  _InlineEntries(this.k0, this.v0, this.k1, this.v1);
-  final String k0;
-  final String v0;
-  final String? k1;
-  final String? v1;
+class _CompactEntries extends Iterable<MapEntry<String, String>> {
+  _CompactEntries(this._k0, this._v0, this._k1, this._v1);
+
+  final String _k0;
+  final String _v0;
+  final String? _k1;
+  final String? _v1;
 
   @override
   Iterator<MapEntry<String, String>> get iterator =>
-      _InlineEntriesIterator(k0, v0, k1, v1);
+      _CompactEntriesIterator(_k0, _v0, _k1, _v1);
 }
 
-class _InlineEntriesIterator implements Iterator<MapEntry<String, String>> {
-  _InlineEntriesIterator(this.k0, this.v0, this.k1, this.v1);
-  final String k0;
-  final String v0;
-  final String? k1;
-  final String? v1;
-  int index = -1;
+class _CompactEntriesIterator implements Iterator<MapEntry<String, String>> {
+  _CompactEntriesIterator(this._k0, this._v0, this._k1, this._v1);
+
+  final String _k0;
+  final String _v0;
+  final String? _k1;
+  final String? _v1;
+  int _index = -1;
 
   @override
-  MapEntry<String, String> get current => index == 0
-      ? MapEntry<String, String>(k0, v0)
-      : MapEntry<String, String>(k1!, v1!);
+  MapEntry<String, String> get current => _index == 0
+      ? MapEntry<String, String>(_k0, _v0)
+      : MapEntry<String, String>(_k1!, _v1!);
 
   @override
   bool moveNext() {
-    if (index >= 0 && k1 == null) return false;
-    if (index >= 1) return false;
-    index += 1;
+    if (_index >= 0 && _k1 == null) return false;
+    if (_index >= 1) return false;
+    _index += 1;
     return true;
   }
 }
