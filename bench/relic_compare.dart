@@ -12,6 +12,23 @@ late final List<String> _staticRoutesToLookup;
 late final List<String> _dynamicRoutesToLookup;
 var _sink = 0;
 
+void _consumeStringParams(Map<String, String>? params) {
+  if (params == null) return;
+  _sink ^= params.length;
+  for (final entry in params.entries) {
+    _sink ^= entry.key.length;
+    _sink ^= entry.value.length;
+  }
+}
+
+void _consumeSymbolParams(Map<Symbol, String> params) {
+  _sink ^= params.length;
+  for (final entry in params.entries) {
+    _sink ^= entry.key.hashCode;
+    _sink ^= entry.value.length;
+  }
+}
+
 void _setupBenchmarkData(int routeCount) {
   _indexes = List<int>.generate(routeCount, (i) => i, growable: false);
   final permutedIndexes = _indexes.toList()..shuffle(Random(123));
@@ -128,6 +145,31 @@ class _DynamicLookupRouxBenchmark extends _RouterBenchmark {
   }
 }
 
+class _DynamicLookupParamsRouxBenchmark extends _RouterBenchmark {
+  _DynamicLookupParamsRouxBenchmark(_CollectingEmitter emitter)
+    : super(['Lookup+Params', 'Dynamic', 'x$_routeCount', 'Roux'], emitter);
+
+  late final roux.Router<int> _router;
+
+  @override
+  void setup() {
+    _router = roux.Router(
+      routes: {
+        for (final i in _indexes) '/users/:id/items/:itemId/profile$i': i,
+      },
+    );
+  }
+
+  @override
+  void run() {
+    for (final route in _dynamicRoutesToLookup) {
+      final match = _router.match(route);
+      _sink ^= match?.data ?? 0;
+      _consumeStringParams(match?.params);
+    }
+  }
+}
+
 class _StaticAddRoutingkitBenchmark extends _RouterBenchmark {
   _StaticAddRoutingkitBenchmark(_CollectingEmitter emitter)
     : super(['Add', 'Static', 'x$_routeCount', 'Routingkit'], emitter);
@@ -194,6 +236,33 @@ class _DynamicLookupRoutingkitBenchmark extends _RouterBenchmark {
   void run() {
     for (final route in _dynamicRoutesToLookup) {
       _sink ^= _router.find('GET', route)?.data ?? 0;
+    }
+  }
+}
+
+class _DynamicLookupParamsRoutingkitBenchmark extends _RouterBenchmark {
+  _DynamicLookupParamsRoutingkitBenchmark(_CollectingEmitter emitter)
+    : super(
+        ['Lookup+Params', 'Dynamic', 'x$_routeCount', 'Routingkit'],
+        emitter,
+      );
+
+  late final routingkit.Router<int> _router;
+
+  @override
+  void setup() {
+    _router = routingkit.createRouter<int>();
+    for (final i in _indexes) {
+      _router.add('GET', '/users/:id/items/:itemId/profile$i', i);
+    }
+  }
+
+  @override
+  void run() {
+    for (final route in _dynamicRoutesToLookup) {
+      final match = _router.find('GET', route);
+      _sink ^= match?.data ?? 0;
+      _consumeStringParams(match?.params);
     }
   }
 }
@@ -268,6 +337,30 @@ class _DynamicLookupRelicBenchmark extends _RouterBenchmark {
   }
 }
 
+class _DynamicLookupParamsRelicBenchmark extends _RouterBenchmark {
+  _DynamicLookupParamsRelicBenchmark(_CollectingEmitter emitter)
+    : super(['Lookup+Params', 'Dynamic', 'x$_routeCount', 'Relic'], emitter);
+
+  late final relic.Router<int> _router;
+
+  @override
+  void setup() {
+    _router = relic.Router<int>();
+    for (final i in _indexes) {
+      _router.get('/users/:id/items/:itemId/profile$i', i);
+    }
+  }
+
+  @override
+  void run() {
+    for (final route in _dynamicRoutesToLookup) {
+      final match = _router.lookup(relic.Method.get, route).asMatch;
+      _sink ^= match.value;
+      _consumeSymbolParams(match.parameters);
+    }
+  }
+}
+
 void main(List<String> args) {
   final routeCount = _parseArg(args, 0, _defaultRouteCount);
   _setupBenchmarkData(routeCount);
@@ -291,6 +384,9 @@ void main(List<String> args) {
     _DynamicLookupRoutingkitBenchmark(emitter),
     _DynamicLookupRelicBenchmark(emitter),
     _DynamicLookupRouxBenchmark(emitter),
+    _DynamicLookupParamsRoutingkitBenchmark(emitter),
+    _DynamicLookupParamsRelicBenchmark(emitter),
+    _DynamicLookupParamsRouxBenchmark(emitter),
   ]) {
     benchmark.report();
   }
@@ -321,6 +417,9 @@ void _printRelative(
   final keyDynamicAddRoux = 'Add;Dynamic;x$_routeCount;Roux';
   final keyDynamicLookupBase = 'Lookup;Dynamic;x$_routeCount;$baseline';
   final keyDynamicLookupRoux = 'Lookup;Dynamic;x$_routeCount;Roux';
+  final keyDynamicLookupParamsBase =
+      'Lookup+Params;Dynamic;x$_routeCount;$baseline';
+  final keyDynamicLookupParamsRoux = 'Lookup+Params;Dynamic;x$_routeCount;Roux';
 
   print('\nrelative ($title, >1 means roux is faster)');
   _printRatio(
@@ -342,6 +441,11 @@ void _printRelative(
     'lookup dynamic',
     results[keyDynamicLookupBase]!,
     results[keyDynamicLookupRoux]!,
+  );
+  _printRatio(
+    'lookup dyn+params',
+    results[keyDynamicLookupParamsBase]!,
+    results[keyDynamicLookupParamsRoux]!,
   );
 }
 
