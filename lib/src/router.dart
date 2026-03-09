@@ -2,6 +2,9 @@ import 'dart:collection';
 
 const _slashCode = 47, _asteriskCode = 42, _colonCode = 58, _mapAt = 4;
 const _wildRank = 0, _paramRank = 1, _staticRank = 2;
+const _compiledBucketHigh = 0,
+    _compiledBucketRepeated = 1,
+    _compiledBucketDeferred = 2;
 const _dupShape = 'Duplicate route shape conflicts with existing route: ';
 const _dupWildcard = 'Duplicate wildcard route shape at prefix for pattern: ';
 const _dupFallback = 'Duplicate global fallback route: ';
@@ -149,10 +152,12 @@ class Router<T> {
   RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
     final fallback = state.globalFallback,
         compiled = state.compiledRoutes,
+        repeated = state.repeatedCompiledRoutes,
         deferred = state.deferredCompiledRoutes;
     return state.staticExactRoutes[normalized]?.noParamsMatch ??
         (compiled == null ? null : _matchCompiled(compiled, normalized)) ??
         _matchNodePath(state, normalized) ??
+        (repeated == null ? null : _matchCompiled(repeated, normalized)) ??
         (deferred == null ? null : _matchCompiled(deferred, normalized)) ??
         (fallback == null ? null : _materialize(fallback, normalized, null, 1));
   }
@@ -176,6 +181,10 @@ class Router<T> {
         methodRank,
         output,
       );
+    }
+    final repeated = state.repeatedCompiledRoutes;
+    if (repeated != null) {
+      _collectCompiled(repeated, normalized, pathDepth, methodRank, output);
     }
     _collectNode(state, normalized, methodRank, output);
     final compiled = state.compiledRoutes;
@@ -378,7 +387,7 @@ class Router<T> {
           output.add(
             _materializeCompiled(route, current.groupIndexes, match),
             pathDepth,
-            _staticRank,
+            current.collectRank,
             methodRank,
           );
         }
@@ -689,9 +698,12 @@ class Router<T> {
     String pattern,
     DuplicatePolicy duplicatePolicy,
   ) {
-    final head = compiled.afterTrie
-        ? state.deferredCompiledRoutes
-        : state.compiledRoutes;
+    final head = switch (compiled.bucket) {
+      _compiledBucketHigh => state.compiledRoutes,
+      _compiledBucketRepeated => state.repeatedCompiledRoutes,
+      _compiledBucketDeferred => state.deferredCompiledRoutes,
+      _ => throw StateError('Invalid compiled bucket: ${compiled.bucket}'),
+    };
     _CompiledSlot<T>? prev;
     for (var current = head; current != null; current = current.next) {
       if (current.shape != compiled.shape) {
@@ -714,12 +726,16 @@ class Router<T> {
     }
 
     if (prev == null) {
-      if (compiled.afterTrie) {
-        compiled.next = state.deferredCompiledRoutes;
-        state.deferredCompiledRoutes = compiled;
-      } else {
-        compiled.next = state.compiledRoutes;
-        state.compiledRoutes = compiled;
+      switch (compiled.bucket) {
+        case _compiledBucketHigh:
+          compiled.next = state.compiledRoutes;
+          state.compiledRoutes = compiled;
+        case _compiledBucketRepeated:
+          compiled.next = state.repeatedCompiledRoutes;
+          state.repeatedCompiledRoutes = compiled;
+        case _compiledBucketDeferred:
+          compiled.next = state.deferredCompiledRoutes;
+          state.deferredCompiledRoutes = compiled;
       }
       return;
     }
@@ -752,6 +768,7 @@ class _MethodState<T> {
   final _Node<T> root = _Node<T>();
   _Route<T>? globalFallback;
   _CompiledSlot<T>? compiledRoutes;
+  _CompiledSlot<T>? repeatedCompiledRoutes;
   _CompiledSlot<T>? deferredCompiledRoutes;
   final Map<String, _Route<T>> staticExactRoutes = <String, _Route<T>>{};
   int maxParamDepth = 0;
@@ -798,14 +815,16 @@ class _Route<T> {
 class _CompiledSlot<T> {
   final RegExp regex;
   final String shape;
-  final bool afterTrie;
+  final int bucket;
+  final int collectRank;
   final List<int> groupIndexes;
   _Route<T> route;
   _CompiledSlot<T>? next;
   _CompiledSlot(
     this.regex,
     this.shape,
-    this.afterTrie,
+    this.bucket,
+    this.collectRank,
     this.groupIndexes,
     this.route,
   );
@@ -1041,6 +1060,8 @@ bool _isSimpleParamSegment(String pattern, int start, int end) =>
 
 _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   var needsCompiled = false;
+  var bucket = _compiledBucketHigh;
+  var collectRank = _paramRank;
   final regex = StringBuffer('^');
   final shape = StringBuffer('^');
   final paramNames = <String>[];
@@ -1061,6 +1082,25 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
       cursor = segmentEnd + 1;
       continue;
     }
+    final repeated = _readRepeatedParam(pattern, cursor, segmentEnd);
+    if (repeated != null) {
+      final quantifier = repeated.$2;
+      if (quantifier == _plusCode) {
+        regex.write('/(.+(?:/.+)*)');
+        shape.write('/(.+(?:/.+)*)');
+      } else {
+        regex.write('(?:/(.*))?');
+        shape.write('(?:/(.*))?');
+      }
+      paramNames.add(repeated.$1);
+      groupCount += 1;
+      groupIndexes.add(groupCount);
+      needsCompiled = true;
+      bucket = _compiledBucketRepeated;
+      collectRank = _paramRank;
+      cursor = segmentEnd + 1;
+      continue;
+    }
     final optionalName = _readOptionalParamName(pattern, cursor, segmentEnd);
     if (optionalName != null) {
       regex.write('(?:/([^/]+))?');
@@ -1069,6 +1109,8 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
       groupCount += 1;
       groupIndexes.add(groupCount);
       needsCompiled = true;
+      bucket = _compiledBucketDeferred;
+      collectRank = _staticRank;
       cursor = segmentEnd + 1;
       continue;
     }
@@ -1149,7 +1191,8 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   return _CompiledSlot<T>(
     RegExp(regex.toString()),
     shape.toString(),
-    shape.toString().contains('(?:/'),
+    bucket,
+    collectRank,
     groupIndexes,
     _Route<T>(data, paramNames, false),
   );
@@ -1166,9 +1209,20 @@ bool _isParamNameCode(int code, bool first) {
 
 String? _readOptionalParamName(String pattern, int start, int end) {
   if (start >= end || pattern.codeUnitAt(start) != _colonCode) return null;
-  if (pattern.codeUnitAt(end - 1) != 63) return null;
+  if (pattern.codeUnitAt(end - 1) != _questionCode) return null;
   final name = pattern.substring(start + 1, end - 1);
   return _isValidParamName(name) ? name : null;
+}
+
+const _questionCode = 63, _plusCode = 43;
+
+(String, int)? _readRepeatedParam(String pattern, int start, int end) {
+  if (start >= end || pattern.codeUnitAt(start) != _colonCode) return null;
+  final last = pattern.codeUnitAt(end - 1);
+  if (last != _asteriskCode && last != _plusCode) return null;
+  final name = pattern.substring(start + 1, end - 1);
+  if (!_isValidParamName(name)) return null;
+  return (name, last);
 }
 
 int _findRegexEnd(String pattern, int start, int segmentEnd) {

@@ -67,6 +67,17 @@ void main() {
       expect(router.match('/users')?.data, 'maybe-user');
       expect(router.match('/users')?.params, isEmpty);
     });
+
+    test('supports repeated parameter segments', () {
+      final router = Router<String>();
+      router.add('/files/:path+', 'plus');
+      router.add('/assets/:rest*', 'star');
+
+      expect(router.match('/files'), isNull);
+      expect(router.match('/files/a/b')?.params, {'path': 'a/b'});
+      expect(router.match('/assets')?.params, isEmpty);
+      expect(router.match('/assets/a/b')?.params, {'rest': 'a/b'});
+    });
   });
 
   group('duplicate policy', () {
@@ -820,6 +831,34 @@ void main() {
         expect(router.match('/users')?.data, 'optional');
       },
     );
+
+    test(
+      'matches repeated params before single params in multi-segment lookups',
+      () {
+        final router = Router<String>(
+          routes: {'/files/:id': 'param', '/files/:path+': 'plus'},
+        );
+
+        expect(router.match('/files/a')?.data, 'param');
+        expect(router.matchAll('/files/a').map((match) => match.data), [
+          'plus',
+          'param',
+        ]);
+        expect(router.match('/files/a/b')?.data, 'plus');
+      },
+    );
+
+    test('collects star params before exact routes when param is empty', () {
+      final router = Router<String>(
+        routes: {'/files': 'exact', '/files/:path*': 'star'},
+      );
+
+      expect(router.match('/files')?.data, 'exact');
+      expect(router.matchAll('/files').map((match) => match.data), [
+        'star',
+        'exact',
+      ]);
+    });
   });
 
   group('normalization and invalid input', () {
@@ -903,6 +942,15 @@ void main() {
       expect(
         () =>
             Router<String>(routes: {'/users/:id?': 'a', '/users/:name?': 'b'}),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate repeated param shape', () {
+      expect(
+        () => Router<String>(
+          routes: {'/files/:path+': 'a', '/files/:rest+': 'b'},
+        ),
         throwsFormatException,
       );
     });
