@@ -3,7 +3,7 @@
 [![Pub Version](https://img.shields.io/pub/v/roux?logo=dart)](https://pub.dev/packages/roux)
 [![Test](https://github.com/medz/roux/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/medz/roux/actions/workflows/test.yml)
 
-Lightweight, fast router for Dart with rou3-style pathname syntax.
+Lightweight, fast router for Dart with expressive pathname syntax.
 
 ## Install
 
