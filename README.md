@@ -28,8 +28,9 @@ final router = Router<String>(
     '/': 'root',
     '/users/all': 'users-all',
     '/users/:id': 'users-id',
-    '/users/*': 'users-wildcard',
-    '/*': 'global-fallback',
+    '/users/*': 'users-one-segment',
+    '/users/**:wildcard': 'users-wildcard',
+    '/**:wildcard': 'global-fallback',
   },
 );
 
@@ -38,7 +39,9 @@ print(match?.data);   // users-id
 print(match?.params); // {id: 123}
 
 final stack = router.matchAll('/users/123');
-print(stack.map((match) => match.data)); // (global-fallback, users-wildcard, users-id)
+print(
+  stack.map((match) => match.data),
+); // (global-fallback, users-wildcard, users-id, users-one-segment)
 ```
 
 ## Duplicate Policy
@@ -76,8 +79,8 @@ To retain multiple handlers in the same normalized slot:
 
 ```dart
 final router = Router<String>(duplicatePolicy: DuplicatePolicy.append);
-router.add('/*', 'global-logger');
-router.add('/*', 'root-scope-middleware');
+router.add('/**:wildcard', 'global-logger');
+router.add('/**:wildcard', 'root-scope-middleware');
 
 print(router.match('/users/42')?.data); // global-logger
 print(
@@ -92,13 +95,17 @@ Parameter-name drift remains a hard error under all policies. For example,
 
 - Static: `/users`
 - Named param: `/users/:id`
-- Wildcard tail: `/users/*`
-- Global fallback: `/*`
+- Single-segment wildcard: `/users/*`
+- Named repeated param: `/files/:path+`, `/files/:path*`
+- Named regex param: `/users/:id(\\d+)`
+- Embedded params: `/files/:name.:ext`
+- Double wildcard tail: `/users/**:wildcard`
+- Global fallback: `/**:wildcard`
 
 Notes:
 - Paths must start with `/`.
-- `*` is only allowed as the final segment.
-- Embedded syntax like `/files/:name.:ext` is intentionally unsupported.
+- `*` matches exactly one segment.
+- `**` and `**:name` match the remaining path and must be the final segment.
 - Matching is case-sensitive.
 - Trailing slash on input is ignored (`/users` equals `/users/`).
 - You can register routes via constructor (`Router(routes: {...})`) or
@@ -110,15 +117,17 @@ For `match(...)`:
 
 1. Exact route (`/users/all`)
 2. Parameter route (`/users/:id`)
-3. Wildcard route (`/users/*`)
-4. Global fallback (`/*`)
+3. Single-segment wildcard (`/users/*`)
+4. Double wildcard route (`/users/**:wildcard`)
+5. Global fallback (`/**:wildcard`)
 
 For `matchAll(...)`:
 
-1. Global fallback (`/*`)
-2. Wildcard scope (`/users/*`)
+1. Global fallback (`/**:wildcard`)
+2. Double wildcard scope (`/users/**:wildcard`)
 3. Parameter route (`/users/:id`)
-4. Exact route (`/users/all`)
+4. Single-segment wildcard (`/users/*`)
+5. Exact route (`/users/all`)
 
 `matchAll(...)` returns every matching route from less specific to more
 specific. When a `method` is provided, both `ANY` and exact-method entries

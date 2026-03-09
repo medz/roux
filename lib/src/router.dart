@@ -4,7 +4,8 @@ const _slashCode = 47, _asteriskCode = 42, _colonCode = 58, _mapAt = 4;
 const _wildRank = 0, _paramRank = 1, _staticRank = 2;
 const _compiledBucketHigh = 0,
     _compiledBucketRepeated = 1,
-    _compiledBucketDeferred = 2;
+    _compiledBucketLate = 2,
+    _compiledBucketDeferred = 3;
 const _dupShape = 'Duplicate route shape conflicts with existing route: ';
 const _dupWildcard = 'Duplicate wildcard route shape at prefix for pattern: ';
 const _dupFallback = 'Duplicate global fallback route: ';
@@ -56,7 +57,7 @@ class RouteMatch<T> {
     null => _params,
     final route => _params ??= _LazyParamsMap(
       route.paramNames,
-      route.hasWildcard,
+      route.wildcardName,
       _path!,
       _captures,
       _wildcardStart,
@@ -150,14 +151,21 @@ class Router<T> {
   }
 
   RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
+    final exact = state.staticExactRoutes[normalized]?.noParamsMatch;
+    if (exact != null) return exact;
+    if (!state.hasSlowMatchPath) {
+      return _matchNodePathFast(state, normalized);
+    }
     final fallback = state.globalFallback,
         compiled = state.compiledRoutes,
         repeated = state.repeatedCompiledRoutes,
+        late = state.lateCompiledRoutes,
         deferred = state.deferredCompiledRoutes;
-    return state.staticExactRoutes[normalized]?.noParamsMatch ??
-        (compiled == null ? null : _matchCompiled(compiled, normalized)) ??
-        _matchNodePath(state, normalized) ??
+    return (compiled == null ? null : _matchCompiled(compiled, normalized)) ??
+        _matchNodePath(state, normalized, false) ??
+        (late == null ? null : _matchCompiled(late, normalized)) ??
         (repeated == null ? null : _matchCompiled(repeated, normalized)) ??
+        _matchNodePath(state, normalized, true) ??
         (deferred == null ? null : _matchCompiled(deferred, normalized)) ??
         (fallback == null ? null : _materialize(fallback, normalized, null, 1));
   }
@@ -190,6 +198,10 @@ class Router<T> {
     final compiled = state.compiledRoutes;
     if (compiled != null) {
       _collectCompiled(compiled, normalized, pathDepth, methodRank, output);
+    }
+    final late = state.lateCompiledRoutes;
+    if (late != null) {
+      _collectCompiled(late, normalized, pathDepth, methodRank, output);
     }
     final exactStatic = state.staticExactRoutes[normalized];
     if (exactStatic != null) {
@@ -249,21 +261,10 @@ class Router<T> {
         ? pattern
         : pattern.substring(0, end);
 
-    if (normalized == '/*') {
-      state.globalFallback = _mergedRoute(
-        state.globalFallback,
-        _Route<T>(data, const <String>[], true),
-        normalized,
-        duplicatePolicy,
-        _dupFallback,
-      );
-      return;
-    }
-
     if (!hasReservedToken) {
       state.staticExactRoutes[normalized] = _mergedRoute(
         state.staticExactRoutes[normalized],
-        _Route<T>(data, const <String>[], false),
+        _Route<T>(data, const <String>[], null),
         normalized,
         duplicatePolicy,
         _dupShape,
@@ -288,21 +289,42 @@ class Router<T> {
         segmentEnd += 1;
       }
 
-      final segmentLength = segmentEnd - cursor;
       final firstCode = pattern.codeUnitAt(cursor);
-      if (segmentLength == 1 && firstCode == _asteriskCode) {
+      final doubleWildcardName = _readDoubleWildcardName(
+        pattern,
+        cursor,
+        segmentEnd,
+      );
+      if (doubleWildcardName != null) {
         if (segmentEnd != end) {
           throw FormatException(
-            'Wildcard must be the last segment: $normalized',
+            'Double wildcard must be the last segment: $normalized',
           );
         }
-        node.wildcardRoute = _mergedRoute(
-          node.wildcardRoute,
-          _Route<T>(data, paramNames ?? const <String>[], true),
-          normalized,
-          duplicatePolicy,
-          _dupWildcard,
+        final route = _Route<T>(
+          data,
+          paramNames ?? const <String>[],
+          doubleWildcardName,
         );
+        if (cursor == 1 && paramCount == 0) {
+          state.hasSlowMatchPath = true;
+          state.globalFallback = _mergedRoute(
+            state.globalFallback,
+            route,
+            normalized,
+            duplicatePolicy,
+            _dupFallback,
+          );
+        } else {
+          state.hasSlowMatchPath = true;
+          node.wildcardRoute = _mergedRoute(
+            node.wildcardRoute,
+            route,
+            normalized,
+            duplicatePolicy,
+            _dupWildcard,
+          );
+        }
         if (paramCount > state.maxParamDepth) state.maxParamDepth = paramCount;
         return;
       }
@@ -315,6 +337,7 @@ class Router<T> {
               'Unsupported segment syntax in route: $normalized',
             );
           }
+          state.hasSlowMatchPath = true;
           _addCompiled(state, compiled, normalized, duplicatePolicy);
           if (compiled.route.paramNames.length > state.maxParamDepth) {
             state.maxParamDepth = compiled.route.paramNames.length;
@@ -336,6 +359,7 @@ class Router<T> {
               'Unsupported segment syntax in route: $normalized',
             );
           }
+          state.hasSlowMatchPath = true;
           _addCompiled(state, compiled, normalized, duplicatePolicy);
           if (compiled.route.paramNames.length > state.maxParamDepth) {
             state.maxParamDepth = compiled.route.paramNames.length;
@@ -349,7 +373,7 @@ class Router<T> {
 
     node.exactRoute = _mergedRoute(
       node.exactRoute,
-      _Route<T>(data, paramNames ?? const <String>[], false),
+      _Route<T>(data, paramNames ?? const <String>[], null),
       normalized,
       duplicatePolicy,
       _dupShape,
@@ -398,7 +422,7 @@ class Router<T> {
     }
   }
 
-  RouteMatch<T>? _matchNodePath(_MethodState<T> state, String path) {
+  RouteMatch<T>? _matchNodePathFast(_MethodState<T> state, String path) {
     _ParamStack? paramStack;
     _Branch<T>? stack;
     var node = state.root;
@@ -497,6 +521,116 @@ class Router<T> {
         stack = branch.prev;
         final wildcard = node.wildcardRoute;
         if (wildcard != null) {
+          return _materialize(wildcard, path, paramStack, cursor);
+        }
+      }
+      return null;
+    } while (true);
+  }
+
+  RouteMatch<T>? _matchNodePath(
+    _MethodState<T> state,
+    String path,
+    bool allowWildcards,
+  ) {
+    _ParamStack? paramStack;
+    _Branch<T>? stack;
+    var node = state.root;
+    var cursor = 1;
+    var paramLength = 0;
+    top:
+    do {
+      final params = paramStack;
+      if (params != null) {
+        params.truncate(paramLength);
+      }
+      final stackParams = paramStack;
+      if (cursor >= path.length) {
+        final exact = node.exactRoute;
+        if (exact != null) return _materialize(exact, path, stackParams, 0);
+        final wildcard = node.wildcardRoute;
+        if (allowWildcards && wildcard != null) {
+          return _materialize(wildcard, path, stackParams, path.length);
+        }
+      } else {
+        final segmentEnd = _findSegmentEnd(path, cursor);
+        if (segmentEnd != cursor) {
+          final nextCursor = segmentEnd < path.length
+              ? segmentEnd + 1
+              : path.length;
+          final staticChild = node._findStaticChildSlice(
+            path,
+            cursor,
+            segmentEnd,
+          );
+          final paramChild = node.paramChild;
+          final wildcard = allowWildcards ? node.wildcardRoute : null;
+
+          if (staticChild != null) {
+            if (paramChild != null || wildcard != null) {
+              stack = _Branch<T>(
+                node,
+                cursor,
+                paramLength,
+                segmentEnd,
+                nextCursor,
+                0,
+                paramChild != null,
+                stack,
+              );
+            }
+            node = staticChild;
+            cursor = nextCursor;
+            continue top;
+          }
+          if (paramChild != null) {
+            paramStack ??= _ParamStack(state.maxParamDepth);
+            paramStack.truncate(paramLength);
+            paramStack.push(cursor, segmentEnd);
+            if (wildcard != null) {
+              stack = _Branch<T>(
+                node,
+                cursor,
+                paramLength,
+                segmentEnd,
+                nextCursor,
+                0,
+                false,
+                stack,
+              );
+            }
+            node = paramChild;
+            cursor = nextCursor;
+            paramLength = paramStack.length;
+            continue top;
+          }
+          if (allowWildcards && wildcard != null) {
+            return _materialize(wildcard, path, stackParams, cursor);
+          }
+        }
+      }
+      while (stack != null) {
+        final branch = stack;
+        node = branch.node;
+        cursor = branch.cursor;
+        paramLength = branch.paramLength;
+        if (paramStack != null) {
+          paramStack.truncate(paramLength);
+        }
+        if (branch.pendingParam) {
+          branch.pendingParam = false;
+          paramStack ??= _ParamStack(state.maxParamDepth);
+          paramStack.truncate(paramLength);
+          paramStack.push(cursor, branch.depthOrSegmentEnd);
+          node = node.paramChild!;
+          cursor = branch.segmentStartOrNextCursor;
+          paramLength = paramStack.length;
+          continue top;
+        }
+
+        stack = branch.prev;
+        final wildcard = node.wildcardRoute;
+        if (allowWildcards && wildcard != null) {
           return _materialize(wildcard, path, paramStack, cursor);
         }
       }
@@ -626,7 +760,7 @@ class Router<T> {
     String path,
     _ParamStack? paramValues,
     int wildcardStart,
-  ) => route.hasWildcard || route.paramNames.isNotEmpty
+  ) => route.wildcardName != null || route.paramNames.isNotEmpty
       ? RouteMatch<T>._lazy(route.data, route, path, paramValues, wildcardStart)
       : route.noParamsMatch;
   void _collectSlot(
@@ -639,7 +773,7 @@ class Router<T> {
     int methodRank,
     _MatchCollector<T> output,
   ) {
-    if (slot.hasWildcard || slot.paramNames.isNotEmpty) {
+    if (slot.wildcardName != null || slot.paramNames.isNotEmpty) {
       final captures = paramValues?.snapshot();
       for (_Route<T>? current = slot; current != null; current = current.next) {
         output.add(
@@ -684,6 +818,9 @@ class Router<T> {
     for (var i = 0; i < a.length; i++) {
       if (a[i] != b[i]) throw FormatException('$_dupShape$pattern');
     }
+    if (existing.wildcardName != replacement.wildcardName) {
+      throw FormatException('$_dupShape$pattern');
+    }
     return switch (duplicatePolicy) {
       DuplicatePolicy.reject => throw FormatException('$rejectPrefix$pattern'),
       DuplicatePolicy.replace => replacement,
@@ -701,6 +838,7 @@ class Router<T> {
     final head = switch (compiled.bucket) {
       _compiledBucketHigh => state.compiledRoutes,
       _compiledBucketRepeated => state.repeatedCompiledRoutes,
+      _compiledBucketLate => state.lateCompiledRoutes,
       _compiledBucketDeferred => state.deferredCompiledRoutes,
       _ => throw StateError('Invalid compiled bucket: ${compiled.bucket}'),
     };
@@ -733,6 +871,9 @@ class Router<T> {
         case _compiledBucketRepeated:
           compiled.next = state.repeatedCompiledRoutes;
           state.repeatedCompiledRoutes = compiled;
+        case _compiledBucketLate:
+          compiled.next = state.lateCompiledRoutes;
+          state.lateCompiledRoutes = compiled;
         case _compiledBucketDeferred:
           compiled.next = state.deferredCompiledRoutes;
           state.deferredCompiledRoutes = compiled;
@@ -766,9 +907,11 @@ class Router<T> {
 
 class _MethodState<T> {
   final _Node<T> root = _Node<T>();
+  bool hasSlowMatchPath = false;
   _Route<T>? globalFallback;
   _CompiledSlot<T>? compiledRoutes;
   _CompiledSlot<T>? repeatedCompiledRoutes;
+  _CompiledSlot<T>? lateCompiledRoutes;
   _CompiledSlot<T>? deferredCompiledRoutes;
   final Map<String, _Route<T>> staticExactRoutes = <String, _Route<T>>{};
   int maxParamDepth = 0;
@@ -798,10 +941,10 @@ class _Branch<T> {
 class _Route<T> {
   final T data;
   final List<String> paramNames;
-  final bool hasWildcard;
+  final String? wildcardName;
   _Route<T>? next;
   late final RouteMatch<T> noParamsMatch = RouteMatch<T>(data);
-  _Route(this.data, this.paramNames, this.hasWildcard);
+  _Route(this.data, this.paramNames, this.wildcardName);
   _Route<T> appended(_Route<T> route) {
     var current = this;
     while (current.next != null) {
@@ -832,14 +975,14 @@ class _CompiledSlot<T> {
 
 class _LazyParamsMap extends MapBase<String, String> {
   final List<String> _names;
-  final bool _wildcard;
+  final String? _wildcardName;
   final String _path;
   final _ParamStack? _captures;
   final int _wildcardStart;
   Map<String, String>? _map;
   _LazyParamsMap(
     this._names,
-    this._wildcard,
+    this._wildcardName,
     this._path,
     this._captures,
     this._wildcardStart,
@@ -854,7 +997,7 @@ class _LazyParamsMap extends MapBase<String, String> {
     if (key is! String) return null;
     final map = _map;
     if (map != null) return map[key];
-    if (_wildcard && key == 'wildcard') return _wildcardValue;
+    if (_wildcardName != null && key == _wildcardName) return _wildcardValue;
     for (var i = 0; i < _names.length; i++) {
       if (_names[i] == key) {
         final captures = _requiredCaptures;
@@ -871,12 +1014,13 @@ class _LazyParamsMap extends MapBase<String, String> {
   @override
   Iterable<String> get keys =>
       _map?.keys ??
-      (_wildcard ? _names.followedBy(const ['wildcard']) : _names);
+      (_wildcardName == null ? _names : _names.followedBy([_wildcardName]));
   @override
   String? remove(Object? key) =>
       key is String ? _materialized.remove(key) : null;
   @override
-  int get length => _map?.length ?? _names.length + (_wildcard ? 1 : 0);
+  int get length =>
+      _map?.length ?? _names.length + (_wildcardName == null ? 0 : 1);
   Map<String, String> _materialize() {
     final map = <String, String>{};
     if (_names.isNotEmpty) {
@@ -888,7 +1032,7 @@ class _LazyParamsMap extends MapBase<String, String> {
         );
       }
     }
-    if (_wildcard) map['wildcard'] = _wildcardValue;
+    if (_wildcardName != null) map[_wildcardName] = _wildcardValue;
     return map;
   }
 }
@@ -1067,6 +1211,7 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   final paramNames = <String>[];
   final groupIndexes = <int>[];
   var groupCount = 0;
+  var unnamedCount = 0;
   var cursor = pattern.length == 1 ? pattern.length : 1;
   while (cursor < pattern.length) {
     final segmentEnd = _findSegmentEnd(pattern, cursor);
@@ -1074,11 +1219,20 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
     if (segmentEnd == cursor) {
       throw FormatException('$_emptySegment$pattern');
     }
-    if (segmentEnd - cursor == 1 && firstCode == _asteriskCode) {
-      return null;
-    }
     if (firstCode == _colonCode &&
         _isSimpleParamSegment(pattern, cursor + 1, segmentEnd)) {
+      cursor = segmentEnd + 1;
+      continue;
+    }
+    if (segmentEnd - cursor == 1 && firstCode == _asteriskCode) {
+      regex.write('/([^/]+)');
+      shape.write('/([^/]+)');
+      paramNames.add('${unnamedCount++}');
+      groupCount += 1;
+      groupIndexes.add(groupCount);
+      needsCompiled = true;
+      bucket = _compiledBucketLate;
+      collectRank = _staticRank;
       cursor = segmentEnd + 1;
       continue;
     }
@@ -1194,7 +1348,7 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
     bucket,
     collectRank,
     groupIndexes,
-    _Route<T>(data, paramNames, false),
+    _Route<T>(data, paramNames, null),
   );
 }
 
@@ -1215,6 +1369,22 @@ String? _readOptionalParamName(String pattern, int start, int end) {
 }
 
 const _questionCode = 63, _plusCode = 43;
+
+String? _readDoubleWildcardName(String pattern, int start, int end) {
+  if (end - start == 2 &&
+      pattern.codeUnitAt(start) == _asteriskCode &&
+      pattern.codeUnitAt(start + 1) == _asteriskCode) {
+    return '_';
+  }
+  if (end - start <= 3 ||
+      pattern.codeUnitAt(start) != _asteriskCode ||
+      pattern.codeUnitAt(start + 1) != _asteriskCode ||
+      pattern.codeUnitAt(start + 2) != _colonCode) {
+    return null;
+  }
+  final name = pattern.substring(start + 3, end);
+  return _isValidParamName(name) ? name : null;
+}
 
 (String, int)? _readRepeatedParam(String pattern, int start, int end) {
   if (start >= end || pattern.codeUnitAt(start) != _colonCode) return null;
