@@ -48,8 +48,8 @@ class RouteMatch<T> {
 
 /// A compact path router with support for exact, parameter, and wildcard routes.
 class Router<T> {
-  final _MethodState<T> _anyState = _MethodState<T>();
-  Map<String, _MethodState<T>>? _methodStates;
+  final _RouteSet<T> _anyRoutes = _RouteSet<T>();
+  Map<String, _RouteSet<T>>? _routeSetsByMethod;
   final DuplicatePolicy _duplicatePolicy;
   final bool _caseSensitive;
   final bool _decodePath;
@@ -77,7 +77,7 @@ class Router<T> {
     String? method,
     DuplicatePolicy? duplicatePolicy,
   }) => _addPattern(
-    _stateForWrite(method),
+    _routeSetForWrite(method),
     path,
     data,
     duplicatePolicy: duplicatePolicy ?? _duplicatePolicy,
@@ -89,10 +89,10 @@ class Router<T> {
     String? method,
     DuplicatePolicy? duplicatePolicy,
   }) {
-    final state = _stateForWrite(method),
+    final routeSet = _routeSetForWrite(method),
         policy = duplicatePolicy ?? _duplicatePolicy;
     for (final entry in routes.entries) {
-      _addPattern(state, entry.key, entry.value, duplicatePolicy: policy);
+      _addPattern(routeSet, entry.key, entry.value, duplicatePolicy: policy);
     }
   }
 
@@ -101,13 +101,11 @@ class Router<T> {
     final normalized = _prepareInputPath(path);
     if (normalized == null) return null;
     final methodToken = method == null ? null : _methodToken(method);
-    final methodState = methodToken == null
+    final routeSet = methodToken == null
         ? null
-        : _methodStates?[methodToken];
-    return (methodState == null
-            ? null
-            : _matchInState(methodState, normalized)) ??
-        _matchInState(_anyState, normalized);
+        : _routeSetsByMethod?[methodToken];
+    return (routeSet == null ? null : _matchInRouteSet(routeSet, normalized)) ??
+        _matchInRouteSet(_anyRoutes, normalized);
   }
 
   /// Returns every matching route for [path] in router priority order.
@@ -116,26 +114,26 @@ class Router<T> {
     if (normalized == null) return <RouteMatch<T>>[];
     final pathDepth = _pathDepth(normalized);
     final methodToken = method == null ? null : _methodToken(method);
-    final methodState = methodToken == null
+    final routeSet = methodToken == null
         ? null
-        : _methodStates?[methodToken];
+        : _routeSetsByMethod?[methodToken];
     final collected = _MatchCollector<T>(
-      methodState != null ||
-          _needsSpecificitySort(_anyState) ||
-          (methodState != null && _needsSpecificitySort(methodState)),
+      routeSet != null ||
+          _needsSpecificitySort(_anyRoutes) ||
+          (routeSet != null && _needsSpecificitySort(routeSet)),
     );
-    _collectState(_anyState, normalized, pathDepth, 0, collected);
-    if (methodState != null) {
-      _collectState(methodState, normalized, pathDepth, 1, collected);
+    _collectRouteSet(_anyRoutes, normalized, pathDepth, 0, collected);
+    if (routeSet != null) {
+      _collectRouteSet(routeSet, normalized, pathDepth, 1, collected);
     }
     return collected.finish();
   }
 
-  _MethodState<T> _stateForWrite(String? method) => method == null
-      ? _anyState
-      : (_methodStates ??= <String, _MethodState<T>>{}).putIfAbsent(
+  _RouteSet<T> _routeSetForWrite(String? method) => method == null
+      ? _anyRoutes
+      : (_routeSetsByMethod ??= <String, _RouteSet<T>>{}).putIfAbsent(
           _methodToken(method),
-          _MethodState<T>.new,
+          _RouteSet<T>.new,
         );
 
   _Route<T> _newRoute(
@@ -161,13 +159,13 @@ class Router<T> {
     );
   }
 
-  bool _needsSpecificitySort(_MethodState<T> state) =>
-      state.hasBranchingChoices ||
-      state.root.paramChild != null ||
-      state.repeatedCompiledRoutes != null ||
-      state.compiledRoutes != null ||
-      state.lateCompiledRoutes != null ||
-      state.deferredCompiledRoutes != null;
+  bool _needsSpecificitySort(_RouteSet<T> routeSet) =>
+      routeSet.hasBranchingChoices ||
+      routeSet.root.paramChild != null ||
+      routeSet.repeatedCompiledRoutes != null ||
+      routeSet.compiledRoutes != null ||
+      routeSet.lateCompiledRoutes != null ||
+      routeSet.deferredCompiledRoutes != null;
 
   String _methodToken(String method) {
     final token = method.trim();
@@ -196,65 +194,65 @@ class Router<T> {
         : _normalizeInputPath(path);
   }
 
-  RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
+  RouteMatch<T>? _matchInRouteSet(_RouteSet<T> routeSet, String normalized) {
     final exact =
-        state.staticExactRoutes[_canonicalPath(normalized)]?.noParamsMatch;
+        routeSet.staticExactRoutes[_canonicalPath(normalized)]?.noParamsMatch;
     if (exact != null) return exact;
-    if (!state.hasSlowMatchPath) {
-      return state.hasBranchingChoices
-          ? _matchNodePathFast(state, normalized)
-          : _matchNodePathStraight(state, normalized);
+    if (!routeSet.hasSlowMatchPath) {
+      return routeSet.hasBranchingChoices
+          ? _matchNodePathFast(routeSet, normalized)
+          : _matchNodePathStraight(routeSet, normalized);
     }
-    final fallback = state.globalFallback,
-        compiled = state.compiledRoutes,
-        repeated = state.repeatedCompiledRoutes,
-        late = state.lateCompiledRoutes,
-        deferred = state.deferredCompiledRoutes;
+    final fallback = routeSet.globalFallback,
+        compiled = routeSet.compiledRoutes,
+        repeated = routeSet.repeatedCompiledRoutes,
+        late = routeSet.lateCompiledRoutes,
+        deferred = routeSet.deferredCompiledRoutes;
     return (compiled == null ? null : _matchCompiled(compiled, normalized)) ??
-        _matchNodePath(state, normalized, false) ??
+        _matchNodePath(routeSet, normalized, false) ??
         (late == null ? null : _matchCompiled(late, normalized)) ??
         (repeated == null ? null : _matchCompiled(repeated, normalized)) ??
-        _matchNodePath(state, normalized, true) ??
+        _matchNodePath(routeSet, normalized, true) ??
         (deferred == null ? null : _matchCompiled(deferred, normalized)) ??
         (fallback == null ? null : _materialize(fallback, normalized, null, 1));
   }
 
-  void _collectState(
-    _MethodState<T> state,
+  void _collectRouteSet(
+    _RouteSet<T> routeSet,
     String normalized,
     int pathDepth,
     int methodRank,
     _MatchCollector<T> output,
   ) {
-    final fallback = state.globalFallback;
+    final fallback = routeSet.globalFallback;
     if (fallback != null) {
       _collectSlot(fallback, normalized, null, 1, methodRank, output);
     }
-    final repeated = state.repeatedCompiledRoutes;
+    final repeated = routeSet.repeatedCompiledRoutes;
     if (repeated != null) {
       _collectCompiled(repeated, normalized, methodRank, output);
     }
-    _collectNode(state, normalized, methodRank, output);
-    final compiled = state.compiledRoutes;
+    _collectNode(routeSet, normalized, methodRank, output);
+    final compiled = routeSet.compiledRoutes;
     if (compiled != null) {
       _collectCompiled(compiled, normalized, methodRank, output);
     }
-    final late = state.lateCompiledRoutes;
+    final late = routeSet.lateCompiledRoutes;
     if (late != null) {
       _collectCompiled(late, normalized, methodRank, output);
     }
-    final exactStatic = state.staticExactRoutes[_canonicalPath(normalized)];
+    final exactStatic = routeSet.staticExactRoutes[_canonicalPath(normalized)];
     if (exactStatic != null) {
       _collectSlot(exactStatic, normalized, null, 0, methodRank, output);
     }
-    final deferred = state.deferredCompiledRoutes;
+    final deferred = routeSet.deferredCompiledRoutes;
     if (deferred != null) {
       _collectCompiled(deferred, normalized, methodRank, output);
     }
   }
 
   void _addPattern(
-    _MethodState<T> state,
+    _RouteSet<T> routeSet,
     String pattern,
     T data, {
     required DuplicatePolicy duplicatePolicy,
@@ -298,8 +296,8 @@ class Router<T> {
     final canonical = _canonicalPath(normalized);
 
     if (!hasReservedToken) {
-      state.staticExactRoutes[canonical] = _mergedRoute(
-        state.staticExactRoutes[canonical],
+      routeSet.staticExactRoutes[canonical] = _mergedRoute(
+        routeSet.staticExactRoutes[canonical],
         _newRoute(
           data,
           const <String>[],
@@ -321,7 +319,7 @@ class Router<T> {
     var paramCount = 0;
     var staticChars = 0;
     var depth = 0;
-    var node = state.root;
+    var node = routeSet.root;
     for (var cursor = end == 1 ? end : 1; cursor < end;) {
       var segmentEnd = cursor;
       var hasReservedInSegment = false;
@@ -361,16 +359,16 @@ class Router<T> {
           0,
         );
         if (cursor == 1 && paramCount == 0) {
-          state.hasSlowMatchPath = true;
-          state.globalFallback = _mergedRoute(
-            state.globalFallback,
+          routeSet.hasSlowMatchPath = true;
+          routeSet.globalFallback = _mergedRoute(
+            routeSet.globalFallback,
             route,
             normalized,
             duplicatePolicy,
             _dupFallback,
           );
         } else {
-          state.hasSlowMatchPath = true;
+          routeSet.hasSlowMatchPath = true;
           node.wildcardRoute = _mergedRoute(
             node.wildcardRoute,
             route,
@@ -379,17 +377,19 @@ class Router<T> {
             _dupWildcard,
           );
         }
-        if (paramCount > state.maxParamDepth) state.maxParamDepth = paramCount;
+        if (paramCount > routeSet.maxParamDepth) {
+          routeSet.maxParamDepth = paramCount;
+        }
         return;
       }
 
       if (firstCode == _colonCode) {
         if (!_hasValidParamNameSlice(pattern, cursor + 1, segmentEnd)) {
-          _addCompiledPattern(state, normalized, data, duplicatePolicy);
+          _addCompiledPattern(routeSet, normalized, data, duplicatePolicy);
           return;
         }
         if (node._staticChild != null || node._staticMap != null) {
-          state.hasBranchingChoices = true;
+          routeSet.hasBranchingChoices = true;
         }
         final paramName = pattern.substring(cursor + 1, segmentEnd);
         node = node.paramChild ??= _Node<T>();
@@ -397,11 +397,11 @@ class Router<T> {
         paramCount += 1;
       } else {
         if (hasReservedInSegment) {
-          _addCompiledPattern(state, normalized, data, duplicatePolicy);
+          _addCompiledPattern(routeSet, normalized, data, duplicatePolicy);
           return;
         }
         if (node.paramChild != null) {
-          state.hasBranchingChoices = true;
+          routeSet.hasBranchingChoices = true;
         }
         node = node.getOrCreateStaticChildSlice(
           _canonicalLiteral(pattern.substring(cursor, segmentEnd)),
@@ -428,7 +428,9 @@ class Router<T> {
       duplicatePolicy,
       _dupShape,
     );
-    if (paramCount > state.maxParamDepth) state.maxParamDepth = paramCount;
+    if (paramCount > routeSet.maxParamDepth) {
+      routeSet.maxParamDepth = paramCount;
+    }
   }
 
   RouteMatch<T>? _matchCompiled(_CompiledSlot<T> current, String path) {
@@ -470,10 +472,10 @@ class Router<T> {
     }
   }
 
-  RouteMatch<T>? _matchNodePathFast(_MethodState<T> state, String path) {
+  RouteMatch<T>? _matchNodePathFast(_RouteSet<T> routeSet, String path) {
     _ParamStack? paramStack;
     _Branch<T>? stack;
-    var node = state.root;
+    var node = routeSet.root;
     var cursor = 1;
     var paramLength = 0;
     top:
@@ -523,7 +525,7 @@ class Router<T> {
             continue top;
           }
           if (paramChild != null) {
-            paramStack ??= _ParamStack(state.maxParamDepth);
+            paramStack ??= _ParamStack(routeSet.maxParamDepth);
             paramStack.truncate(paramLength);
             paramStack.push(cursor, segmentEnd);
             if (wildcard != null) {
@@ -558,7 +560,7 @@ class Router<T> {
         }
         if (branch.pendingParam) {
           branch.pendingParam = false;
-          paramStack ??= _ParamStack(state.maxParamDepth);
+          paramStack ??= _ParamStack(routeSet.maxParamDepth);
           paramStack.truncate(paramLength);
           paramStack.push(cursor, branch.depthOrSegmentEnd);
           node = node.paramChild!;
@@ -577,10 +579,10 @@ class Router<T> {
     } while (true);
   }
 
-  RouteMatch<T>? _matchNodePathStraight(_MethodState<T> state, String path) {
-    final smallParams = state.maxParamDepth <= 2;
+  RouteMatch<T>? _matchNodePathStraight(_RouteSet<T> routeSet, String path) {
+    final smallParams = routeSet.maxParamDepth <= 2;
     _ParamStack? paramStack;
-    var node = state.root;
+    var node = routeSet.root;
     var cursor = 1;
     var paramCount = 0;
     var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
@@ -636,7 +638,7 @@ class Router<T> {
         paramCount += 1;
       } else {
         (paramStack ??= _ParamStack(
-          state.maxParamDepth,
+          routeSet.maxParamDepth,
         )).push(cursor, segmentEnd);
       }
       node = paramChild;
@@ -645,13 +647,13 @@ class Router<T> {
   }
 
   RouteMatch<T>? _matchNodePath(
-    _MethodState<T> state,
+    _RouteSet<T> routeSet,
     String path,
     bool allowWildcards,
   ) {
     _ParamStack? paramStack;
     _Branch<T>? stack;
-    var node = state.root;
+    var node = routeSet.root;
     var cursor = 1;
     var paramLength = 0;
     top:
@@ -701,7 +703,7 @@ class Router<T> {
             continue top;
           }
           if (paramChild != null) {
-            paramStack ??= _ParamStack(state.maxParamDepth);
+            paramStack ??= _ParamStack(routeSet.maxParamDepth);
             paramStack.truncate(paramLength);
             paramStack.push(cursor, segmentEnd);
             if (wildcard != null) {
@@ -736,7 +738,7 @@ class Router<T> {
         }
         if (branch.pendingParam) {
           branch.pendingParam = false;
-          paramStack ??= _ParamStack(state.maxParamDepth);
+          paramStack ??= _ParamStack(routeSet.maxParamDepth);
           paramStack.truncate(paramLength);
           paramStack.push(cursor, branch.depthOrSegmentEnd);
           node = node.paramChild!;
@@ -756,14 +758,14 @@ class Router<T> {
   }
 
   void _collectNode(
-    _MethodState<T> state,
+    _RouteSet<T> routeSet,
     String path,
     int methodRank,
     _MatchCollector<T> output,
   ) {
     _ParamStack? paramStack;
     _Branch<T>? stack;
-    var node = state.root;
+    var node = routeSet.root;
     var cursor = 1;
     var depth = 0;
     var paramLength = 0;
@@ -833,7 +835,7 @@ class Router<T> {
             continue top;
           }
           if (paramChild != null) {
-            paramStack ??= _ParamStack(state.maxParamDepth);
+            paramStack ??= _ParamStack(routeSet.maxParamDepth);
             paramStack.truncate(paramLength);
             paramStack.push(cursor, segmentEnd);
             node = paramChild;
@@ -847,7 +849,7 @@ class Router<T> {
       while (stack != null) {
         final branch = stack;
         stack = branch.prev;
-        paramStack ??= _ParamStack(state.maxParamDepth);
+        paramStack ??= _ParamStack(routeSet.maxParamDepth);
         paramStack.truncate(branch.paramLength);
         paramStack.push(branch.segmentStartOrNextCursor, branch.segmentEnd);
         node = branch.node;
@@ -985,20 +987,20 @@ class Router<T> {
   }
 
   void _addCompiled(
-    _MethodState<T> state,
+    _RouteSet<T> routeSet,
     _CompiledSlot<T> compiled,
     String pattern,
     DuplicatePolicy duplicatePolicy,
   ) {
     final head = switch (compiled.bucket) {
-      _compiledBucketHigh => state.compiledRoutes,
-      _compiledBucketRepeated => state.repeatedCompiledRoutes,
-      _compiledBucketLate => state.lateCompiledRoutes,
-      _compiledBucketDeferred => state.deferredCompiledRoutes,
+      _compiledBucketHigh => routeSet.compiledRoutes,
+      _compiledBucketRepeated => routeSet.repeatedCompiledRoutes,
+      _compiledBucketLate => routeSet.lateCompiledRoutes,
+      _compiledBucketDeferred => routeSet.deferredCompiledRoutes,
       _ => throw StateError('Invalid compiled bucket: ${compiled.bucket}'),
     };
     if (head == null) {
-      _setCompiledHead(state, compiled);
+      _setCompiledHead(routeSet, compiled);
       return;
     }
     if (head.shape == compiled.shape) {
@@ -1018,7 +1020,7 @@ class Router<T> {
     }
     if (_compiledSortsBefore(compiled.route, head.route)) {
       compiled.next = head;
-      _setCompiledHead(state, compiled);
+      _setCompiledHead(routeSet, compiled);
       return;
     }
     for (var current = head; ; current = current.next!) {
@@ -1050,16 +1052,16 @@ class Router<T> {
     }
   }
 
-  void _setCompiledHead(_MethodState<T> state, _CompiledSlot<T> compiled) {
+  void _setCompiledHead(_RouteSet<T> routeSet, _CompiledSlot<T> compiled) {
     switch (compiled.bucket) {
       case _compiledBucketHigh:
-        state.compiledRoutes = compiled;
+        routeSet.compiledRoutes = compiled;
       case _compiledBucketRepeated:
-        state.repeatedCompiledRoutes = compiled;
+        routeSet.repeatedCompiledRoutes = compiled;
       case _compiledBucketLate:
-        state.lateCompiledRoutes = compiled;
+        routeSet.lateCompiledRoutes = compiled;
       case _compiledBucketDeferred:
-        state.deferredCompiledRoutes = compiled;
+        routeSet.deferredCompiledRoutes = compiled;
     }
   }
 
@@ -1071,7 +1073,7 @@ class Router<T> {
   }
 
   void _addCompiledPattern(
-    _MethodState<T> state,
+    _RouteSet<T> routeSet,
     String normalized,
     T data,
     DuplicatePolicy duplicatePolicy,
@@ -1085,10 +1087,10 @@ class Router<T> {
     if (compiled == null) {
       throw FormatException('Unsupported segment syntax in route: $normalized');
     }
-    state.hasSlowMatchPath = true;
-    _addCompiled(state, compiled, normalized, duplicatePolicy);
-    if (compiled.route.paramNames.length > state.maxParamDepth) {
-      state.maxParamDepth = compiled.route.paramNames.length;
+    routeSet.hasSlowMatchPath = true;
+    _addCompiled(routeSet, compiled, normalized, duplicatePolicy);
+    if (compiled.route.paramNames.length > routeSet.maxParamDepth) {
+      routeSet.maxParamDepth = compiled.route.paramNames.length;
     }
   }
 
@@ -1107,7 +1109,7 @@ class Router<T> {
   }
 }
 
-class _MethodState<T> {
+class _RouteSet<T> {
   final _Node<T> root = _Node<T>();
   bool hasSlowMatchPath = false;
   bool hasBranchingChoices = false;
