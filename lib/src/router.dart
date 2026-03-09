@@ -289,11 +289,12 @@ class Router<T> {
           code == _closeBraceCode ||
           code == _questionCode) {
         hasReservedToken = true;
+        break;
       }
       exactStaticChars += 1;
       prevSlash = false;
     }
-    if (end > 1 && !prevSlash) {
+    if (!hasReservedToken && end > 1 && !prevSlash) {
       exactDepth += 1;
     }
 
@@ -336,6 +337,9 @@ class Router<T> {
           hasReservedInSegment = true;
         }
         segmentEnd += 1;
+      }
+      if (segmentEnd == cursor) {
+        throw FormatException('$_emptySegment$pattern');
       }
 
       final firstCode = pattern.codeUnitAt(cursor);
