@@ -106,7 +106,7 @@ class Router<T> {
   RouteMatch<T>? match(String path, {String? method}) {
     final normalized = _prepareInputPath(path);
     if (normalized == null) return null;
-    final methodToken = method == null ? null : _methodToken(method);
+    final methodToken = method == null ? null : _normalizeMethod(method);
     final routeSet = methodToken == null
         ? null
         : _routeSetsByMethod?[methodToken];
@@ -118,8 +118,7 @@ class Router<T> {
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
     final normalized = _prepareInputPath(path);
     if (normalized == null) return <RouteMatch<T>>[];
-    final pathDepth = _pathDepth(normalized);
-    final methodToken = method == null ? null : _methodToken(method);
+    final methodToken = method == null ? null : _normalizeMethod(method);
     final routeSet = methodToken == null
         ? null
         : _routeSetsByMethod?[methodToken];
@@ -128,17 +127,17 @@ class Router<T> {
           _needsSpecificitySort(_anyRoutes) ||
           (routeSet != null && _needsSpecificitySort(routeSet)),
     );
-    _collectRouteSet(_anyRoutes, normalized, pathDepth, 0, collected);
+    _collectRouteSet(_anyRoutes, normalized, 0, collected);
     if (routeSet != null) {
-      _collectRouteSet(routeSet, normalized, pathDepth, 1, collected);
+      _collectRouteSet(routeSet, normalized, 1, collected);
     }
-    return collected.finish();
+    return collected._matches;
   }
 
   _RouteSet<T> _routeSetForWrite(String? method) => method == null
       ? _anyRoutes
       : (_routeSetsByMethod ??= <String, _RouteSet<T>>{}).putIfAbsent(
-          _methodToken(method),
+          _normalizeMethod(method),
           _RouteSet<T>.new,
         );
 
@@ -173,19 +172,8 @@ class Router<T> {
       routeSet.lateCompiledRoutes != null ||
       routeSet.deferredCompiledRoutes != null;
 
-  String _methodToken(String method) {
-    final token = method.trim();
-    if (token.isEmpty) {
-      throw ArgumentError.value(method, 'method', 'Method must not be empty.');
-    }
-    return token.toUpperCase();
-  }
-
   String _canonicalPath(String path) =>
       _caseSensitive ? path : path.toLowerCase();
-
-  String _canonicalLiteral(String literal) =>
-      _caseSensitive ? literal : literal.toLowerCase();
 
   String? _prepareInputPath(String path) {
     if (_decodePath && path.contains('%')) {
@@ -226,7 +214,6 @@ class Router<T> {
   void _collectRouteSet(
     _RouteSet<T> routeSet,
     String normalized,
-    int pathDepth,
     int methodRank,
     _MatchCollector<T> output,
   ) {
@@ -257,39 +244,6 @@ class Router<T> {
     }
   }
 
-  _Route<T> _mergedRoute(
-    _Route<T>? existing,
-    _Route<T> route,
-    String pattern,
-    DuplicatePolicy duplicatePolicy,
-    String rejectPrefix,
-  ) => existing == null
-      ? route
-      : _resolveDup(existing, route, pattern, duplicatePolicy, rejectPrefix);
-
-  _Route<T> _resolveDup(
-    _Route<T> existing,
-    _Route<T> replacement,
-    String pattern,
-    DuplicatePolicy duplicatePolicy,
-    String rejectPrefix,
-  ) {
-    final a = existing.paramNames, b = replacement.paramNames;
-    if (a.length != b.length) throw FormatException('$_dupShape$pattern');
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) throw FormatException('$_dupShape$pattern');
-    }
-    if (existing.wildcardName != replacement.wildcardName) {
-      throw FormatException('$_dupShape$pattern');
-    }
-    return switch (duplicatePolicy) {
-      DuplicatePolicy.reject => throw FormatException('$rejectPrefix$pattern'),
-      DuplicatePolicy.replace => replacement,
-      DuplicatePolicy.keepFirst => existing,
-      DuplicatePolicy.append => existing.appended(replacement),
-    };
-  }
-
   void _addCompiledPattern(
     _RouteSet<T> routeSet,
     String normalized,
@@ -306,7 +260,7 @@ class Router<T> {
       throw FormatException('Unsupported segment syntax in route: $normalized');
     }
     routeSet.hasSlowMatchPath = true;
-    _addCompiled(this, routeSet, compiled, normalized, duplicatePolicy);
+    _addCompiled(routeSet, compiled, normalized, duplicatePolicy);
     if (compiled.route.paramNames.length > routeSet.maxParamDepth) {
       routeSet.maxParamDepth = compiled.route.paramNames.length;
     }
@@ -315,13 +269,12 @@ class Router<T> {
 
 class _RouteSet<T> {
   final _Node<T> root = _Node<T>();
-  bool hasSlowMatchPath = false;
-  bool hasBranchingChoices = false;
+  bool hasSlowMatchPath = false, hasBranchingChoices = false;
   _Route<T>? globalFallback;
-  _CompiledSlot<T>? compiledRoutes;
-  _CompiledSlot<T>? repeatedCompiledRoutes;
-  _CompiledSlot<T>? lateCompiledRoutes;
-  _CompiledSlot<T>? deferredCompiledRoutes;
+  _CompiledSlot<T>? compiledRoutes,
+      repeatedCompiledRoutes,
+      lateCompiledRoutes,
+      deferredCompiledRoutes;
   final Map<String, _Route<T>> staticExactRoutes = <String, _Route<T>>{};
   int maxParamDepth = 0;
 }
@@ -330,10 +283,6 @@ class _Route<T> {
   final T data;
   final List<String> paramNames;
   final String? wildcardName;
-  final int depth;
-  final int specificity;
-  final int staticChars;
-  final int constraintScore;
   final int registrationOrder;
   final int rankPrefix;
   _Route<T>? next;
@@ -342,10 +291,10 @@ class _Route<T> {
     this.data,
     this.paramNames,
     this.wildcardName,
-    this.depth,
-    this.specificity,
-    this.staticChars,
-    this.constraintScore,
+    int depth,
+    int specificity,
+    int staticChars,
+    int constraintScore,
     this.registrationOrder,
   ) : rankPrefix =
           (((specificity * 256) + depth) * 4096 + staticChars) * 4 +
@@ -358,4 +307,36 @@ class _Route<T> {
     current.next = route;
     return this;
   }
+}
+
+String _normalizeMethod(String method) {
+  final token = method.trim();
+  if (token.isEmpty) {
+    throw ArgumentError.value(method, 'method', 'Method must not be empty.');
+  }
+  return token.toUpperCase();
+}
+
+_Route<T> _mergeRoutes<T>(
+  _Route<T>? existing,
+  _Route<T> replacement,
+  String pattern,
+  DuplicatePolicy duplicatePolicy,
+  String rejectPrefix,
+) {
+  if (existing == null) return replacement;
+  final a = existing.paramNames, b = replacement.paramNames;
+  if (a.length != b.length) throw FormatException('$_dupShape$pattern');
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) throw FormatException('$_dupShape$pattern');
+  }
+  if (existing.wildcardName != replacement.wildcardName) {
+    throw FormatException('$_dupShape$pattern');
+  }
+  return switch (duplicatePolicy) {
+    DuplicatePolicy.reject => throw FormatException('$rejectPrefix$pattern'),
+    DuplicatePolicy.replace => replacement,
+    DuplicatePolicy.keepFirst => existing,
+    DuplicatePolicy.append => existing.appended(replacement),
+  };
 }

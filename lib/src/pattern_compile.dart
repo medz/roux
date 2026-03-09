@@ -217,7 +217,6 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
     RegExp(regex.toString(), caseSensitive: caseSensitive),
     shape.toString(),
     bucket,
-    _pathDepth(pattern),
     groupIndexes,
     _Route<T>(
       data,
@@ -361,7 +360,6 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
     RegExp(regex.toString(), caseSensitive: caseSensitive),
     shape.toString(),
     _compiledBucketDeferred,
-    _pathDepth(pattern),
     groupIndexes,
     _Route<T>(
       data,

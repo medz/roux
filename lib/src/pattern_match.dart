@@ -40,7 +40,6 @@ void _collectCompiled<T>(
 }
 
 void _addCompiled<T>(
-  Router<T> router,
   _RouteSet<T> routeSet,
   _CompiledSlot<T> compiled,
   String pattern,
@@ -63,7 +62,7 @@ void _addCompiled<T>(
       compiled.route.paramNames,
       pattern,
     );
-    head.route = router._resolveDup(
+    head.route = _mergeRoutes(
       head.route,
       compiled.route,
       pattern,
@@ -89,7 +88,7 @@ void _addCompiled<T>(
         compiled.route.paramNames,
         pattern,
       );
-      next.route = router._resolveDup(
+      next.route = _mergeRoutes(
         next.route,
         compiled.route,
         pattern,
@@ -144,7 +143,6 @@ class _CompiledSlot<T> {
   final RegExp regex;
   final String shape;
   final int bucket;
-  final int depth;
   final List<int> groupIndexes;
   _Route<T> route;
   _CompiledSlot<T>? next;
@@ -153,7 +151,6 @@ class _CompiledSlot<T> {
     this.regex,
     this.shape,
     this.bucket,
-    this.depth,
     this.groupIndexes,
     this.route,
   );

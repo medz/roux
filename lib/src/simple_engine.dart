@@ -112,7 +112,7 @@ extension _SimpleEngine<T> on Router<T> {
         );
         if (cursor == 1 && paramCount == 0) {
           routeSet.hasSlowMatchPath = true;
-          routeSet.globalFallback = _mergedRoute(
+          routeSet.globalFallback = _mergeRoutes(
             routeSet.globalFallback,
             route,
             normalized,
@@ -121,7 +121,7 @@ extension _SimpleEngine<T> on Router<T> {
           );
         } else {
           routeSet.hasSlowMatchPath = true;
-          node.wildcardRoute = _mergedRoute(
+          node.wildcardRoute = _mergeRoutes(
             node.wildcardRoute,
             route,
             normalized,
@@ -156,7 +156,7 @@ extension _SimpleEngine<T> on Router<T> {
           routeSet.hasBranchingChoices = true;
         }
         node = node.getOrCreateStaticChildSlice(
-          _canonicalLiteral(pattern.substring(cursor, segmentEnd)),
+          _canonicalPath(pattern.substring(cursor, segmentEnd)),
         );
         staticChars += segmentEnd - cursor;
       }
@@ -164,7 +164,7 @@ extension _SimpleEngine<T> on Router<T> {
       cursor = segmentEnd + 1;
     }
 
-    node.exactRoute = _mergedRoute(
+    node.exactRoute = _mergeRoutes(
       node.exactRoute,
       _newRoute(
         data,
@@ -194,7 +194,7 @@ extension _SimpleEngine<T> on Router<T> {
     int depth,
     int staticChars,
   ) {
-    routeSet.staticExactRoutes[canonical] = _mergedRoute(
+    routeSet.staticExactRoutes[canonical] = _mergeRoutes(
       routeSet.staticExactRoutes[canonical],
       _newRoute(
         data,

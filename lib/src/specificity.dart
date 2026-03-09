@@ -45,8 +45,6 @@ class _MatchCollector<T> {
     _routes[insertIndex] = route;
     _methodRanks[insertIndex] = methodRank;
   }
-
-  List<RouteMatch<T>> finish() => _matches;
 }
 
 bool _sortsBefore<T>(
