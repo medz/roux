@@ -77,11 +77,10 @@ class _StaticAddRouxBenchmark extends _RouterBenchmark {
 
   @override
   void run() {
-    final routes = <String, int>{};
+    final router = roux.Router<int>();
     for (final i in _indexes) {
-      routes['/path$i'] = i;
+      router.add('/path$i', i);
     }
-    roux.Router<int>(routes: routes);
   }
 }
 
@@ -114,11 +113,10 @@ class _DynamicAddRouxBenchmark extends _RouterBenchmark {
 
   @override
   void run() {
-    roux.Router(
-      routes: {
-        for (final i in _indexes) '/users/:id/items/:itemId/profile$i': i,
-      },
-    );
+    final router = roux.Router<int>();
+    for (final i in _indexes) {
+      router.add('/users/:id/items/:itemId/profile$i', i);
+    }
   }
 }
 
@@ -242,10 +240,12 @@ class _DynamicLookupRoutingkitBenchmark extends _RouterBenchmark {
 
 class _DynamicLookupParamsRoutingkitBenchmark extends _RouterBenchmark {
   _DynamicLookupParamsRoutingkitBenchmark(_CollectingEmitter emitter)
-    : super(
-        ['Lookup+Params', 'Dynamic', 'x$_routeCount', 'Routingkit'],
-        emitter,
-      );
+    : super([
+        'Lookup+Params',
+        'Dynamic',
+        'x$_routeCount',
+        'Routingkit',
+      ], emitter);
 
   late final routingkit.Router<int> _router;
 
