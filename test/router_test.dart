@@ -58,6 +58,16 @@ void main() {
       expect(router.match('/users/nope'), isNull);
     });
 
+    test('returns writable params maps for small dynamic matches', () {
+      final router = Router<String>();
+      router.add('/users/:id/items/:itemId', 'item');
+
+      final params = router.match('/users/42/items/7')!.params!;
+      params['extra'] = 'ok';
+
+      expect(params, {'id': '42', 'itemId': '7', 'extra': 'ok'});
+    });
+
     test('supports optional parameter segments', () {
       final router = Router<String>();
       router.add('/users/:id?', 'maybe-user');
@@ -908,27 +918,30 @@ void main() {
       expect(router.match('/files/file-z.png')?.params, {'0': 'z'});
     });
 
-    test('orders grouped routes before exact routes but after plain params', () {
-      final router = Router<String>(
-        routes: {
-          '/book': 'exact-book',
-          '/book{s}?': 'group-book',
-          '/users/:id': 'param-user',
-          '/users{/:id}?': 'group-user',
-        },
-      );
+    test(
+      'orders grouped routes before exact routes but after plain params',
+      () {
+        final router = Router<String>(
+          routes: {
+            '/book': 'exact-book',
+            '/book{s}?': 'group-book',
+            '/users/:id': 'param-user',
+            '/users{/:id}?': 'group-user',
+          },
+        );
 
-      expect(router.match('/book')?.data, 'exact-book');
-      expect(router.matchAll('/book').map((match) => match.data), [
-        'group-book',
-        'exact-book',
-      ]);
-      expect(router.match('/users/42')?.data, 'param-user');
-      expect(router.matchAll('/users/42').map((match) => match.data), [
-        'param-user',
-        'group-user',
-      ]);
-    });
+        expect(router.match('/book')?.data, 'exact-book');
+        expect(router.matchAll('/book').map((match) => match.data), [
+          'group-book',
+          'exact-book',
+        ]);
+        expect(router.match('/users/42')?.data, 'param-user');
+        expect(router.matchAll('/users/42').map((match) => match.data), [
+          'param-user',
+          'group-user',
+        ]);
+      },
+    );
 
     test('orders mandatory group routes before exact routes', () {
       final router = Router<String>(
@@ -1056,12 +1069,10 @@ void main() {
           },
         );
 
-        expect(router.matchAll('/files/file-a.png').map((match) => match.data), [
-          'param',
-          'pattern',
-          'wild',
-          'exact',
-        ]);
+        expect(
+          router.matchAll('/files/file-a.png').map((match) => match.data),
+          ['param', 'pattern', 'wild', 'exact'],
+        );
       },
     );
   });
@@ -1156,9 +1167,7 @@ void main() {
         routes: {'/files/:name': 'file'},
       );
 
-      expect(local.match('/files/%2E/Read%20Me')?.params, {
-        'name': 'Read Me',
-      });
+      expect(local.match('/files/%2E/Read%20Me')?.params, {'name': 'Read Me'});
     });
 
     test('returns null for invalid lookup path', () {
@@ -1168,25 +1177,31 @@ void main() {
       expect(router.match('/a//b'), isNull);
     });
 
-    test('returns null for invalid URL encoding when decodePath is enabled', () {
-      final local = Router<String>(
-        decodePath: true,
-        routes: {'/files/:name': 'file', '/**:wildcard': 'fallback'},
-      );
+    test(
+      'returns null for invalid URL encoding when decodePath is enabled',
+      () {
+        final local = Router<String>(
+          decodePath: true,
+          routes: {'/files/:name': 'file', '/**:wildcard': 'fallback'},
+        );
 
-      expect(local.match('/files/%ZZ'), isNull);
-      expect(local.matchAll('/files/%ZZ'), isEmpty);
-    });
+        expect(local.match('/files/%ZZ'), isNull);
+        expect(local.matchAll('/files/%ZZ'), isEmpty);
+      },
+    );
 
-    test('returns null for root-escaping paths when normalization is enabled', () {
-      final local = Router<String>(
-        normalizePath: true,
-        routes: {'/files/:name': 'file', '/**:wildcard': 'fallback'},
-      );
+    test(
+      'returns null for root-escaping paths when normalization is enabled',
+      () {
+        final local = Router<String>(
+          normalizePath: true,
+          routes: {'/files/:name': 'file', '/**:wildcard': 'fallback'},
+        );
 
-      expect(local.match('/files/../../readme'), isNull);
-      expect(local.matchAll('/files/../../readme'), isEmpty);
-    });
+        expect(local.match('/files/../../readme'), isNull);
+        expect(local.matchAll('/files/../../readme'), isEmpty);
+      },
+    );
 
     test('does not let invalid paths hit wildcard fallback routes', () {
       final wildcardRouter = Router<String>(
@@ -1304,9 +1319,8 @@ void main() {
 
     test('rejects duplicate global fallback after normalization', () {
       expect(
-        () => Router<String>(
-          routes: {'/**:wildcard': 'a', '/**:wildcard/': 'b'},
-        ),
+        () =>
+            Router<String>(routes: {'/**:wildcard': 'a', '/**:wildcard/': 'b'}),
         throwsFormatException,
       );
     });
