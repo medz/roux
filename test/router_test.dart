@@ -24,7 +24,7 @@ void main() {
 
     test('supports add after initial routes', () {
       final router = Router<String>(routes: {'/': 'root'});
-      router.add('/users/*', 'users');
+      router.add('/users/**:wildcard', 'users');
 
       expect(router.match('/')?.data, 'root');
       expect(router.match('/users/a/b')?.data, 'users');
@@ -77,6 +77,16 @@ void main() {
       expect(router.match('/files/a/b')?.params, {'path': 'a/b'});
       expect(router.match('/assets')?.params, isEmpty);
       expect(router.match('/assets/a/b')?.params, {'rest': 'a/b'});
+    });
+
+    test('supports single-segment wildcard routes', () {
+      final router = Router<String>();
+      router.add('/users/*', 'star');
+      router.add('/teams/*/members', 'middle');
+
+      expect(router.match('/users/a')?.params, {'0': 'a'});
+      expect(router.match('/users/a/b'), isNull);
+      expect(router.match('/teams/core/members')?.params, {'0': 'core'});
     });
   });
 
@@ -139,9 +149,9 @@ void main() {
     test('supports replace for wildcard routes', () {
       final router = Router<String>();
 
-      router.add('/files/*', 'first');
+      router.add('/files/**:wildcard', 'first');
       router.add(
-        '/files/*',
+        '/files/**:wildcard',
         'second',
         duplicatePolicy: DuplicatePolicy.replace,
       );
@@ -153,9 +163,9 @@ void main() {
     test('supports keepFirst for wildcard routes', () {
       final router = Router<String>();
 
-      router.add('/files/*', 'first');
+      router.add('/files/**:wildcard', 'first');
       router.add(
-        '/files/*',
+        '/files/**:wildcard',
         'second',
         duplicatePolicy: DuplicatePolicy.keepFirst,
       );
@@ -167,8 +177,12 @@ void main() {
     test('supports append for wildcard routes', () {
       final router = Router<String>();
 
-      router.add('/files/*', 'first');
-      router.add('/files/*', 'second', duplicatePolicy: DuplicatePolicy.append);
+      router.add('/files/**:wildcard', 'first');
+      router.add(
+        '/files/**:wildcard',
+        'second',
+        duplicatePolicy: DuplicatePolicy.append,
+      );
 
       expect(router.match('/files/a/b')?.data, 'first');
       expect(router.matchAll('/files/a/b').map((match) => match.data), [
@@ -180,8 +194,12 @@ void main() {
     test('supports replace for global fallback routes', () {
       final router = Router<String>();
 
-      router.add('/*', 'first');
-      router.add('/*', 'second', duplicatePolicy: DuplicatePolicy.replace);
+      router.add('/**:wildcard', 'first');
+      router.add(
+        '/**:wildcard',
+        'second',
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
 
       expect(router.match('/unknown')?.data, 'second');
       expect(router.match('/unknown')?.params, {'wildcard': 'unknown'});
@@ -190,8 +208,12 @@ void main() {
     test('supports keepFirst for global fallback routes', () {
       final router = Router<String>();
 
-      router.add('/*', 'first');
-      router.add('/*', 'second', duplicatePolicy: DuplicatePolicy.keepFirst);
+      router.add('/**:wildcard', 'first');
+      router.add(
+        '/**:wildcard',
+        'second',
+        duplicatePolicy: DuplicatePolicy.keepFirst,
+      );
 
       expect(router.match('/unknown')?.data, 'first');
       expect(router.match('/unknown')?.params, {'wildcard': 'unknown'});
@@ -200,8 +222,12 @@ void main() {
     test('supports append for global fallback routes', () {
       final router = Router<String>();
 
-      router.add('/*', 'first');
-      router.add('/*', 'second', duplicatePolicy: DuplicatePolicy.append);
+      router.add('/**:wildcard', 'first');
+      router.add(
+        '/**:wildcard',
+        'second',
+        duplicatePolicy: DuplicatePolicy.append,
+      );
 
       expect(router.match('/unknown')?.data, 'first');
       expect(router.matchAll('/unknown').map((match) => match.data), [
@@ -366,9 +392,9 @@ void main() {
 
     test('matchAll sees only the retained route entry', () {
       final router = Router<String>(duplicatePolicy: DuplicatePolicy.replace);
-      router.add('/*', 'global');
-      router.add('/api/*', 'first');
-      router.add('/api/*', 'second');
+      router.add('/**:wildcard', 'global');
+      router.add('/api/**:wildcard', 'first');
+      router.add('/api/**:wildcard', 'second');
 
       final matches = router.matchAll('/api/demo');
 
@@ -377,10 +403,10 @@ void main() {
 
     test('matchAll expands appended entries in registration order', () {
       final router = Router<String>(duplicatePolicy: DuplicatePolicy.append);
-      router.add('/*', 'global-1');
-      router.add('/*', 'global-2');
-      router.add('/api/*', 'api-1');
-      router.add('/api/*', 'api-2');
+      router.add('/**:wildcard', 'global-1');
+      router.add('/**:wildcard', 'global-2');
+      router.add('/api/**:wildcard', 'api-1');
+      router.add('/api/**:wildcard', 'api-2');
 
       final matches = router.matchAll('/api/demo');
 
@@ -398,9 +424,9 @@ void main() {
         final router = Router<String>(
           duplicatePolicy: DuplicatePolicy.keepFirst,
         );
-        router.add('/*', 'global');
-        router.add('/api/*', 'first');
-        router.add('/api/*', 'second');
+        router.add('/**:wildcard', 'global');
+        router.add('/api/**:wildcard', 'first');
+        router.add('/api/**:wildcard', 'second');
 
         final matches = router.matchAll('/api/demo');
 
@@ -410,10 +436,13 @@ void main() {
 
     test('matchAll keeps the original retained entry after reject failure', () {
       final router = Router<String>();
-      router.add('/*', 'global');
-      router.add('/api/*', 'first');
+      router.add('/**:wildcard', 'global');
+      router.add('/api/**:wildcard', 'first');
 
-      expect(() => router.add('/api/*', 'second'), throwsFormatException);
+      expect(
+        () => router.add('/api/**:wildcard', 'second'),
+        throwsFormatException,
+      );
 
       final matches = router.matchAll('/api/demo');
 
@@ -424,16 +453,16 @@ void main() {
       'matchAll reflects retained entries independently per method bucket',
       () {
         final router = Router<String>();
-        router.add('/*', 'global-any');
-        router.add('/api/*', 'api-any-first');
+        router.add('/**:wildcard', 'global-any');
+        router.add('/api/**:wildcard', 'api-any-first');
         router.add(
-          '/api/*',
+          '/api/**:wildcard',
           'api-any-second',
           duplicatePolicy: DuplicatePolicy.replace,
         );
-        router.add('/api/*', 'api-get-first', method: 'GET');
+        router.add('/api/**:wildcard', 'api-get-first', method: 'GET');
         router.add(
-          '/api/*',
+          '/api/**:wildcard',
           'api-get-second',
           method: 'GET',
           duplicatePolicy: DuplicatePolicy.keepFirst,
@@ -451,9 +480,13 @@ void main() {
 
     test('replace collapses an appended slot back to the latest entry', () {
       final router = Router<String>(duplicatePolicy: DuplicatePolicy.append);
-      router.add('/api/*', 'first');
-      router.add('/api/*', 'second');
-      router.add('/api/*', 'third', duplicatePolicy: DuplicatePolicy.replace);
+      router.add('/api/**:wildcard', 'first');
+      router.add('/api/**:wildcard', 'second');
+      router.add(
+        '/api/**:wildcard',
+        'third',
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
 
       expect(router.matchAll('/api/demo').map((match) => match.data), [
         'third',
@@ -528,8 +561,8 @@ void main() {
         '/': 'root',
         '/users/all': 'users-all',
         '/users/:id': 'users-id',
-        '/users/*': 'users-wildcard',
-        '/*': 'global',
+        '/users/**:wildcard': 'users-wildcard',
+        '/**:wildcard': 'global',
       },
     );
 
@@ -569,8 +602,8 @@ void main() {
       routes: {
         '/:id': 'single-param',
         '/:name/details': 'named-param',
-        '/files/*': 'files',
-        '/*': 'global',
+        '/files/**:wildcard': 'files',
+        '/**:wildcard': 'global',
       },
     );
 
@@ -585,19 +618,36 @@ void main() {
     });
 
     test('wildcard captures remainder and allows empty', () {
-      final deep = router.match('/files/a/b/c');
+      final local = Router<String>(routes: {'/files/**:wildcard': 'files'});
+
+      final deep = local.match('/files/a/b/c');
       expect(deep?.data, 'files');
       expect(deep?.params, {'wildcard': 'a/b/c'});
 
-      final empty = router.match('/files');
+      final empty = local.match('/files');
       expect(empty?.data, 'files');
       expect(empty?.params, {'wildcard': ''});
     });
 
     test('global wildcard captures remainder', () {
-      final match = router.match('/foo/bar');
+      final local = Router<String>(routes: {'/**:wildcard': 'global'});
+
+      final match = local.match('/foo/bar');
       expect(match?.data, 'global');
       expect(match?.params, {'wildcard': 'foo/bar'});
+    });
+
+    test('single-segment wildcard captures one segment only', () {
+      final router = Router<String>(
+        routes: {'/users/*': 'single', '/users/**:wildcard': 'double'},
+      );
+
+      expect(router.match('/users/demo')?.data, 'single');
+      expect(router.match('/users/demo')?.params, {'0': 'demo'});
+      expect(router.match('/users/demo/profile')?.data, 'double');
+      expect(router.match('/users/demo/profile')?.params, {
+        'wildcard': 'demo/profile',
+      });
     });
   });
 
@@ -628,8 +678,8 @@ void main() {
     test('returns matches from less specific to more specific', () {
       final router = Router<String>(
         routes: {
-          '/*': 'global',
-          '/api/*': 'api-wildcard',
+          '/**:wildcard': 'global',
+          '/api/**:wildcard': 'api-wildcard',
           '/api/:id': 'api-param',
           '/api/demo': 'api-demo',
         },
@@ -648,8 +698,8 @@ void main() {
     test('returns route-local params for each matched route', () {
       final router = Router<String>(
         routes: {
-          '/*': 'global',
-          '/api/*': 'api-wildcard',
+          '/**:wildcard': 'global',
+          '/api/**:wildcard': 'api-wildcard',
           '/api/:id': 'api-param',
           '/api/demo': 'api-demo',
         },
@@ -666,7 +716,7 @@ void main() {
     test('snapshots params for each lazy match before backtracking', () {
       final router = Router<String>(
         routes: {
-          '/:section/*': 'section-wildcard',
+          '/:section/**:wildcard': 'section-wildcard',
           '/users/:id': 'user-detail',
         },
       );
@@ -683,10 +733,10 @@ void main() {
 
     test('includes ANY and exact method matches when method is provided', () {
       final router = Router<String>();
-      router.add('/*', 'global-any');
-      router.add('/*', 'global-get', method: 'GET');
-      router.add('/api/*', 'api-any');
-      router.add('/api/*', 'api-get', method: 'GET');
+      router.add('/**:wildcard', 'global-any');
+      router.add('/**:wildcard', 'global-get', method: 'GET');
+      router.add('/api/**:wildcard', 'api-any');
+      router.add('/api/**:wildcard', 'api-get', method: 'GET');
 
       final matches = matchAll(router, '/api/demo', method: 'GET');
 
@@ -700,26 +750,34 @@ void main() {
 
     test('preserves registration order for appended entries within a slot', () {
       final router = Router<String>();
-      router.add('/*', 'global-any-1', duplicatePolicy: DuplicatePolicy.append);
-      router.add('/*', 'global-any-2', duplicatePolicy: DuplicatePolicy.append);
       router.add(
-        '/api/*',
+        '/**:wildcard',
+        'global-any-1',
+        duplicatePolicy: DuplicatePolicy.append,
+      );
+      router.add(
+        '/**:wildcard',
+        'global-any-2',
+        duplicatePolicy: DuplicatePolicy.append,
+      );
+      router.add(
+        '/api/**:wildcard',
         'api-any-1',
         duplicatePolicy: DuplicatePolicy.append,
       );
       router.add(
-        '/api/*',
+        '/api/**:wildcard',
         'api-any-2',
         duplicatePolicy: DuplicatePolicy.append,
       );
       router.add(
-        '/api/*',
+        '/api/**:wildcard',
         'api-get-1',
         method: 'GET',
         duplicatePolicy: DuplicatePolicy.append,
       );
       router.add(
-        '/api/*',
+        '/api/**:wildcard',
         'api-get-2',
         method: 'GET',
         duplicatePolicy: DuplicatePolicy.append,
@@ -739,10 +797,10 @@ void main() {
 
     test('uses only ANY routes when method is omitted', () {
       final router = Router<String>();
-      router.add('/*', 'global-any');
-      router.add('/*', 'global-get', method: 'GET');
-      router.add('/api/*', 'api-any');
-      router.add('/api/*', 'api-get', method: 'GET');
+      router.add('/**:wildcard', 'global-any');
+      router.add('/**:wildcard', 'global-get', method: 'GET');
+      router.add('/api/**:wildcard', 'api-any');
+      router.add('/api/**:wildcard', 'api-get', method: 'GET');
 
       final matches = matchAll(router, '/api/demo');
 
@@ -760,8 +818,8 @@ void main() {
 
     test('keeps single-match behavior unchanged', () {
       final router = Router<String>();
-      router.add('/*', 'global');
-      router.add('/api/*', 'api-wildcard');
+      router.add('/**:wildcard', 'global');
+      router.add('/api/**:wildcard', 'api-wildcard');
       router.add('/api/:id', 'api-param');
       router.add('/api/demo', 'api-demo');
 
@@ -859,6 +917,34 @@ void main() {
         'exact',
       ]);
     });
+
+    test(
+      'orders double wildcard before param before single wildcard before exact',
+      () {
+        final router = Router<String>(
+          routes: {
+            '/users/all': 'exact',
+            '/users/:id': 'param',
+            '/users/*': 'star',
+            '/users/**:rest': 'double',
+          },
+        );
+
+        expect(router.match('/users/all')?.data, 'exact');
+        expect(router.matchAll('/users/all').map((match) => match.data), [
+          'double',
+          'param',
+          'star',
+          'exact',
+        ]);
+        expect(router.match('/users/demo')?.data, 'param');
+        expect(router.matchAll('/users/demo').map((match) => match.data), [
+          'double',
+          'param',
+          'star',
+        ]);
+      },
+    );
   });
 
   group('normalization and invalid input', () {
@@ -889,7 +975,9 @@ void main() {
     });
 
     test('does not let invalid paths hit wildcard fallback routes', () {
-      final wildcardRouter = Router<String>(routes: {'/*': 'fallback'});
+      final wildcardRouter = Router<String>(
+        routes: {'/**:wildcard': 'fallback'},
+      );
 
       expect(wildcardRouter.match('/users//42'), isNull);
       expect(wildcardRouter.matchAll('/users//42'), isEmpty);
@@ -901,9 +989,9 @@ void main() {
       expect(() => Router<String>(routes: {'a': 'bad'}), throwsFormatException);
     });
 
-    test('rejects wildcard in the middle', () {
+    test('rejects double wildcard in the middle', () {
       expect(
-        () => Router<String>(routes: {'/a/*/b': 'bad'}),
+        () => Router<String>(routes: {'/a/**:rest/b': 'bad'}),
         throwsFormatException,
       );
     });
@@ -957,14 +1045,18 @@ void main() {
 
     test('rejects duplicate wildcard shape after normalization', () {
       expect(
-        () => Router<String>(routes: {'/docs/*': 'a', '/docs/*/': 'b'}),
+        () => Router<String>(
+          routes: {'/docs/**:wildcard': 'a', '/docs/**:wildcard/': 'b'},
+        ),
         throwsFormatException,
       );
     });
 
     test('rejects duplicate global fallback after normalization', () {
       expect(
-        () => Router<String>(routes: {'/*': 'a', '/*/': 'b'}),
+        () => Router<String>(
+          routes: {'/**:wildcard': 'a', '/**:wildcard/': 'b'},
+        ),
         throwsFormatException,
       );
     });
