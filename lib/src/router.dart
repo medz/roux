@@ -147,10 +147,13 @@ class Router<T> {
   }
 
   RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
-    final fallback = state.globalFallback, compiled = state.compiledRoutes;
+    final fallback = state.globalFallback,
+        compiled = state.compiledRoutes,
+        deferred = state.deferredCompiledRoutes;
     return state.staticExactRoutes[normalized]?.noParamsMatch ??
         (compiled == null ? null : _matchCompiled(compiled, normalized)) ??
         _matchNodePath(state, normalized) ??
+        (deferred == null ? null : _matchCompiled(deferred, normalized)) ??
         (fallback == null ? null : _materialize(fallback, normalized, null, 1));
   }
 
@@ -191,6 +194,10 @@ class Router<T> {
         methodRank,
         output,
       );
+    }
+    final deferred = state.deferredCompiledRoutes;
+    if (deferred != null) {
+      _collectCompiled(deferred, normalized, pathDepth, methodRank, output);
     }
   }
 
@@ -682,12 +689,11 @@ class Router<T> {
     String pattern,
     DuplicatePolicy duplicatePolicy,
   ) {
+    final head = compiled.afterTrie
+        ? state.deferredCompiledRoutes
+        : state.compiledRoutes;
     _CompiledSlot<T>? prev;
-    for (
-      var current = state.compiledRoutes;
-      current != null;
-      current = current.next
-    ) {
+    for (var current = head; current != null; current = current.next) {
       if (current.shape != compiled.shape) {
         prev = current;
         continue;
@@ -708,8 +714,13 @@ class Router<T> {
     }
 
     if (prev == null) {
-      compiled.next = state.compiledRoutes;
-      state.compiledRoutes = compiled;
+      if (compiled.afterTrie) {
+        compiled.next = state.deferredCompiledRoutes;
+        state.deferredCompiledRoutes = compiled;
+      } else {
+        compiled.next = state.compiledRoutes;
+        state.compiledRoutes = compiled;
+      }
       return;
     }
     prev.next = compiled;
@@ -741,6 +752,7 @@ class _MethodState<T> {
   final _Node<T> root = _Node<T>();
   _Route<T>? globalFallback;
   _CompiledSlot<T>? compiledRoutes;
+  _CompiledSlot<T>? deferredCompiledRoutes;
   final Map<String, _Route<T>> staticExactRoutes = <String, _Route<T>>{};
   int maxParamDepth = 0;
 }
@@ -786,10 +798,17 @@ class _Route<T> {
 class _CompiledSlot<T> {
   final RegExp regex;
   final String shape;
+  final bool afterTrie;
   final List<int> groupIndexes;
   _Route<T> route;
   _CompiledSlot<T>? next;
-  _CompiledSlot(this.regex, this.shape, this.groupIndexes, this.route);
+  _CompiledSlot(
+    this.regex,
+    this.shape,
+    this.afterTrie,
+    this.groupIndexes,
+    this.route,
+  );
 }
 
 class _LazyParamsMap extends MapBase<String, String> {
@@ -1029,8 +1048,6 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   var groupCount = 0;
   var cursor = pattern.length == 1 ? pattern.length : 1;
   while (cursor < pattern.length) {
-    regex.write('/');
-    shape.write('/');
     final segmentEnd = _findSegmentEnd(pattern, cursor);
     final firstCode = pattern.codeUnitAt(cursor);
     if (segmentEnd == cursor) {
@@ -1044,6 +1061,20 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
       cursor = segmentEnd + 1;
       continue;
     }
+    final optionalName = _readOptionalParamName(pattern, cursor, segmentEnd);
+    if (optionalName != null) {
+      regex.write('(?:/([^/]+))?');
+      shape.write('(?:/([^/]+))?');
+      paramNames.add(optionalName);
+      groupCount += 1;
+      groupIndexes.add(groupCount);
+      needsCompiled = true;
+      cursor = segmentEnd + 1;
+      continue;
+    }
+
+    regex.write('/');
+    shape.write('/');
 
     var segmentCursor = cursor;
     var lastWasParam = false;
@@ -1118,6 +1149,7 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   return _CompiledSlot<T>(
     RegExp(regex.toString()),
     shape.toString(),
+    shape.toString().contains('(?:/'),
     groupIndexes,
     _Route<T>(data, paramNames, false),
   );
@@ -1130,6 +1162,13 @@ bool _isParamNameCode(int code, bool first) {
   return ((code | 32) >= 97 && (code | 32) <= 122) ||
       code == 95 ||
       (code >= 48 && code <= 57);
+}
+
+String? _readOptionalParamName(String pattern, int start, int end) {
+  if (start >= end || pattern.codeUnitAt(start) != _colonCode) return null;
+  if (pattern.codeUnitAt(end - 1) != 63) return null;
+  final name = pattern.substring(start + 1, end - 1);
+  return _isValidParamName(name) ? name : null;
 }
 
 int _findRegexEnd(String pattern, int start, int segmentEnd) {

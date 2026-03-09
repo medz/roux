@@ -57,6 +57,16 @@ void main() {
       expect(router.match('/users/42')?.params, {'id': '42'});
       expect(router.match('/users/nope'), isNull);
     });
+
+    test('supports optional parameter segments', () {
+      final router = Router<String>();
+      router.add('/users/:id?', 'maybe-user');
+
+      expect(router.match('/users/42')?.data, 'maybe-user');
+      expect(router.match('/users/42')?.params, {'id': '42'});
+      expect(router.match('/users')?.data, 'maybe-user');
+      expect(router.match('/users')?.params, isEmpty);
+    });
   });
 
   group('duplicate policy', () {
@@ -779,6 +789,37 @@ void main() {
         ]);
       },
     );
+
+    test(
+      'matches exact routes before optional params when param is missing',
+      () {
+        final router = Router<String>(
+          routes: {'/users': 'exact', '/users/:id?': 'optional'},
+        );
+
+        expect(router.match('/users')?.data, 'exact');
+        expect(router.matchAll('/users').map((match) => match.data), [
+          'exact',
+          'optional',
+        ]);
+      },
+    );
+
+    test(
+      'matches plain params before optional params when param is present',
+      () {
+        final router = Router<String>(
+          routes: {'/users/:id': 'param', '/users/:id?': 'optional'},
+        );
+
+        expect(router.match('/users/42')?.data, 'param');
+        expect(router.matchAll('/users/42').map((match) => match.data), [
+          'param',
+          'optional',
+        ]);
+        expect(router.match('/users')?.data, 'optional');
+      },
+    );
   });
 
   group('normalization and invalid input', () {
@@ -854,6 +895,14 @@ void main() {
         () => Router<String>(
           routes: {'/files/:name.:ext': 'a', '/files/:base.:suffix': 'b'},
         ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate optional param shape', () {
+      expect(
+        () =>
+            Router<String>(routes: {'/users/:id?': 'a', '/users/:name?': 'b'}),
         throwsFormatException,
       );
     });
