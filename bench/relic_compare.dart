@@ -79,7 +79,7 @@ class _StaticAddRouxBenchmark extends _RouterBenchmark {
   void run() {
     final router = roux.Router<int>();
     for (final i in _indexes) {
-      router.add('/path$i', i);
+      router.add('/path$i', i, method: 'GET');
     }
   }
 }
@@ -92,17 +92,16 @@ class _StaticLookupRouxBenchmark extends _RouterBenchmark {
 
   @override
   void setup() {
-    final routes = <String, int>{};
+    _router = roux.Router<int>();
     for (final i in _indexes) {
-      routes['/path$i'] = i;
+      _router.add('/path$i', i, method: 'GET');
     }
-    _router = roux.Router<int>(routes: routes);
   }
 
   @override
   void run() {
     for (final route in _staticRoutesToLookup) {
-      _sink ^= _router.match(route)?.data ?? 0;
+      _sink ^= _router.match(route, method: 'GET')?.data ?? 0;
     }
   }
 }
@@ -115,7 +114,7 @@ class _DynamicAddRouxBenchmark extends _RouterBenchmark {
   void run() {
     final router = roux.Router<int>();
     for (final i in _indexes) {
-      router.add('/users/:id/items/:itemId/profile$i', i);
+      router.add('/users/:id/items/:itemId/profile$i', i, method: 'GET');
     }
   }
 }
@@ -128,17 +127,16 @@ class _DynamicLookupRouxBenchmark extends _RouterBenchmark {
 
   @override
   void setup() {
-    _router = roux.Router(
-      routes: {
-        for (final i in _indexes) '/users/:id/items/:itemId/profile$i': i,
-      },
-    );
+    _router = roux.Router<int>();
+    for (final i in _indexes) {
+      _router.add('/users/:id/items/:itemId/profile$i', i, method: 'GET');
+    }
   }
 
   @override
   void run() {
     for (final route in _dynamicRoutesToLookup) {
-      _sink ^= _router.match(route)?.data ?? 0;
+      _sink ^= _router.match(route, method: 'GET')?.data ?? 0;
     }
   }
 }
@@ -151,17 +149,16 @@ class _DynamicLookupParamsRouxBenchmark extends _RouterBenchmark {
 
   @override
   void setup() {
-    _router = roux.Router(
-      routes: {
-        for (final i in _indexes) '/users/:id/items/:itemId/profile$i': i,
-      },
-    );
+    _router = roux.Router<int>();
+    for (final i in _indexes) {
+      _router.add('/users/:id/items/:itemId/profile$i', i, method: 'GET');
+    }
   }
 
   @override
   void run() {
     for (final route in _dynamicRoutesToLookup) {
-      final match = _router.match(route);
+      final match = _router.match(route, method: 'GET');
       _sink ^= match?.data ?? 0;
       _consumeStringParams(match?.params);
     }

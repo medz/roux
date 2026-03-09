@@ -94,19 +94,17 @@ class _RouxLookupBenchmark extends _LookupBenchmark {
 
   @override
   void setup() {
-    _router = roux.Router<int>(
-      routes: {
-        for (var i = 0; i < _staticPatterns.length; i++) _staticPatterns[i]: i,
-        for (var i = 0; i < _dynamicPatterns.length; i++)
-          _dynamicPatterns[i]: i,
-      },
-    );
+    _router = roux.Router<int>();
+    for (var i = 0; i < _staticPatterns.length; i++) {
+      _router.add(_staticPatterns[i], i, method: 'GET');
+      _router.add(_dynamicPatterns[i], i, method: 'GET');
+    }
   }
 
   @override
   void run() {
     for (final path in queries) {
-      final match = _router.match(path);
+      final match = _router.match(path, method: 'GET');
       _sink ^= match?.data ?? 0;
       switch (scenario) {
         case _LookupScenario.dynamicRoundRobinParams:
@@ -244,9 +242,7 @@ void main(List<String> args) {
   print('lookup benchmark (benchmark_harness)');
   print('routeCount=$routeCount totalRoutes=${routeCount * 2}');
   print('queryScales=${_queryScales.join(",")}');
-  print(
-    'note: routingkit/relic require method, benchmark uses fixed GET for them',
-  );
+  print('note: all routers use fixed GET');
   print('lower is better (us)');
 
   final results = <String, double>{};
