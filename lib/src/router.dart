@@ -1,5 +1,3 @@
-import 'dart:collection';
-
 const _slashCode = 47,
     _asteriskCode = 42,
     _colonCode = 58,
@@ -18,7 +16,6 @@ const _dupShape = 'Duplicate route shape conflicts with existing route: ';
 const _dupWildcard = 'Duplicate wildcard route shape at prefix for pattern: ';
 const _dupFallback = 'Duplicate global fallback route: ';
 const _emptySegment = 'Route pattern contains empty segment: ';
-const _missingCaptures = 'Missing parameter capture stack for matched route.';
 
 /// Controls how duplicate route registrations are handled.
 enum DuplicatePolicy {
@@ -39,38 +36,12 @@ enum DuplicatePolicy {
 class RouteMatch<T> {
   /// The value associated with the matched route.
   final T data;
-  Map<String, String>? _params;
-  final _Route<T>? _route;
-  final String? _path;
-  final _ParamStack? _captures;
-  final int _wildcardStart;
-
-  /// Creates an eager route match with an optional prebuilt params map.
-  RouteMatch(this.data, [Map<String, String>? params])
-    : _params = params,
-      _route = null,
-      _path = null,
-      _captures = null,
-      _wildcardStart = 0;
-  RouteMatch._lazy(
-    this.data,
-    this._route,
-    this._path,
-    this._captures,
-    this._wildcardStart,
-  );
 
   /// Captured parameter values for the matched route, if any.
-  Map<String, String>? get params => switch (_route) {
-    null => _params,
-    final route => _params ??= _LazyParamsMap(
-      route.paramNames,
-      route.wildcardName,
-      _path!,
-      _captures,
-      _wildcardStart,
-    ),
-  };
+  final Map<String, String>? params;
+
+  /// Creates an eager route match with an optional prebuilt params map.
+  RouteMatch(this.data, [this.params]);
 }
 
 /// A compact path router with support for exact, parameter, and wildcard routes.
@@ -862,7 +833,10 @@ class Router<T> {
     _ParamStack? paramValues,
     int wildcardStart,
   ) => route.wildcardName != null || route.paramNames.isNotEmpty
-      ? RouteMatch<T>._lazy(route.data, route, path, paramValues, wildcardStart)
+      ? RouteMatch<T>(
+          route.data,
+          _materializeParams(route, path, paramValues, wildcardStart),
+        )
       : route.noParamsMatch;
   void _collectSlot(
     _Route<T> slot,
@@ -876,12 +850,9 @@ class Router<T> {
       final captures = paramValues?.snapshot();
       for (_Route<T>? current = slot; current != null; current = current.next) {
         output.add(
-          RouteMatch<T>._lazy(
+          RouteMatch<T>(
             current.data,
-            current,
-            path,
-            captures,
-            wildcardStart,
+            _materializeParams(current, path, captures, wildcardStart),
           ),
           current,
           methodRank,
@@ -892,6 +863,32 @@ class Router<T> {
     for (_Route<T>? current = slot; current != null; current = current.next) {
       output.add(current.noParamsMatch, current, methodRank);
     }
+  }
+
+  Map<String, String> _materializeParams(
+    _Route<T> route,
+    String path,
+    _ParamStack? captures,
+    int wildcardStart,
+  ) {
+    final params = <String, String>{};
+    final names = route.paramNames;
+    if (names.isNotEmpty) {
+      final requiredCaptures = captures!;
+      for (var i = 0; i < names.length; i++) {
+        params[names[i]] = path.substring(
+          requiredCaptures.startAt(i),
+          requiredCaptures.endAt(i),
+        );
+      }
+    }
+    final wildcardName = route.wildcardName;
+    if (wildcardName != null) {
+      params[wildcardName] = wildcardStart < path.length
+          ? path.substring(wildcardStart)
+          : '';
+    }
+    return params;
   }
 
   _Route<T> _mergedRoute(
@@ -1086,70 +1083,6 @@ class _CompiledSlot<T> {
     this.groupIndexes,
     this.route,
   );
-}
-
-class _LazyParamsMap extends MapBase<String, String> {
-  final List<String> _names;
-  final String? _wildcardName;
-  final String _path;
-  final _ParamStack? _captures;
-  final int _wildcardStart;
-  Map<String, String>? _map;
-  _LazyParamsMap(
-    this._names,
-    this._wildcardName,
-    this._path,
-    this._captures,
-    this._wildcardStart,
-  );
-  Map<String, String> get _materialized => _map ??= _materialize();
-  _ParamStack get _requiredCaptures =>
-      _captures ?? (throw StateError(_missingCaptures));
-  String get _wildcardValue =>
-      _wildcardStart < _path.length ? _path.substring(_wildcardStart) : '';
-  @override
-  String? operator [](Object? key) {
-    if (key is! String) return null;
-    final map = _map;
-    if (map != null) return map[key];
-    if (_wildcardName != null && key == _wildcardName) return _wildcardValue;
-    for (var i = 0; i < _names.length; i++) {
-      if (_names[i] == key) {
-        final captures = _requiredCaptures;
-        return _path.substring(captures.startAt(i), captures.endAt(i));
-      }
-    }
-    return null;
-  }
-
-  @override
-  void operator []=(String key, String value) => _materialized[key] = value;
-  @override
-  void clear() => _materialized.clear();
-  @override
-  Iterable<String> get keys =>
-      _map?.keys ??
-      (_wildcardName == null ? _names : _names.followedBy([_wildcardName]));
-  @override
-  String? remove(Object? key) =>
-      key is String ? _materialized.remove(key) : null;
-  @override
-  int get length =>
-      _map?.length ?? _names.length + (_wildcardName == null ? 0 : 1);
-  Map<String, String> _materialize() {
-    final map = <String, String>{};
-    if (_names.isNotEmpty) {
-      final captures = _requiredCaptures;
-      for (var i = 0; i < _names.length; i++) {
-        map[_names[i]] = _path.substring(
-          captures.startAt(i),
-          captures.endAt(i),
-        );
-      }
-    }
-    if (_wildcardName != null) map[_wildcardName] = _wildcardValue;
-    return map;
-  }
 }
 
 class _Node<T> {
