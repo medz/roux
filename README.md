@@ -52,6 +52,7 @@ Duplicate route handling is configurable at both router and call level:
 final router = Router<String>(
   duplicatePolicy: DuplicatePolicy.replace,
   caseSensitive: false,
+  decodePath: true,
   routes: {'/users/:id': 'first'},
 );
 
@@ -111,6 +112,8 @@ Notes:
 - `**` and `**:name` match the remaining path and must be the final segment.
 - Matching is case-sensitive by default. Set `caseSensitive: false` to ignore
   path casing.
+- Input is not URL-decoded by default. Set `decodePath: true` to decode `%xx`
+  sequences before matching.
 - Trailing slash on input is ignored (`/users` equals `/users/`).
 - You can register routes via constructor (`Router(routes: {...})`) or
   incrementally (`add` / `addAll`).

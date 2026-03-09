@@ -1084,11 +1084,52 @@ void main() {
       expect(router.match('/a/b'), isNull);
     });
 
+    test('supports URL decoding when configured', () {
+      final local = Router<String>(
+        decodePath: true,
+        routes: {
+          '/a/b': 'decoded',
+          '/a%2Fb': 'encoded-literal',
+          '/files/:name.:ext': 'asset',
+        },
+      );
+
+      expect(local.match('/a%2Fb')?.data, 'decoded');
+      expect(local.match('/files/Read%20Me.MD')?.params, {
+        'name': 'Read Me',
+        'ext': 'MD',
+      });
+      expect(local.match('/a%20b'), isNull);
+    });
+
+    test('supports combining decodePath with case-insensitive matching', () {
+      final local = Router<String>(
+        decodePath: true,
+        caseSensitive: false,
+        routes: {'/files/:name.:ext': 'asset'},
+      );
+
+      expect(local.match('/FILES/Read%20Me.MD')?.params, {
+        'name': 'Read Me',
+        'ext': 'MD',
+      });
+    });
+
     test('returns null for invalid lookup path', () {
       expect(router.match(''), isNull);
       expect(router.match('a'), isNull);
       expect(router.match('//a'), isNull);
       expect(router.match('/a//b'), isNull);
+    });
+
+    test('returns null for invalid URL encoding when decodePath is enabled', () {
+      final local = Router<String>(
+        decodePath: true,
+        routes: {'/files/:name': 'file', '/**:wildcard': 'fallback'},
+      );
+
+      expect(local.match('/files/%ZZ'), isNull);
+      expect(local.matchAll('/files/%ZZ'), isEmpty);
     });
 
     test('does not let invalid paths hit wildcard fallback routes', () {
