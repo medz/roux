@@ -147,8 +147,9 @@ class Router<T> {
   }
 
   RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
-    final fallback = state.globalFallback;
+    final fallback = state.globalFallback, compiled = state.compiledRoutes;
     return state.staticExactRoutes[normalized]?.noParamsMatch ??
+        (compiled == null ? null : _matchCompiled(compiled, normalized)) ??
         _matchNodePath(state, normalized) ??
         (fallback == null ? null : _materialize(fallback, normalized, null, 1));
   }
@@ -174,6 +175,10 @@ class Router<T> {
       );
     }
     _collectNode(state, normalized, methodRank, output);
+    final compiled = state.compiledRoutes;
+    if (compiled != null) {
+      _collectCompiled(compiled, normalized, pathDepth, methodRank, output);
+    }
     final exactStatic = state.staticExactRoutes[normalized];
     if (exactStatic != null) {
       _collectSlot(
@@ -287,6 +292,19 @@ class Router<T> {
       }
 
       if (firstCode == _colonCode) {
+        if (!_isSimpleParamSegment(pattern, cursor + 1, segmentEnd)) {
+          final compiled = _compilePatternRoute(normalized, data);
+          if (compiled == null) {
+            throw FormatException(
+              'Unsupported segment syntax in route: $normalized',
+            );
+          }
+          _addCompiled(state, compiled, normalized, duplicatePolicy);
+          if (compiled.route.paramNames.length > state.maxParamDepth) {
+            state.maxParamDepth = compiled.route.paramNames.length;
+          }
+          return;
+        }
         final paramName = pattern.substring(cursor + 1, segmentEnd);
         if (!_isValidParamName(paramName)) {
           throw FormatException('Invalid parameter name in route: $normalized');
@@ -296,9 +314,17 @@ class Router<T> {
         paramCount += 1;
       } else {
         if (hasReservedInSegment) {
-          throw FormatException(
-            'Unsupported segment syntax in route: $normalized',
-          );
+          final compiled = _compilePatternRoute(normalized, data);
+          if (compiled == null) {
+            throw FormatException(
+              'Unsupported segment syntax in route: $normalized',
+            );
+          }
+          _addCompiled(state, compiled, normalized, duplicatePolicy);
+          if (compiled.route.paramNames.length > state.maxParamDepth) {
+            state.maxParamDepth = compiled.route.paramNames.length;
+          }
+          return;
         }
         node = node.getOrCreateStaticChildSlice(pattern, cursor, segmentEnd);
       }
@@ -313,6 +339,45 @@ class Router<T> {
       _dupShape,
     );
     if (paramCount > state.maxParamDepth) state.maxParamDepth = paramCount;
+  }
+
+  RouteMatch<T>? _matchCompiled(_CompiledSlot<T> current, String path) {
+    while (true) {
+      final match = current.regex.firstMatch(path);
+      if (match != null) return _materializeCompiled(current.route, match);
+      final next = current.next;
+      if (next == null) return null;
+      current = next;
+    }
+  }
+
+  void _collectCompiled(
+    _CompiledSlot<T> current,
+    String path,
+    int pathDepth,
+    int methodRank,
+    _MatchCollector<T> output,
+  ) {
+    while (true) {
+      final match = current.regex.firstMatch(path);
+      if (match != null) {
+        for (
+          _Route<T>? route = current.route;
+          route != null;
+          route = route.next
+        ) {
+          output.add(
+            _materializeCompiled(route, match),
+            pathDepth,
+            _staticRank,
+            methodRank,
+          );
+        }
+      }
+      final next = current.next;
+      if (next == null) return;
+      current = next;
+    }
   }
 
   RouteMatch<T>? _matchNodePath(_MethodState<T> state, String path) {
@@ -608,11 +673,68 @@ class Router<T> {
       DuplicatePolicy.append => existing.appended(replacement),
     };
   }
+
+  void _addCompiled(
+    _MethodState<T> state,
+    _CompiledSlot<T> compiled,
+    String pattern,
+    DuplicatePolicy duplicatePolicy,
+  ) {
+    _CompiledSlot<T>? prev;
+    for (
+      var current = state.compiledRoutes;
+      current != null;
+      current = current.next
+    ) {
+      if (current.shape != compiled.shape) {
+        prev = current;
+        continue;
+      }
+      _verifyCompiledNames(
+        current.route.paramNames,
+        compiled.route.paramNames,
+        pattern,
+      );
+      current.route = _resolveDup(
+        current.route,
+        compiled.route,
+        pattern,
+        duplicatePolicy,
+        _dupShape,
+      );
+      return;
+    }
+
+    if (prev == null) {
+      compiled.next = state.compiledRoutes;
+      state.compiledRoutes = compiled;
+      return;
+    }
+    prev.next = compiled;
+  }
+
+  void _verifyCompiledNames(List<String> a, List<String> b, String pattern) {
+    if (a.length != b.length) throw FormatException('$_dupShape$pattern');
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) throw FormatException('$_dupShape$pattern');
+    }
+  }
+
+  RouteMatch<T> _materializeCompiled(_Route<T> route, RegExpMatch match) {
+    if (route.paramNames.isEmpty) return route.noParamsMatch;
+    final params = <String, String>{};
+    for (var i = 0; i < route.paramNames.length; i++) {
+      final value = match.group(i + 1);
+      if (value != null) params[route.paramNames[i]] = value;
+    }
+    return RouteMatch<T>(route.data, params);
+  }
 }
 
 class _MethodState<T> {
   final _Node<T> root = _Node<T>();
   _Route<T>? globalFallback;
+  _CompiledSlot<T>? compiledRoutes;
   final Map<String, _Route<T>> staticExactRoutes = <String, _Route<T>>{};
   int maxParamDepth = 0;
 }
@@ -653,6 +775,14 @@ class _Route<T> {
     current.next = route;
     return this;
   }
+}
+
+class _CompiledSlot<T> {
+  final RegExp regex;
+  final String shape;
+  _Route<T> route;
+  _CompiledSlot<T>? next;
+  _CompiledSlot(this.regex, this.shape, this.route);
 }
 
 class _LazyParamsMap extends MapBase<String, String> {
@@ -878,4 +1008,97 @@ bool _isValidParamName(String name) {
     }
   }
   return true;
+}
+
+bool _isSimpleParamSegment(String pattern, int start, int end) =>
+    start < end && _isValidParamName(pattern.substring(start, end));
+
+_CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
+  var needsCompiled = false;
+  final regex = StringBuffer('^');
+  final shape = StringBuffer('^');
+  final paramNames = <String>[];
+  var cursor = pattern.length == 1 ? pattern.length : 1;
+  while (cursor < pattern.length) {
+    regex.write('/');
+    shape.write('/');
+    final segmentEnd = _findSegmentEnd(pattern, cursor);
+    final firstCode = pattern.codeUnitAt(cursor);
+    if (segmentEnd == cursor) {
+      throw FormatException('$_emptySegment$pattern');
+    }
+    if (segmentEnd - cursor == 1 && firstCode == _asteriskCode) {
+      return null;
+    }
+    if (firstCode == _colonCode &&
+        _isSimpleParamSegment(pattern, cursor + 1, segmentEnd)) {
+      cursor = segmentEnd + 1;
+      continue;
+    }
+
+    var segmentCursor = cursor;
+    var lastWasParam = false;
+    while (segmentCursor < segmentEnd) {
+      final code = pattern.codeUnitAt(segmentCursor);
+      if (code == _asteriskCode) {
+        throw FormatException('Unsupported segment syntax in route: $pattern');
+      }
+      if (code == _colonCode) {
+        if (lastWasParam) {
+          throw FormatException(
+            'Unsupported segment syntax in route: $pattern',
+          );
+        }
+        var nameEnd = segmentCursor + 1;
+        while (nameEnd < segmentEnd &&
+            _isParamNameCode(
+              pattern.codeUnitAt(nameEnd),
+              nameEnd == segmentCursor + 1,
+            )) {
+          nameEnd += 1;
+        }
+        final paramName = pattern.substring(segmentCursor + 1, nameEnd);
+        if (!_isValidParamName(paramName)) {
+          throw FormatException('Invalid parameter name in route: $pattern');
+        }
+        regex.write('([^/]+)');
+        shape.write('([^/]+)');
+        paramNames.add(paramName);
+        segmentCursor = nameEnd;
+        lastWasParam = true;
+        needsCompiled = true;
+        continue;
+      }
+
+      final literalStart = segmentCursor;
+      segmentCursor += 1;
+      while (segmentCursor < segmentEnd) {
+        final literalCode = pattern.codeUnitAt(segmentCursor);
+        if (literalCode == _colonCode || literalCode == _asteriskCode) break;
+        segmentCursor += 1;
+      }
+      final literal = pattern.substring(literalStart, segmentCursor);
+      regex.write(RegExp.escape(literal));
+      shape.write(RegExp.escape(literal));
+      lastWasParam = false;
+    }
+    cursor = segmentEnd + 1;
+  }
+  regex.write(r'$');
+  shape.write(r'$');
+  if (!needsCompiled) return null;
+  return _CompiledSlot<T>(
+    RegExp(regex.toString()),
+    shape.toString(),
+    _Route<T>(data, paramNames, false),
+  );
+}
+
+bool _isParamNameCode(int code, bool first) {
+  if (first) {
+    return ((code | 32) >= 97 && (code | 32) <= 122) || code == 95;
+  }
+  return ((code | 32) >= 97 && (code | 32) <= 122) ||
+      code == 95 ||
+      (code >= 48 && code <= 57);
 }

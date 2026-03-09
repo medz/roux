@@ -37,6 +37,17 @@ void main() {
 
       expect(() => router.add('/users/:name', 'b'), throwsFormatException);
     });
+
+    test('supports embedded parameter segments', () {
+      final router = Router<String>();
+      router.add('/files/:name.:ext', 'asset');
+
+      expect(router.match('/files/readme.md')?.data, 'asset');
+      expect(router.match('/files/readme.md')?.params, {
+        'name': 'readme',
+        'ext': 'md',
+      });
+    });
   });
 
   group('duplicate policy', () {
@@ -727,6 +738,23 @@ void main() {
       expect(router.match('/api/demo')?.data, 'api-demo');
       expect(router.match('/api/demo')?.params, isNull);
     });
+
+    test('orders embedded parameter routes between param and exact routes', () {
+      final router = Router<String>(
+        routes: {
+          '/files/:id': 'param',
+          '/files/:name.:ext': 'pattern',
+          '/files/readme.md': 'exact',
+        },
+      );
+
+      expect(router.match('/files/readme.md')?.data, 'exact');
+      expect(router.match('/files/guide.md')?.data, 'pattern');
+      expect(router.matchAll('/files/guide.md').map((match) => match.data), [
+        'param',
+        'pattern',
+      ]);
+    });
   });
 
   group('normalization and invalid input', () {
@@ -783,9 +811,9 @@ void main() {
       );
     });
 
-    test('rejects embedded segment syntax', () {
+    test('rejects unsupported embedded segment syntax', () {
       expect(
-        () => Router<String>(routes: {'/a/:id.:ext': 'bad'}),
+        () => Router<String>(routes: {'/a/:id:ext': 'bad'}),
         throwsFormatException,
       );
     });
@@ -793,6 +821,15 @@ void main() {
     test('rejects duplicate param shape', () {
       expect(
         () => Router<String>(routes: {'/users/:id': 'a', '/users/:name': 'b'}),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate embedded param shape', () {
+      expect(
+        () => Router<String>(
+          routes: {'/files/:name.:ext': 'a', '/files/:base.:suffix': 'b'},
+        ),
         throwsFormatException,
       );
     });
