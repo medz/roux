@@ -6,7 +6,10 @@ const _slashCode = 47,
     _openBraceCode = 123,
     _closeBraceCode = 125,
     _mapAt = 4;
-const _wildRank = 0, _paramRank = 1, _staticRank = 2;
+const _remainderSpecificity = 0,
+    _singleDynamicSpecificity = 1,
+    _structuredDynamicSpecificity = 2,
+    _exactSpecificity = 3;
 const _compiledBucketHigh = 0,
     _compiledBucketRepeated = 1,
     _compiledBucketLate = 2,
@@ -78,6 +81,7 @@ class Router<T> {
   final bool _caseSensitive;
   final bool _decodePath;
   final bool _normalizePath;
+  int _nextRegistrationOrder = 0;
 
   /// Creates a router and optionally preloads [routes].
   Router({
@@ -138,12 +142,16 @@ class Router<T> {
     final normalized = _prepareInputPath(path);
     if (normalized == null) return <RouteMatch<T>>[];
     final pathDepth = _pathDepth(normalized);
-    final collected = _MatchCollector<T>(pathDepth);
-    _collectState(_anyState, normalized, pathDepth, 0, collected);
     final methodToken = method == null ? null : _methodToken(method);
     final methodState = methodToken == null
         ? null
         : _methodStates?[methodToken];
+    final collected = _MatchCollector<T>(
+      methodState != null ||
+          _needsSpecificitySort(_anyState) ||
+          (methodState != null && _needsSpecificitySort(methodState)),
+    );
+    _collectState(_anyState, normalized, pathDepth, 0, collected);
     if (methodState != null) {
       _collectState(methodState, normalized, pathDepth, 1, collected);
     }
@@ -156,6 +164,32 @@ class Router<T> {
           _methodToken(method),
           _MethodState<T>.new,
         );
+
+  _Route<T> _newRoute(
+    T data,
+    List<String> paramNames,
+    String? wildcardName,
+    int depth,
+    int specificity,
+    int staticChars,
+    int constraintScore,
+  ) => _Route<T>(
+    data,
+    paramNames,
+    wildcardName,
+    depth,
+    specificity,
+    staticChars,
+    constraintScore,
+    _nextRegistrationOrder++,
+  );
+
+  bool _needsSpecificitySort(_MethodState<T> state) =>
+      state.root.paramChild != null ||
+      state.compiledRoutes != null ||
+      state.lateCompiledRoutes != null ||
+      state.deferredCompiledRoutes != null;
+
   String _methodToken(String method) {
     final token = method.trim();
     if (token.isEmpty) {
@@ -215,24 +249,22 @@ class Router<T> {
         normalized,
         null,
         1,
-        0,
-        _wildRank,
         methodRank,
         output,
       );
     }
     final repeated = state.repeatedCompiledRoutes;
     if (repeated != null) {
-      _collectCompiled(repeated, normalized, pathDepth, methodRank, output);
+      _collectCompiled(repeated, normalized, methodRank, output);
     }
     _collectNode(state, normalized, methodRank, output);
     final compiled = state.compiledRoutes;
     if (compiled != null) {
-      _collectCompiled(compiled, normalized, pathDepth, methodRank, output);
+      _collectCompiled(compiled, normalized, methodRank, output);
     }
     final late = state.lateCompiledRoutes;
     if (late != null) {
-      _collectCompiled(late, normalized, pathDepth, methodRank, output);
+      _collectCompiled(late, normalized, methodRank, output);
     }
     final exactStatic = state.staticExactRoutes[_canonicalPath(normalized)];
     if (exactStatic != null) {
@@ -241,15 +273,13 @@ class Router<T> {
         normalized,
         null,
         0,
-        pathDepth,
-        _staticRank,
         methodRank,
         output,
       );
     }
     final deferred = state.deferredCompiledRoutes;
     if (deferred != null) {
-      _collectCompiled(deferred, normalized, pathDepth, methodRank, output);
+      _collectCompiled(deferred, normalized, methodRank, output);
     }
   }
 
@@ -300,7 +330,15 @@ class Router<T> {
     if (!hasReservedToken) {
       state.staticExactRoutes[canonical] = _mergedRoute(
         state.staticExactRoutes[canonical],
-        _Route<T>(data, const <String>[], null),
+        _newRoute(
+          data,
+          const <String>[],
+          null,
+          _pathDepth(normalized),
+          _exactSpecificity,
+          _literalCharCount(normalized),
+          0,
+        ),
         normalized,
         duplicatePolicy,
         _dupShape,
@@ -310,6 +348,8 @@ class Router<T> {
 
     List<String>? paramNames;
     var paramCount = 0;
+    var staticChars = 0;
+    var depth = 0;
     var node = state.root;
     for (var cursor = end == 1 ? end : 1; cursor < end;) {
       var segmentEnd = cursor;
@@ -341,10 +381,14 @@ class Router<T> {
             'Double wildcard must be the last segment: $normalized',
           );
         }
-        final route = _Route<T>(
+        final route = _newRoute(
           data,
           paramNames ?? const <String>[],
           doubleWildcardName,
+          depth,
+          _remainderSpecificity,
+          staticChars,
+          0,
         );
         if (cursor == 1 && paramCount == 0) {
           state.hasSlowMatchPath = true;
@@ -371,7 +415,12 @@ class Router<T> {
 
       if (firstCode == _colonCode) {
         if (!_isSimpleParamSegment(pattern, cursor + 1, segmentEnd)) {
-          final compiled = _compilePatternRoute(normalized, data, _caseSensitive);
+          final compiled = _compilePatternRoute(
+            normalized,
+            data,
+            _caseSensitive,
+            _nextRegistrationOrder++,
+          );
           if (compiled == null) {
             throw FormatException(
               'Unsupported segment syntax in route: $normalized',
@@ -393,7 +442,12 @@ class Router<T> {
         paramCount += 1;
       } else {
         if (hasReservedInSegment) {
-          final compiled = _compilePatternRoute(normalized, data, _caseSensitive);
+          final compiled = _compilePatternRoute(
+            normalized,
+            data,
+            _caseSensitive,
+            _nextRegistrationOrder++,
+          );
           if (compiled == null) {
             throw FormatException(
               'Unsupported segment syntax in route: $normalized',
@@ -409,13 +463,23 @@ class Router<T> {
         node = node.getOrCreateStaticChildSlice(
           _canonicalLiteral(pattern.substring(cursor, segmentEnd)),
         );
+        staticChars += segmentEnd - cursor;
       }
+      depth += 1;
       cursor = segmentEnd + 1;
     }
 
     node.exactRoute = _mergedRoute(
       node.exactRoute,
-      _Route<T>(data, paramNames ?? const <String>[], null),
+      _newRoute(
+        data,
+        paramNames ?? const <String>[],
+        null,
+        depth,
+        paramCount == 0 ? _exactSpecificity : _singleDynamicSpecificity,
+        staticChars,
+        0,
+      ),
       normalized,
       duplicatePolicy,
       _dupShape,
@@ -438,7 +502,6 @@ class Router<T> {
   void _collectCompiled(
     _CompiledSlot<T> current,
     String path,
-    int pathDepth,
     int methodRank,
     _MatchCollector<T> output,
   ) {
@@ -452,8 +515,7 @@ class Router<T> {
         ) {
           output.add(
             _materializeCompiled(route, current.groupIndexes, match),
-            pathDepth,
-            current.collectRank,
+            route,
             methodRank,
           );
         }
@@ -709,8 +771,6 @@ class Router<T> {
             path,
             stackParams,
             path.length,
-            depth,
-            _wildRank,
             methodRank,
             output,
           );
@@ -722,8 +782,6 @@ class Router<T> {
             path,
             stackParams,
             0,
-            depth,
-            _paramRank,
             methodRank,
             output,
           );
@@ -741,8 +799,6 @@ class Router<T> {
               path,
               stackParams,
               cursor,
-              depth,
-              _wildRank,
               methodRank,
               output,
             );
@@ -813,8 +869,6 @@ class Router<T> {
     String path,
     _ParamStack? paramValues,
     int wildcardStart,
-    int depth,
-    int routeKind,
     int methodRank,
     _MatchCollector<T> output,
   ) {
@@ -829,15 +883,14 @@ class Router<T> {
             captures,
             wildcardStart,
           ),
-          depth,
-          routeKind,
+          current,
           methodRank,
         );
       }
       return;
     }
     for (_Route<T>? current = slot; current != null; current = current.next) {
-      output.add(current.noParamsMatch, depth, routeKind, methodRank);
+      output.add(current.noParamsMatch, current, methodRank);
     }
   }
 
@@ -987,9 +1040,26 @@ class _Route<T> {
   final T data;
   final List<String> paramNames;
   final String? wildcardName;
+  final int depth;
+  final int specificity;
+  final int staticChars;
+  final int constraintScore;
+  final int registrationOrder;
+  final int rankPrefix;
   _Route<T>? next;
   late final RouteMatch<T> noParamsMatch = RouteMatch<T>(data);
-  _Route(this.data, this.paramNames, this.wildcardName);
+  _Route(
+    this.data,
+    this.paramNames,
+    this.wildcardName,
+    this.depth,
+    this.specificity,
+    this.staticChars,
+    this.constraintScore,
+    this.registrationOrder,
+  ) : rankPrefix =
+           (((specificity * 256) + depth) * 4096 + staticChars) * 4 +
+           constraintScore;
   _Route<T> appended(_Route<T> route) {
     var current = this;
     while (current.next != null) {
@@ -1004,7 +1074,7 @@ class _CompiledSlot<T> {
   final RegExp regex;
   final String shape;
   final int bucket;
-  final int collectRank;
+  final int depth;
   final List<int> groupIndexes;
   _Route<T> route;
   _CompiledSlot<T>? next;
@@ -1012,7 +1082,7 @@ class _CompiledSlot<T> {
     this.regex,
     this.shape,
     this.bucket,
-    this.collectRank,
+    this.depth,
     this.groupIndexes,
     this.route,
   );
@@ -1226,33 +1296,68 @@ int _pathDepth(String path) {
   return count;
 }
 
+int _literalCharCount(String path) {
+  var count = 0;
+  for (var i = 0; i < path.length; i++) {
+    if (path.codeUnitAt(i) != _slashCode) count += 1;
+  }
+  return count;
+}
+
 class _MatchCollector<T> {
-  final List<List<RouteMatch<T>>?> _buckets;
-  int _count = 0;
-  _MatchCollector(int maxDepth)
-    : _buckets = List<List<RouteMatch<T>>?>.filled(
-        (maxDepth + 1) * 6,
-        null,
-        growable: false,
-      );
-  void add(RouteMatch<T> match, int depth, int routeKind, int methodRank) {
-    final index = depth * 6 + routeKind * 2 + methodRank;
-    (_buckets[index] ??= <RouteMatch<T>>[]).add(match);
-    _count += 1;
+  final bool _sortMatches;
+  final List<RouteMatch<T>> _matches = <RouteMatch<T>>[];
+  final List<_Route<T>> _routes = <_Route<T>>[];
+  final List<int> _methodRanks = <int>[];
+  _MatchCollector(this._sortMatches);
+  void add(RouteMatch<T> match, _Route<T> route, int methodRank) {
+    if (!_sortMatches) {
+      _matches.add(match);
+      return;
+    }
+    final index = _matches.length;
+    if (index == 0 ||
+        !_sortsBefore(route, methodRank, _routes[index - 1], _methodRanks[index - 1])) {
+      _matches.add(match);
+      _routes.add(route);
+      _methodRanks.add(methodRank);
+      return;
+    }
+    _matches.add(match);
+    _routes.add(route);
+    _methodRanks.add(methodRank);
+    var insertIndex = index;
+    while (insertIndex > 0 &&
+        _sortsBefore(
+          route,
+          methodRank,
+          _routes[insertIndex - 1],
+          _methodRanks[insertIndex - 1],
+        )) {
+      _matches[insertIndex] = _matches[insertIndex - 1];
+      _routes[insertIndex] = _routes[insertIndex - 1];
+      _methodRanks[insertIndex] = _methodRanks[insertIndex - 1];
+      insertIndex -= 1;
+    }
+    _matches[insertIndex] = match;
+    _routes[insertIndex] = route;
+    _methodRanks[insertIndex] = methodRank;
   }
 
-  List<RouteMatch<T>> finish() {
-    if (_count == 0) return <RouteMatch<T>>[];
-    final result = List<RouteMatch<T>?>.filled(_count, null, growable: false);
-    var offset = 0;
-    for (final bucket in _buckets) {
-      if (bucket == null) continue;
-      for (final match in bucket) {
-        result[offset++] = match;
-      }
-    }
-    return result.cast<RouteMatch<T>>();
-  }
+  List<RouteMatch<T>> finish() => _matches;
+}
+
+bool _sortsBefore<T>(
+  _Route<T> a,
+  int methodRankA,
+  _Route<T> b,
+  int methodRankB,
+) {
+  var diff = a.rankPrefix - b.rankPrefix;
+  if (diff != 0) return diff < 0;
+  diff = methodRankA - methodRankB;
+  if (diff != 0) return diff < 0;
+  return a.registrationOrder < b.registrationOrder;
 }
 
 class _ParamStack {
@@ -1306,13 +1411,21 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
   String pattern,
   T data,
   bool caseSensitive,
+  int registrationOrder,
 ) {
   if (pattern.contains('{')) {
-    return _compileGroupedRoute(pattern, data, caseSensitive);
+    return _compileGroupedRoute(
+      pattern,
+      data,
+      caseSensitive,
+      registrationOrder,
+    );
   }
   var needsCompiled = false;
   var bucket = _compiledBucketHigh;
-  var collectRank = _paramRank;
+  var specificity = _singleDynamicSpecificity;
+  var staticChars = 0;
+  var constraintScore = 0;
   final regex = StringBuffer('^');
   final shape = StringBuffer('^');
   final paramNames = <String>[];
@@ -1339,7 +1452,7 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
       groupIndexes.add(groupCount);
       needsCompiled = true;
       bucket = _compiledBucketLate;
-      collectRank = _staticRank;
+      constraintScore = 1;
       cursor = segmentEnd + 1;
       continue;
     }
@@ -1358,7 +1471,8 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
       groupIndexes.add(groupCount);
       needsCompiled = true;
       bucket = _compiledBucketRepeated;
-      collectRank = _paramRank;
+      specificity = _remainderSpecificity;
+      constraintScore = 1;
       cursor = segmentEnd + 1;
       continue;
     }
@@ -1371,7 +1485,8 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
       groupIndexes.add(groupCount);
       needsCompiled = true;
       bucket = _compiledBucketDeferred;
-      collectRank = _staticRank;
+      specificity = _structuredDynamicSpecificity;
+      constraintScore = 1;
       cursor = segmentEnd + 1;
       continue;
     }
@@ -1381,6 +1496,8 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
 
     var segmentCursor = cursor;
     var lastWasParam = false;
+    var segmentHasLiteral = false;
+    var segmentCaptureCount = 0;
     while (segmentCursor < segmentEnd) {
       final code = pattern.codeUnitAt(segmentCursor);
       if (code == _asteriskCode) {
@@ -1390,7 +1507,11 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
         groupCount += 1;
         groupIndexes.add(groupCount);
         needsCompiled = true;
-        collectRank = _wildRank;
+        constraintScore = constraintScore < 1 ? 1 : constraintScore;
+        segmentCaptureCount += 1;
+        if (segmentHasLiteral || segmentCaptureCount > 1) {
+          specificity = _structuredDynamicSpecificity;
+        }
         segmentCursor += 1;
         lastWasParam = false;
         continue;
@@ -1427,6 +1548,7 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
           groupCount += 1;
           groupIndexes.add(groupCount);
           groupCount += _countCapturingGroups(body);
+          constraintScore = constraintScore < 2 ? 2 : constraintScore;
           segmentCursor = regexEnd + 1;
         } else {
           regex.write('([^/]+)');
@@ -1436,6 +1558,10 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
           segmentCursor = nameEnd;
         }
         paramNames.add(paramName);
+        segmentCaptureCount += 1;
+        if (segmentHasLiteral || segmentCaptureCount > 1) {
+          specificity = _structuredDynamicSpecificity;
+        }
         lastWasParam = true;
         needsCompiled = true;
         continue;
@@ -1449,10 +1575,15 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
         segmentCursor += 1;
       }
       final literal = pattern.substring(literalStart, segmentCursor);
+      staticChars += _literalCharCount(literal);
       regex.write(RegExp.escape(literal));
       shape.write(
         RegExp.escape(caseSensitive ? literal : literal.toLowerCase()),
       );
+      segmentHasLiteral = true;
+      if (segmentCaptureCount > 0) {
+        specificity = _structuredDynamicSpecificity;
+      }
       lastWasParam = false;
     }
     cursor = segmentEnd + 1;
@@ -1464,9 +1595,18 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
     RegExp(regex.toString(), caseSensitive: caseSensitive),
     shape.toString(),
     bucket,
-    collectRank,
+    _pathDepth(pattern),
     groupIndexes,
-    _Route<T>(data, paramNames, null),
+    _Route<T>(
+      data,
+      paramNames,
+      null,
+      _pathDepth(pattern),
+      specificity,
+      staticChars,
+      constraintScore,
+      registrationOrder,
+    ),
   );
 }
 
@@ -1474,6 +1614,7 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
   String pattern,
   T data,
   bool caseSensitive,
+  int registrationOrder,
 ) {
   final regex = StringBuffer('^');
   final shape = StringBuffer('^');
@@ -1481,7 +1622,8 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
   final groupIndexes = <int>[];
   var groupCount = 0;
   var unnamedCount = 0;
-  var hasWildcard = false;
+  var staticChars = 0;
+  var constraintScore = 1;
 
   void writeChunk(StringBuffer targetRegex, StringBuffer targetShape, int start, int end) {
     var cursor = start;
@@ -1513,7 +1655,7 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
         paramNames.add('${unnamedCount++}');
         groupCount += 1;
         groupIndexes.add(groupCount);
-        hasWildcard = true;
+        constraintScore = 2;
         cursor += 1;
         continue;
       }
@@ -1544,6 +1686,7 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
           groupCount += 1;
           groupIndexes.add(groupCount);
           groupCount += _countCapturingGroups(body);
+          constraintScore = constraintScore < 2 ? 2 : constraintScore;
           cursor = regexEnd + 1;
         } else {
           targetRegex.write('([^/]+)');
@@ -1573,6 +1716,7 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
         cursor += 1;
       }
       final literal = pattern.substring(literalStart, cursor);
+      staticChars += _literalCharCount(literal);
       targetRegex.write(RegExp.escape(literal));
       targetShape.write(
         RegExp.escape(caseSensitive ? literal : literal.toLowerCase()),
@@ -1587,9 +1731,18 @@ _CompiledSlot<T> _compileGroupedRoute<T>(
     RegExp(regex.toString(), caseSensitive: caseSensitive),
     shape.toString(),
     _compiledBucketDeferred,
-    hasWildcard ? _wildRank : _staticRank,
+    _pathDepth(pattern),
     groupIndexes,
-    _Route<T>(data, paramNames, null),
+    _Route<T>(
+      data,
+      paramNames,
+      null,
+      _pathDepth(pattern),
+      _structuredDynamicSpecificity,
+      staticChars,
+      constraintScore,
+      registrationOrder,
+    ),
   );
 }
 

@@ -161,17 +161,20 @@ For `match(...)`:
 
 For `matchAll(...)`:
 
-1. Global fallback (`/**:wildcard`)
-2. Double wildcard scope (`/users/**:wildcard`)
-3. Parameter route (`/users/:id`)
-4. Single-segment wildcard (`/users/*`)
-5. Exact route (`/users/all`)
-
 `matchAll(...)` returns every matching route from less specific to more
-specific. When a `method` is provided, both `ANY` and exact-method entries
-participate, with `ANY` ordered first at the same scope. When duplicate slots
-are retained via `DuplicatePolicy.append`, entries from the same slot stay in
-registration order.
+specific using an explicit specificity sort:
+
+1. Remainder routes (`/**:wildcard`, `/files/:path*`, `/files/:path+`)
+2. Single-segment dynamic routes (`/users/:id`, `/users/*`)
+3. Structured dynamic routes (`/files/:name.:ext`, `/book{s}?`, `/foo{bar}`)
+4. Exact static routes (`/users/all`)
+
+At the same specificity level, shallower routes come first, then routes with
+less literal structure, then routes with fewer extra constraints. When a
+`method` is provided, both `ANY` and exact-method entries participate, with
+`ANY` ordered first at the same specificity. When duplicate slots are retained
+via `DuplicatePolicy.append`, entries from the same slot stay in registration
+order.
 
 ## Benchmarks
 
