@@ -1,66 +1,68 @@
-part of 'router.dart';
+import 'route_entry.dart';
+import 'types.dart';
 
-class _MatchCollector<T> {
-  final bool _sortMatches;
-  final List<RouteMatch<T>> _matches = <RouteMatch<T>>[];
-  final List<_Route<T>> _routes = <_Route<T>>[];
-  final List<int> _methodRanks = <int>[];
-  _MatchCollector(this._sortMatches);
+class MatchCollector<T> {
+  final bool sortMatches;
+  final List<RouteMatch<T>> matches = <RouteMatch<T>>[];
+  final List<RouteEntry<T>> routes = <RouteEntry<T>>[];
+  final List<int> methodRanks = <int>[];
 
-  void add(RouteMatch<T> match, _Route<T> route, int methodRank) {
-    if (!_sortMatches) {
-      _matches.add(match);
+  MatchCollector(this.sortMatches);
+
+  void add(RouteMatch<T> match, RouteEntry<T> route, int methodRank) {
+    if (!sortMatches) {
+      matches.add(match);
       return;
     }
-    final index = _matches.length;
+    final index = matches.length;
     if (index == 0 ||
-        !_sortsBefore(
+        !sortsBefore(
           route,
           methodRank,
-          _routes[index - 1],
-          _methodRanks[index - 1],
+          routes[index - 1],
+          methodRanks[index - 1],
         )) {
-      _matches.add(match);
-      _routes.add(route);
-      _methodRanks.add(methodRank);
+      matches.add(match);
+      routes.add(route);
+      methodRanks.add(methodRank);
       return;
     }
-    _matches.add(match);
-    _routes.add(route);
-    _methodRanks.add(methodRank);
+    matches.add(match);
+    routes.add(route);
+    methodRanks.add(methodRank);
     var insertIndex = index;
     while (insertIndex > 0 &&
-        _sortsBefore(
+        sortsBefore(
           route,
           methodRank,
-          _routes[insertIndex - 1],
-          _methodRanks[insertIndex - 1],
+          routes[insertIndex - 1],
+          methodRanks[insertIndex - 1],
         )) {
-      _matches[insertIndex] = _matches[insertIndex - 1];
-      _routes[insertIndex] = _routes[insertIndex - 1];
-      _methodRanks[insertIndex] = _methodRanks[insertIndex - 1];
+      matches[insertIndex] = matches[insertIndex - 1];
+      routes[insertIndex] = routes[insertIndex - 1];
+      methodRanks[insertIndex] = methodRanks[insertIndex - 1];
       insertIndex -= 1;
     }
-    _matches[insertIndex] = match;
-    _routes[insertIndex] = route;
-    _methodRanks[insertIndex] = methodRank;
+    matches[insertIndex] = match;
+    routes[insertIndex] = route;
+    methodRanks[insertIndex] = methodRank;
   }
 }
 
-bool _sortsBefore<T>(
-  _Route<T> a,
+bool sortsBefore<T>(
+  RouteEntry<T> a,
   int methodRankA,
-  _Route<T> b,
+  RouteEntry<T> b,
   int methodRankB,
 ) {
-  var diff = a.rankPrefix - b.rankPrefix;
-  if (diff != 0) return diff < 0;
-  diff = methodRankA - methodRankB;
-  if (diff != 0) return diff < 0;
+  final rankDiff = a.rankPrefix - b.rankPrefix;
+  if (rankDiff != 0) return rankDiff < 0;
+  final methodDiff = methodRankA - methodRankB;
+  if (methodDiff != 0) return methodDiff < 0;
   return a.registrationOrder < b.registrationOrder;
 }
 
-bool _compiledSortsBefore<T>(_Route<T> a, _Route<T> b) {
+bool compiledSortsBefore<T>(RouteEntry<T> a, RouteEntry<T> b) {
   final diff = b.rankPrefix - a.rankPrefix;
   if (diff != 0) return diff < 0;
   return a.registrationOrder < b.registrationOrder;
