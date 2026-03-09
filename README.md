@@ -120,12 +120,30 @@ Lookup processing order:
 Because decoding runs first, `decodePath: true` can change segment boundaries.
 For example, `/a%2Fb` becomes `/a/b` before matching.
 
-`match(...)` priority: exact, param, single-segment wildcard, double wildcard,
-then global fallback.
+`match(...)` priority is path-dependent, but the broad rules are:
 
-`matchAll(...)` order: less specific to more specific. Broadly: remainder
-routes, single-segment dynamic routes, structured dynamic routes, then exact
-static routes.
+- Exact static routes win first.
+- Structured dynamic routes participate in single-match precedence too. This
+  includes embedded patterns, regex params, grouped patterns, optional
+  segments, and repeated segments.
+- Regex and shell-style structured patterns can beat plain `:param` routes.
+- Plain `:param` routes beat single-segment wildcards.
+- Single-segment wildcards beat remainder wildcards.
+- Global fallback is always last.
+
+Examples:
+
+- `/users/:id(\\d+)` beats `/users/:id` for `/users/42`.
+- `/files/file-*.png` beats `/files/:name.:ext` for `/files/file-a.png`.
+- `/users/:id` beats `/users{/:id}?` for `/users/42`.
+
+`matchAll(...)` order is always less specific to more specific. Broadly:
+
+- remainder routes
+- single-segment dynamic routes
+- structured dynamic routes, including embedded, regex, grouped, optional, and
+  repeated patterns
+- exact static routes
 
 ## Differences from URLPattern
 

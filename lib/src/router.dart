@@ -988,19 +988,18 @@ class Router<T> {
       _compiledBucketDeferred => state.deferredCompiledRoutes,
       _ => throw StateError('Invalid compiled bucket: ${compiled.bucket}'),
     };
-    _CompiledSlot<T>? prev;
-    for (var current = head; current != null; current = current.next) {
-      if (current.shape != compiled.shape) {
-        prev = current;
-        continue;
-      }
+    if (head == null) {
+      _setCompiledHead(state, compiled);
+      return;
+    }
+    if (head.shape == compiled.shape) {
       _verifyCompiledNames(
-        current.route.paramNames,
+        head.route.paramNames,
         compiled.route.paramNames,
         pattern,
       );
-      current.route = _resolveDup(
-        current.route,
+      head.route = _resolveDup(
+        head.route,
         compiled.route,
         pattern,
         duplicatePolicy,
@@ -1008,25 +1007,51 @@ class Router<T> {
       );
       return;
     }
-
-    if (prev == null) {
-      switch (compiled.bucket) {
-        case _compiledBucketHigh:
-          compiled.next = state.compiledRoutes;
-          state.compiledRoutes = compiled;
-        case _compiledBucketRepeated:
-          compiled.next = state.repeatedCompiledRoutes;
-          state.repeatedCompiledRoutes = compiled;
-        case _compiledBucketLate:
-          compiled.next = state.lateCompiledRoutes;
-          state.lateCompiledRoutes = compiled;
-        case _compiledBucketDeferred:
-          compiled.next = state.deferredCompiledRoutes;
-          state.deferredCompiledRoutes = compiled;
-      }
+    if (_compiledSortsBefore(compiled.route, head.route)) {
+      compiled.next = head;
+      _setCompiledHead(state, compiled);
       return;
     }
-    prev.next = compiled;
+    for (var current = head; ; current = current.next!) {
+      final next = current.next;
+      if (next == null) {
+        current.next = compiled;
+        return;
+      }
+      if (next.shape == compiled.shape) {
+        _verifyCompiledNames(
+          next.route.paramNames,
+          compiled.route.paramNames,
+          pattern,
+        );
+        next.route = _resolveDup(
+          next.route,
+          compiled.route,
+          pattern,
+          duplicatePolicy,
+          _dupShape,
+        );
+        return;
+      }
+      if (_compiledSortsBefore(compiled.route, next.route)) {
+        compiled.next = next;
+        current.next = compiled;
+        return;
+      }
+    }
+  }
+
+  void _setCompiledHead(_MethodState<T> state, _CompiledSlot<T> compiled) {
+    switch (compiled.bucket) {
+      case _compiledBucketHigh:
+        state.compiledRoutes = compiled;
+      case _compiledBucketRepeated:
+        state.repeatedCompiledRoutes = compiled;
+      case _compiledBucketLate:
+        state.lateCompiledRoutes = compiled;
+      case _compiledBucketDeferred:
+        state.deferredCompiledRoutes = compiled;
+    }
   }
 
   void _verifyCompiledNames(List<String> a, List<String> b, String pattern) {
@@ -1372,6 +1397,12 @@ bool _sortsBefore<T>(
   return a.registrationOrder < b.registrationOrder;
 }
 
+bool _compiledSortsBefore<T>(_Route<T> a, _Route<T> b) {
+  final diff = b.rankPrefix - a.rankPrefix;
+  if (diff != 0) return diff < 0;
+  return a.registrationOrder < b.registrationOrder;
+}
+
 class _ParamStack {
   final List<int> _values;
   int _length = 0;
@@ -1564,6 +1595,11 @@ _CompiledSlot<T>? _compilePatternRoute<T>(
     }
     if (firstCode == _colonCode &&
         _hasValidParamNameSlice(pattern, cursor + 1, segmentEnd)) {
+      regex.write('/([^/]+)');
+      shape.write('/([^/]+)');
+      paramNames.add(pattern.substring(cursor + 1, segmentEnd));
+      groupCount += 1;
+      groupIndexes.add(groupCount);
       cursor = segmentEnd + 1;
       continue;
     }

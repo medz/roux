@@ -919,6 +919,21 @@ void main() {
     });
 
     test(
+      'matches more specific compiled patterns before broader ones regardless of registration order',
+      () {
+        final router = Router<String>();
+        router.add('/files/:name.:ext', 'pattern');
+        router.add('/files/file-*.png', 'wild');
+
+        expect(router.match('/files/file-z.png')?.data, 'wild');
+        expect(
+          router.matchAll('/files/file-z.png').map((match) => match.data),
+          ['pattern', 'wild'],
+        );
+      },
+    );
+
+    test(
       'orders grouped routes before exact routes but after plain params',
       () {
         final router = Router<String>(
@@ -969,6 +984,17 @@ void main() {
         ]);
       },
     );
+
+    test('matches plain param segments inside compiled mixed routes', () {
+      final router = Router<String>();
+      router.add('/users/:id/file-*.png', 'asset');
+
+      expect(router.match('/users/42/file-demo.png')?.data, 'asset');
+      expect(router.match('/users/42/file-demo.png')?.params, {
+        'id': '42',
+        '0': 'demo',
+      });
+    });
 
     test(
       'orders optional params before exact routes when param is missing',
