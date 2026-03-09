@@ -271,12 +271,15 @@ class Router<T> {
 
     var hasReservedToken = false;
     var prevSlash = true;
+    var exactDepth = 0;
+    var exactStaticChars = 0;
     for (var i = 1; i < end; i++) {
       final code = pattern.codeUnitAt(i);
       if (code == _slashCode) {
         if (prevSlash) {
           throw FormatException('$_emptySegment$pattern');
         }
+        exactDepth += 1;
         prevSlash = true;
         continue;
       }
@@ -287,7 +290,11 @@ class Router<T> {
           code == _questionCode) {
         hasReservedToken = true;
       }
+      exactStaticChars += 1;
       prevSlash = false;
+    }
+    if (end > 1 && !prevSlash) {
+      exactDepth += 1;
     }
 
     final normalized = end == pattern.length
@@ -296,21 +303,14 @@ class Router<T> {
     final canonical = _canonicalPath(normalized);
 
     if (!hasReservedToken) {
-      routeSet.staticExactRoutes[canonical] = _mergedRoute(
-        routeSet.staticExactRoutes[canonical],
-        _newRoute(
-          data,
-          const <String>[],
-          null,
-          normalized,
-          _pathDepth(normalized),
-          _exactSpecificity,
-          _literalCharCount(normalized),
-          0,
-        ),
+      _addExactStaticRoute(
+        routeSet,
+        canonical,
         normalized,
+        data,
         duplicatePolicy,
-        _dupShape,
+        exactDepth,
+        exactStaticChars,
       );
       return;
     }
@@ -431,6 +431,33 @@ class Router<T> {
     if (paramCount > routeSet.maxParamDepth) {
       routeSet.maxParamDepth = paramCount;
     }
+  }
+
+  void _addExactStaticRoute(
+    _RouteSet<T> routeSet,
+    String canonical,
+    String normalized,
+    T data,
+    DuplicatePolicy duplicatePolicy,
+    int depth,
+    int staticChars,
+  ) {
+    routeSet.staticExactRoutes[canonical] = _mergedRoute(
+      routeSet.staticExactRoutes[canonical],
+      _newRoute(
+        data,
+        const <String>[],
+        null,
+        normalized,
+        depth,
+        _exactSpecificity,
+        staticChars,
+        0,
+      ),
+      normalized,
+      duplicatePolicy,
+      _dupShape,
+    );
   }
 
   RouteMatch<T>? _matchCompiled(_CompiledSlot<T> current, String path) {
