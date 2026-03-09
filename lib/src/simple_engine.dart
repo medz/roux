@@ -9,13 +9,46 @@ class SimpleEngine<T> {
   bool hasWildcardRoutes = false;
   RouteEntry<T>? globalFallback;
   int maxParamDepth = 0;
+  bool straightDirty = false;
+  List<String?> straightSegments = <String?>[];
+  List<Map<String, RouteEntry<T>>?> straightLeaves =
+      <Map<String, RouteEntry<T>>?>[];
+  List<RouteEntry<T>?> straightExacts = <RouteEntry<T>?>[];
+  List<RouteEntry<T>?> straightWildcards = <RouteEntry<T>?>[];
+
+  void rebuildStraightPlan() {
+    straightSegments = <String?>[];
+    straightLeaves = <Map<String, RouteEntry<T>>?>[root.leafRoutes];
+    straightExacts = <RouteEntry<T>?>[root.exactRoute];
+    straightWildcards = <RouteEntry<T>?>[root.wildcardRoute];
+    var node = root;
+    while (true) {
+      final paramChild = node.paramChild;
+      if (paramChild != null) {
+        straightSegments.add(null);
+        node = paramChild;
+      } else {
+        final staticChild = node.staticChild;
+        if (staticChild == null) break;
+        straightSegments.add(staticChild.staticKey!);
+        node = staticChild;
+      }
+      straightLeaves.add(node.leafRoutes);
+      straightExacts.add(node.exactRoute);
+      straightWildcards.add(node.wildcardRoute);
+    }
+  }
 
   RouteMatch<T>? matchStraight(String path, bool caseSensitive) {
+    if (straightDirty || straightExacts.isEmpty) {
+      rebuildStraightPlan();
+      straightDirty = false;
+    }
     final allowWildcards = hasWildcardRoutes;
     final smallParams = maxParamDepth <= 2;
     ParamStack? paramStack;
-    var node = root;
     var cursor = 1;
+    var depth = 0;
     var paramCount = 0;
     var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
 
@@ -57,11 +90,11 @@ class SimpleEngine<T> {
 
     while (true) {
       if (cursor >= path.length) {
-        final exact = node.exactRoute;
+        final exact = straightExacts[depth];
         if (exact != null) {
           return buildMatch(exact, 0);
         }
-        final wildcard = allowWildcards ? node.wildcardRoute : null;
+        final wildcard = allowWildcards ? straightWildcards[depth] : null;
         if (wildcard != null) {
           return buildMatch(wildcard, path.length);
         }
@@ -73,28 +106,30 @@ class SimpleEngine<T> {
           ? segmentEnd + 1
           : path.length;
       if (nextCursor == path.length) {
-        final leaf = node.findLeafRouteSlice(
-          path,
-          cursor,
-          segmentEnd,
-          caseSensitive,
-        );
+        final leafRoutes = straightLeaves[depth];
+        final leaf = leafRoutes == null
+            ? null
+            : leafRoutes[caseSensitive
+                  ? path.substring(cursor, segmentEnd)
+                  : path.substring(cursor, segmentEnd).toLowerCase()];
         if (leaf != null) return buildMatch(leaf, 0);
       }
-      final staticChild = node.findStaticChildSlice(
-        path,
-        cursor,
-        segmentEnd,
-        caseSensitive,
-      );
-      if (staticChild != null) {
-        node = staticChild;
+      if (depth >= straightSegments.length) {
+        final wildcard = allowWildcards ? straightWildcards[depth] : null;
+        if (wildcard != null) return buildMatch(wildcard, cursor);
+        return null;
+      }
+      final staticKey = straightSegments[depth];
+      if (staticKey != null &&
+          (caseSensitive
+              ? equalsPathSlice(staticKey, path, cursor, segmentEnd)
+              : equalsFoldedPathSlice(staticKey, path, cursor, segmentEnd))) {
+        depth += 1;
         cursor = nextCursor;
         continue;
       }
-      final wildcard = allowWildcards ? node.wildcardRoute : null;
-      final paramChild = node.paramChild;
-      if (paramChild == null) {
+      final wildcard = allowWildcards ? straightWildcards[depth] : null;
+      if (staticKey != null) {
         if (wildcard != null) return buildMatch(wildcard, cursor);
         return null;
       }
@@ -110,7 +145,7 @@ class SimpleEngine<T> {
       } else {
         (paramStack ??= ParamStack(maxParamDepth)).push(cursor, segmentEnd);
       }
-      node = paramChild;
+      depth += 1;
       cursor = nextCursor;
     }
   }
@@ -483,6 +518,16 @@ bool equalsPathSlice(String key, String path, int start, int end) {
   if (key.length != end - start) return false;
   for (var i = 0; i < key.length; i++) {
     if (key.codeUnitAt(i) != path.codeUnitAt(start + i)) return false;
+  }
+  return true;
+}
+
+bool equalsFoldedPathSlice(String key, String path, int start, int end) {
+  if (key.length != end - start) return false;
+  for (var i = 0; i < key.length; i++) {
+    final code = path.codeUnitAt(start + i);
+    final lowered = code >= 65 && code <= 90 ? code + 32 : code;
+    if (key.codeUnitAt(i) != lowered) return false;
   }
   return true;
 }

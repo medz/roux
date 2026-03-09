@@ -62,9 +62,7 @@ class Router<T> {
   RouteMatch<T>? match(String path, {String? method}) {
     final normalized = prepareInputPath(path);
     if (normalized == null) return null;
-    final routeSet = method == null
-        ? null
-        : _methodRoutes.lookup(normalizeMethod(method));
+    final routeSet = method == null ? null : _methodRoutes.lookupMethod(method);
     return (routeSet == null ? null : routeSet.match(normalized)) ??
         _anyRoutes.match(normalized);
   }
@@ -72,9 +70,7 @@ class Router<T> {
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
     final normalized = prepareInputPath(path);
     if (normalized == null) return <RouteMatch<T>>[];
-    final routeSet = method == null
-        ? null
-        : _methodRoutes.lookup(normalizeMethod(method));
+    final routeSet = method == null ? null : _methodRoutes.lookupMethod(method);
     final collected = MatchCollector<T>(
       routeSet != null ||
           _anyRoutes.needsSpecificitySort ||
@@ -87,7 +83,7 @@ class Router<T> {
 
   RouteSet<T> routeSetForWrite(String? method) => method == null
       ? _anyRoutes
-      : _methodRoutes.forWrite(normalizeMethod(method), _caseSensitive);
+      : _methodRoutes.forWriteMethod(method, _caseSensitive);
 
   String? prepareInputPath(String path) {
     if (_decodePath && path.contains('%')) {
@@ -189,6 +185,31 @@ class RouteSet<T> {
     var staticChars = 0;
     var depth = 0;
     var node = simple.root;
+    RouteEntry<T> buildRoute(
+      String? wildcardName,
+      int routeDepth,
+      int routeSpecificity,
+      int routeStaticChars,
+      int constraintScore,
+    ) => newRoute(
+      data,
+      paramNames ?? const <String>[],
+      wildcardName,
+      normalized,
+      routeDepth,
+      routeSpecificity,
+      routeStaticChars,
+      constraintScore,
+      registrationOrder,
+    );
+
+    void finishSimple() {
+      if (paramCount > simple.maxParamDepth) {
+        simple.maxParamDepth = paramCount;
+      }
+      simple.straightDirty = true;
+    }
+
     for (var cursor = end == 1 ? end : 1; cursor < end;) {
       var segmentEnd = cursor;
       var hasReservedInSegment = false;
@@ -217,16 +238,12 @@ class RouteSet<T> {
             'Double wildcard must be the last segment: $normalized',
           );
         }
-        final route = newRoute(
-          data,
-          paramNames ?? const <String>[],
+        final route = buildRoute(
           doubleWildcardName,
-          normalized,
           depth,
           remainderSpecificity,
           staticChars,
           0,
-          registrationOrder,
         );
         if (cursor == 1 && paramCount == 0) {
           simple.hasWildcardRoutes = true;
@@ -247,8 +264,7 @@ class RouteSet<T> {
             dupWildcard,
           );
         }
-        if (paramCount > simple.maxParamDepth)
-          simple.maxParamDepth = paramCount;
+        finishSimple();
         return;
       }
 
@@ -282,23 +298,18 @@ class RouteSet<T> {
           final routes = node.leafRoutes ??= <String, RouteEntry<T>>{};
           routes[key] = mergeRouteEntries(
             routes[key],
-            newRoute(
-              data,
-              paramNames ?? const <String>[],
+            buildRoute(
               null,
-              normalized,
               depth + 1,
               paramCount == 0 ? exactSpecificity : singleDynamicSpecificity,
               staticChars + segmentEnd - cursor,
               0,
-              registrationOrder,
             ),
             normalized,
             duplicatePolicy,
             dupShape,
           );
-          if (paramCount > simple.maxParamDepth)
-            simple.maxParamDepth = paramCount;
+          finishSimple();
           return;
         }
         if (node.paramChild != null) simple.hasBranchingChoices = true;
@@ -312,22 +323,18 @@ class RouteSet<T> {
 
     node.exactRoute = mergeRouteEntries(
       node.exactRoute,
-      newRoute(
-        data,
-        paramNames ?? const <String>[],
+      buildRoute(
         null,
-        normalized,
         depth,
         paramCount == 0 ? exactSpecificity : singleDynamicSpecificity,
         staticChars,
         0,
-        registrationOrder,
       ),
       normalized,
       duplicatePolicy,
       dupShape,
     );
-    if (paramCount > simple.maxParamDepth) simple.maxParamDepth = paramCount;
+    finishSimple();
   }
 
   RouteMatch<T>? match(String normalized) {
@@ -385,38 +392,27 @@ class MethodTable<T> {
   final List<RouteSet<T>?> commonRoutes = List<RouteSet<T>?>.filled(7, null);
   Map<String, RouteSet<T>>? extraRoutes;
 
-  RouteSet<T> forWrite(String method, bool caseSensitive) {
-    final index = commonMethodIndex(method);
+  RouteSet<T> forWriteMethod(String method, bool caseSensitive) {
+    final (index, normalized) = classifyMethod(method);
     if (index >= 0) {
       return commonRoutes[index] ??= RouteSet<T>(caseSensitive);
     }
     return (extraRoutes ??= <String, RouteSet<T>>{}).putIfAbsent(
-      method,
+      normalized!,
       () => RouteSet<T>(caseSensitive),
     );
   }
 
-  RouteSet<T>? lookup(String method) {
-    final index = commonMethodIndex(method);
-    return index >= 0 ? commonRoutes[index] : extraRoutes?[method];
+  RouteSet<T>? lookupMethod(String method) {
+    final (index, normalized) = classifyMethod(method);
+    return index >= 0 ? commonRoutes[index] : extraRoutes?[normalized!];
   }
 }
-
-int commonMethodIndex(String method) => switch (method) {
-  'GET' => 0,
-  'POST' => 1,
-  'PUT' => 2,
-  'PATCH' => 3,
-  'DELETE' => 4,
-  'HEAD' => 5,
-  'OPTIONS' => 6,
-  _ => -1,
-};
 
 String canonicalPath(String path, bool caseSensitive) =>
     caseSensitive ? path : path.toLowerCase();
 
-String normalizeMethod(String method) {
+(int, String?) classifyMethod(String method) {
   var start = 0;
   var end = method.length;
   while (start < end && method.codeUnitAt(start) <= 32) start += 1;
@@ -424,19 +420,41 @@ String normalizeMethod(String method) {
   if (start == end) {
     throw ArgumentError.value(method, 'method', 'Method must not be empty.');
   }
-  var unchanged = start == 0 && end == method.length;
-  for (var i = start; i < end; i++) {
-    final code = method.codeUnitAt(i);
-    if (code >= 97 && code <= 122) {
-      unchanged = false;
-      break;
-    }
-  }
-  if (unchanged) return method;
+  final length = end - start;
+  final common = commonMethodIndex(method, start, end, length);
+  if (common >= 0) return (common, null);
   final buffer = StringBuffer();
   for (var i = start; i < end; i++) {
     final code = method.codeUnitAt(i);
     buffer.writeCharCode(code >= 97 && code <= 122 ? code - 32 : code);
   }
-  return buffer.toString();
+  return (-1, buffer.toString());
 }
+
+int commonMethodIndex(String method, int start, int end, int length) {
+  for (var i = 0; i < commonMethods.length; i++) {
+    final candidate = commonMethods[i];
+    if (candidate.length != length) continue;
+    var matched = true;
+    for (var j = 0; j < length; j++) {
+      final code = method.codeUnitAt(start + j);
+      final upper = code >= 97 && code <= 122 ? code - 32 : code;
+      if (upper != candidate.codeUnitAt(j)) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return i;
+  }
+  return -1;
+}
+
+const List<String> commonMethods = <String>[
+  'GET',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'HEAD',
+  'OPTIONS',
+];
