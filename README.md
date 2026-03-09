@@ -100,6 +100,7 @@ Parameter-name drift remains a hard error under all policies. For example,
 - Named repeated param: `/files/:path+`, `/files/:path*`
 - Named regex param: `/users/:id(\\d+)`
 - Embedded params: `/files/:name.:ext`
+- Optional group: `/book{s}?`, `/users{/:id}?`
 - Double wildcard tail: `/users/**:wildcard`
 - Global fallback: `/**:wildcard`
 
