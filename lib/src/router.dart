@@ -75,12 +75,15 @@ class Router<T> {
   final _MethodState<T> _anyState = _MethodState<T>();
   Map<String, _MethodState<T>>? _methodStates;
   final DuplicatePolicy _duplicatePolicy;
+  final bool _caseSensitive;
 
   /// Creates a router and optionally preloads [routes].
   Router({
     Map<String, T>? routes,
     DuplicatePolicy duplicatePolicy = DuplicatePolicy.reject,
-  }) : _duplicatePolicy = duplicatePolicy {
+    bool caseSensitive = true,
+  }) : _duplicatePolicy = duplicatePolicy,
+       _caseSensitive = caseSensitive {
     if (routes != null && routes.isNotEmpty) addAll(routes);
   }
 
@@ -155,8 +158,14 @@ class Router<T> {
     return token.toUpperCase();
   }
 
+  String _canonicalPath(String path) =>
+      _caseSensitive ? path : path.toLowerCase();
+
+  String _canonicalLiteral(String literal) =>
+      _caseSensitive ? literal : literal.toLowerCase();
+
   RouteMatch<T>? _matchInState(_MethodState<T> state, String normalized) {
-    final exact = state.staticExactRoutes[normalized]?.noParamsMatch;
+    final exact = state.staticExactRoutes[_canonicalPath(normalized)]?.noParamsMatch;
     if (exact != null) return exact;
     if (!state.hasSlowMatchPath) {
       return _matchNodePathFast(state, normalized);
@@ -208,7 +217,7 @@ class Router<T> {
     if (late != null) {
       _collectCompiled(late, normalized, pathDepth, methodRank, output);
     }
-    final exactStatic = state.staticExactRoutes[normalized];
+    final exactStatic = state.staticExactRoutes[_canonicalPath(normalized)];
     if (exactStatic != null) {
       _collectSlot(
         exactStatic,
@@ -269,10 +278,11 @@ class Router<T> {
     final normalized = end == pattern.length
         ? pattern
         : pattern.substring(0, end);
+    final canonical = _canonicalPath(normalized);
 
     if (!hasReservedToken) {
-      state.staticExactRoutes[normalized] = _mergedRoute(
-        state.staticExactRoutes[normalized],
+      state.staticExactRoutes[canonical] = _mergedRoute(
+        state.staticExactRoutes[canonical],
         _Route<T>(data, const <String>[], null),
         normalized,
         duplicatePolicy,
@@ -344,7 +354,7 @@ class Router<T> {
 
       if (firstCode == _colonCode) {
         if (!_isSimpleParamSegment(pattern, cursor + 1, segmentEnd)) {
-          final compiled = _compilePatternRoute(normalized, data);
+          final compiled = _compilePatternRoute(normalized, data, _caseSensitive);
           if (compiled == null) {
             throw FormatException(
               'Unsupported segment syntax in route: $normalized',
@@ -366,7 +376,7 @@ class Router<T> {
         paramCount += 1;
       } else {
         if (hasReservedInSegment) {
-          final compiled = _compilePatternRoute(normalized, data);
+          final compiled = _compilePatternRoute(normalized, data, _caseSensitive);
           if (compiled == null) {
             throw FormatException(
               'Unsupported segment syntax in route: $normalized',
@@ -379,7 +389,9 @@ class Router<T> {
           }
           return;
         }
-        node = node.getOrCreateStaticChildSlice(pattern, cursor, segmentEnd);
+        node = node.getOrCreateStaticChildSlice(
+          _canonicalLiteral(pattern.substring(cursor, segmentEnd)),
+        );
       }
       cursor = segmentEnd + 1;
     }
@@ -465,6 +477,7 @@ class Router<T> {
             path,
             cursor,
             segmentEnd,
+            _caseSensitive,
           );
           final paramChild = node.paramChild;
           final wildcard = node.wildcardRoute;
@@ -575,6 +588,7 @@ class Router<T> {
             path,
             cursor,
             segmentEnd,
+            _caseSensitive,
           );
           final paramChild = node.paramChild;
           final wildcard = allowWildcards ? node.wildcardRoute : null;
@@ -720,6 +734,7 @@ class Router<T> {
             path,
             cursor,
             segmentEnd,
+            _caseSensitive,
           );
           final paramChild = node.paramChild;
           if (staticChild != null) {
@@ -1057,15 +1072,14 @@ class _Node<T> {
   int _staticCount = 0;
   _Route<T>? exactRoute, wildcardRoute;
   _Node([this._staticKey]);
-  _Node<T> getOrCreateStaticChildSlice(String path, int start, int end) {
+  _Node<T> getOrCreateStaticChildSlice(String key) {
     final map = _staticMap;
     if (map != null) {
-      final key = path.substring(start, end);
       return map[key] ??= _Node<T>(key);
     }
-    final child = _findStaticChildSlice(path, start, end);
+    final child = _findStaticChild(key);
     if (child != null) return child;
-    final created = _Node<T>(path.substring(start, end));
+    final created = _Node<T>(key);
     created._staticNext = _staticChild;
     _staticChild = created;
     if (++_staticCount >= _mapAt) {
@@ -1078,7 +1092,15 @@ class _Node<T> {
     return created;
   }
 
-  _Node<T>? _findStaticChildSlice(String path, int start, int end) {
+  _Node<T>? _findStaticChildSlice(
+    String path,
+    int start,
+    int end,
+    bool caseSensitive,
+  ) {
+    if (!caseSensitive) {
+      return _findStaticChild(path.substring(start, end).toLowerCase());
+    }
     final map = _staticMap;
     if (map != null) return map[path.substring(start, end)];
     _Node<T>? prev;
@@ -1097,6 +1119,34 @@ class _Node<T> {
     }
     return null;
   }
+
+  _Node<T>? _findStaticChild(String key) {
+    final map = _staticMap;
+    if (map != null) return map[key];
+    _Node<T>? prev;
+    var child = _staticChild;
+    while (child != null) {
+      if (child._staticKey == key) {
+        if (prev != null) {
+          prev._staticNext = child._staticNext;
+          child._staticNext = _staticChild;
+          _staticChild = child;
+        }
+        return child;
+      }
+      prev = child;
+      child = child._staticNext;
+    }
+    return null;
+  }
+}
+
+bool _equalsPathSlice(String key, String path, int start, int end) {
+  if (key.length != end - start) return false;
+  for (var i = 0; i < key.length; i++) {
+    if (key.codeUnitAt(i) != path.codeUnitAt(start + i)) return false;
+  }
+  return true;
 }
 
 String? _normalizeInputPath(String path) {
@@ -1121,14 +1171,6 @@ int _findSegmentEnd(String path, int start) {
     i += 1;
   }
   return i;
-}
-
-bool _equalsPathSlice(String key, String path, int start, int end) {
-  if (key.length != end - start) return false;
-  for (var i = 0; i < key.length; i++) {
-    if (key.codeUnitAt(i) != path.codeUnitAt(start + i)) return false;
-  }
-  return true;
 }
 
 int _pathDepth(String path) {
@@ -1215,9 +1257,13 @@ bool _isValidParamName(String name) {
 bool _isSimpleParamSegment(String pattern, int start, int end) =>
     start < end && _isValidParamName(pattern.substring(start, end));
 
-_CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
+_CompiledSlot<T>? _compilePatternRoute<T>(
+  String pattern,
+  T data,
+  bool caseSensitive,
+) {
   if (pattern.contains('{')) {
-    return _compileGroupedRoute(pattern, data);
+    return _compileGroupedRoute(pattern, data, caseSensitive);
   }
   var needsCompiled = false;
   var bucket = _compiledBucketHigh;
@@ -1359,7 +1405,9 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
       }
       final literal = pattern.substring(literalStart, segmentCursor);
       regex.write(RegExp.escape(literal));
-      shape.write(RegExp.escape(literal));
+      shape.write(
+        RegExp.escape(caseSensitive ? literal : literal.toLowerCase()),
+      );
       lastWasParam = false;
     }
     cursor = segmentEnd + 1;
@@ -1368,7 +1416,7 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   shape.write(r'$');
   if (!needsCompiled) return null;
   return _CompiledSlot<T>(
-    RegExp(regex.toString()),
+    RegExp(regex.toString(), caseSensitive: caseSensitive),
     shape.toString(),
     bucket,
     collectRank,
@@ -1377,7 +1425,11 @@ _CompiledSlot<T>? _compilePatternRoute<T>(String pattern, T data) {
   );
 }
 
-_CompiledSlot<T> _compileGroupedRoute<T>(String pattern, T data) {
+_CompiledSlot<T> _compileGroupedRoute<T>(
+  String pattern,
+  T data,
+  bool caseSensitive,
+) {
   final regex = StringBuffer('^');
   final shape = StringBuffer('^');
   final paramNames = <String>[];
@@ -1477,7 +1529,9 @@ _CompiledSlot<T> _compileGroupedRoute<T>(String pattern, T data) {
       }
       final literal = pattern.substring(literalStart, cursor);
       targetRegex.write(RegExp.escape(literal));
-      targetShape.write(RegExp.escape(literal));
+      targetShape.write(
+        RegExp.escape(caseSensitive ? literal : literal.toLowerCase()),
+      );
     }
   }
 
@@ -1485,7 +1539,7 @@ _CompiledSlot<T> _compileGroupedRoute<T>(String pattern, T data) {
   regex.write(r'$');
   shape.write(r'$');
   return _CompiledSlot<T>(
-    RegExp(regex.toString()),
+    RegExp(regex.toString(), caseSensitive: caseSensitive),
     shape.toString(),
     _compiledBucketDeferred,
     hasWildcard ? _wildRank : _staticRank,

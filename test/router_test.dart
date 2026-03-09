@@ -1060,6 +1060,25 @@ void main() {
       expect(router.match('/users'), isNull);
     });
 
+    test('supports case-insensitive matching when configured', () {
+      final local = Router<String>(
+        caseSensitive: false,
+        routes: {
+          '/Users': 'users',
+          '/files/:name.:ext': 'asset',
+          '/book{s}?': 'books',
+        },
+      );
+
+      expect(local.match('/users')?.data, 'users');
+      expect(local.match('/FILES/ReadMe.MD')?.data, 'asset');
+      expect(local.match('/FILES/ReadMe.MD')?.params, {
+        'name': 'ReadMe',
+        'ext': 'MD',
+      });
+      expect(local.match('/BOOKS')?.data, 'books');
+    });
+
     test('does not URL decode', () {
       expect(router.match('/a%2Fb')?.data, 'encoded');
       expect(router.match('/a/b'), isNull);
@@ -1111,6 +1130,26 @@ void main() {
     test('rejects duplicate param shape', () {
       expect(
         () => Router<String>(routes: {'/users/:id': 'a', '/users/:name': 'b'}),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects case-insensitive duplicate static paths', () {
+      expect(
+        () => Router<String>(
+          caseSensitive: false,
+          routes: {'/Users': 'a', '/users': 'b'},
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects case-insensitive duplicate compiled shapes', () {
+      expect(
+        () => Router<String>(
+          caseSensitive: false,
+          routes: {'/Files/:name.:ext': 'a', '/files/:name.:ext': 'b'},
+        ),
         throwsFormatException,
       );
     });

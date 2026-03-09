@@ -51,6 +51,7 @@ Duplicate route handling is configurable at both router and call level:
 ```dart
 final router = Router<String>(
   duplicatePolicy: DuplicatePolicy.replace,
+  caseSensitive: false,
   routes: {'/users/:id': 'first'},
 );
 
@@ -108,7 +109,8 @@ Notes:
 - Paths must start with `/`.
 - `*` matches exactly one segment.
 - `**` and `**:name` match the remaining path and must be the final segment.
-- Matching is case-sensitive.
+- Matching is case-sensitive by default. Set `caseSensitive: false` to ignore
+  path casing.
 - Trailing slash on input is ignored (`/users` equals `/users/`).
 - You can register routes via constructor (`Router(routes: {...})`) or
   incrementally (`add` / `addAll`).
