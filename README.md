@@ -53,12 +53,12 @@ router.add('/posts/:id', 'post-detail');
 router.add('/posts/**:rest', 'post-fallback');
 ```
 
-Method-specific routes are supported through `method:` on `add`, `addAll`,
-`match`, and `matchAll`.
+Method-specific routes use `method:` on `add`, `addAll`, `match`, and
+`matchAll`.
 
 ## Route Patterns
 
-`roux` focuses on pathname routing. It accepts the following route shapes:
+Supported route shapes:
 
 | Syntax | Meaning | Example |
 | --- | --- | --- |
@@ -120,12 +120,12 @@ Lookup processing order:
 Because decoding runs first, `decodePath: true` can change segment boundaries.
 For example, `/a%2Fb` becomes `/a/b` before matching.
 
-`match(...)` returns the highest-priority route: exact, param, single-segment
-wildcard, double wildcard, then global fallback.
+`match(...)` priority: exact, param, single-segment wildcard, double wildcard,
+then global fallback.
 
-`matchAll(...)` returns every matching route from less specific to more
-specific. Broadly: remainder routes, single-segment dynamic routes,
-structured dynamic routes, then exact static routes.
+`matchAll(...)` order: less specific to more specific. Broadly: remainder
+routes, single-segment dynamic routes, structured dynamic routes, then exact
+static routes.
 
 ## Differences from URLPattern
 
