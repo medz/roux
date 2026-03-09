@@ -569,13 +569,34 @@ class Router<T> {
   }
 
   RouteMatch<T>? _matchNodePathStraight(_MethodState<T> state, String path) {
+    final smallParams = state.maxParamDepth <= 2;
     _ParamStack? paramStack;
     var node = state.root;
     var cursor = 1;
+    var paramCount = 0;
+    var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
     while (true) {
       if (cursor >= path.length) {
         final exact = node.exactRoute;
-        return exact == null ? null : _materialize(exact, path, paramStack, 0);
+        if (exact == null) return null;
+        if (!smallParams) return _materialize(exact, path, paramStack, 0);
+        final names = exact.paramNames;
+        if (names.isEmpty) return exact.noParamsMatch;
+        if (names.length == 1) {
+          return RouteMatch<T>(
+            exact.data,
+            _SmallParamsMap1(names[0], path.substring(p0Start, p0End)),
+          );
+        }
+        return RouteMatch<T>(
+          exact.data,
+          _SmallParamsMap2(
+            names[0],
+            path.substring(p0Start, p0End),
+            names[1],
+            path.substring(p1Start, p1End),
+          ),
+        );
       }
       final segmentEnd = _findSegmentEnd(path, cursor);
       if (segmentEnd == cursor) return null;
@@ -595,9 +616,20 @@ class Router<T> {
       }
       final paramChild = node.paramChild;
       if (paramChild == null) return null;
-      (paramStack ??= _ParamStack(
-        state.maxParamDepth,
-      )).push(cursor, segmentEnd);
+      if (smallParams) {
+        if (paramCount == 0) {
+          p0Start = cursor;
+          p0End = segmentEnd;
+        } else {
+          p1Start = cursor;
+          p1End = segmentEnd;
+        }
+        paramCount += 1;
+      } else {
+        (paramStack ??= _ParamStack(
+          state.maxParamDepth,
+        )).push(cursor, segmentEnd);
+      }
       node = paramChild;
       cursor = nextCursor;
     }
