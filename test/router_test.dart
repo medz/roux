@@ -1233,6 +1233,13 @@ void main() {
       expect(router.match('/a//b'), isNull);
     });
 
+    test('returns null for invalid lookup path with repeated patterns', () {
+      final local = Router<String>(routes: {'/files/:path*': 'file'});
+
+      expect(local.match('/files//readme'), isNull);
+      expect(local.matchAll('/files//readme'), isEmpty);
+    });
+
     test(
       'returns null for invalid URL encoding when decodePath is enabled',
       () {
