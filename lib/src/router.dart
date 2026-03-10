@@ -200,11 +200,9 @@ class RouteSet<T> {
     }
 
     final normalized = trimTrailingSlash(patternPath);
-    if (simple.add(normalized, data, duplicatePolicy, registrationOrder)) {
-      _refreshMatchMode();
-      return;
+    if (!simple.add(normalized, data, duplicatePolicy, registrationOrder)) {
+      patterns.add(normalized, data, duplicatePolicy, registrationOrder);
     }
-    patterns.add(normalized, data, duplicatePolicy, registrationOrder);
     _refreshMatchMode();
   }
 

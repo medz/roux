@@ -1025,10 +1025,8 @@ class CompactParamsMap extends MapBase<String, String> {
   /// Creates a compact map containing two entries.
   CompactParamsMap.two(this._k0, this._v0, this._k1, this._v1) : _count = 2;
 
-  final String _k0;
-  final String _v0;
-  final String? _k1;
-  final String? _v1;
+  final String _k0, _v0;
+  final String? _k1, _v1;
   final int _count;
   Map<String, String>? _backing;
 
@@ -1073,10 +1071,8 @@ class CompactParamsMap extends MapBase<String, String> {
 class _CompactEntries extends IterableBase<MapEntry<String, String>> {
   _CompactEntries(this._k0, this._v0, this._k1, this._v1, this._count);
 
-  final String _k0;
-  final String _v0;
-  final String? _k1;
-  final String? _v1;
+  final String _k0, _v0;
+  final String? _k1, _v1;
   final int _count;
 
   @override
@@ -1087,10 +1083,8 @@ class _CompactEntries extends IterableBase<MapEntry<String, String>> {
 class _CompactEntriesIterator implements Iterator<MapEntry<String, String>> {
   _CompactEntriesIterator(this._k0, this._v0, this._k1, this._v1, this._count);
 
-  final String _k0;
-  final String _v0;
-  final String? _k1;
-  final String? _v1;
+  final String _k0, _v0;
+  final String? _k1, _v1;
   final int _count;
   int _index = -1;
   MapEntry<String, String>? _current;
