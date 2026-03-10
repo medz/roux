@@ -39,7 +39,7 @@ class RouteEntry<T> {
   final int registrationOrder;
   final int sortKey;
   RouteEntry<T>? next;
-  late final noParamsMatch = RouteMatch<T>(data);
+  late final noParamsMatch = RouteMatch(data);
 
   RouteEntry(
     this.data,
@@ -99,7 +99,7 @@ RouteEntry<T> newRoute<T>(
   int registrationOrder,
 ) {
   validateCaptureNames(paramNames, wildcardName, pattern);
-  return RouteEntry<T>(
+  return RouteEntry(
     data,
     paramNames,
     wildcardName,

@@ -8,7 +8,7 @@ class PatternEngine<T> {
   bool hasRoutes = false;
   final List<List<CompiledSlot<T>>> buckets = List.generate(
     4,
-    (_) => <CompiledSlot<T>>[],
+    (_) => [],
     growable: false,
   );
 
@@ -124,7 +124,7 @@ RouteMatch<T> materializeCompiled<T>(
     final value = match.group(groupIndex);
     if (value != null) params[route.paramNames[i]] = value;
   }
-  return RouteMatch<T>(route.data, params);
+  return RouteMatch(route.data, params);
 }
 
 class _PatternCompiler<T> {
@@ -243,7 +243,7 @@ class _PatternCompiler<T> {
   }
 
   CompiledSlot<T> finish(int bucket, int specificity, int constraintScore) =>
-      CompiledSlot<T>(
+      CompiledSlot(
         RegExp(regex.toString(), caseSensitive: caseSensitive),
         shape.toString(),
         bucket,

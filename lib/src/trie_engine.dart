@@ -176,7 +176,7 @@ class TrieEngine<T> {
           if (node.paramChild != null || node.wildcardRoute != null) {
             hasBranchingChoices = true;
           }
-          final routes = node.leafRoutes ??= <String, RouteEntry<T>>{};
+          final routes = node.leafRoutes ??= {};
           routes[key] = mergeRouteEntries(
             routes[key],
             buildRoute(
@@ -258,10 +258,10 @@ class TrieEngine<T> {
   }
 
   void rebuildStraightPlan() {
-    straightSegments = <String?>[];
+    straightSegments = [];
     straightLeaves = [root.leafRoutes];
-    straightExacts = <RouteEntry<T>?>[root.exactRoute];
-    straightWildcards = <RouteEntry<T>?>[root.wildcardRoute];
+    straightExacts = [root.exactRoute];
+    straightWildcards = [root.wildcardRoute];
     var node = root;
     while (true) {
       final paramChild = node.paramChild;
@@ -356,12 +356,12 @@ class TrieEngine<T> {
       case 0:
         return leaf.noParamsMatch;
       case 1:
-        return RouteMatch<T>(
+        return RouteMatch(
           leaf.data,
           CompactParamsMap.one(straightParam0!, path.substring(p0Start, p0End)),
         );
       case 2:
-        return RouteMatch<T>(
+        return RouteMatch(
           leaf.data,
           CompactParamsMap.two(
             straightParam0!,
@@ -533,13 +533,13 @@ class TrieEngine<T> {
     final names = route.paramNames;
     if (names.isEmpty) return route.noParamsMatch;
     if (names.length == 1) {
-      return RouteMatch<T>(
+      return RouteMatch(
         route.data,
         CompactParamsMap.one(names[0], path.substring(p0Start, p0End)),
       );
     }
     if (names.length == 2) {
-      return RouteMatch<T>(
+      return RouteMatch(
         route.data,
         CompactParamsMap.two(
           names[0],
@@ -566,7 +566,7 @@ class TrieEngine<T> {
     ParamStack? paramValues,
     int wildcardStart,
   ) => route.wildcardName != null || route.paramNames.isNotEmpty
-      ? RouteMatch<T>(
+      ? RouteMatch(
           route.data,
           materializeParams(route, path, paramValues, wildcardStart),
         )
@@ -959,9 +959,8 @@ class _CompactEntriesIterator implements Iterator<MapEntry<String, String>> {
   int _index = -1;
 
   @override
-  MapEntry<String, String> get current => _index == 0
-      ? MapEntry<String, String>(_k0, _v0)
-      : MapEntry<String, String>(_k1!, _v1!);
+  MapEntry<String, String> get current =>
+      _index == 0 ? MapEntry(_k0, _v0) : MapEntry(_k1!, _v1!);
 
   @override
   bool moveNext() {

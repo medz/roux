@@ -16,7 +16,7 @@ class Router<T> {
        _caseSensitive = caseSensitive,
        _decodePath = decodePath,
        _normalizePath = normalizePath,
-       _sharedRoutes = RouteSet<T>(caseSensitive) {
+       _sharedRoutes = RouteSet(caseSensitive) {
     if (routes != null && routes.isNotEmpty) addAll(routes);
   }
 
@@ -140,8 +140,8 @@ class Router<T> {
 
 class RouteSet<T> {
   RouteSet(bool caseSensitive)
-    : simple = TrieEngine<T>(caseSensitive),
-      patterns = PatternEngine<T>(caseSensitive);
+    : simple = TrieEngine(caseSensitive),
+      patterns = PatternEngine(caseSensitive);
 
   static const int _hybridMode = 0, _simpleMode = 1, _straightMode = 2;
 
@@ -244,11 +244,11 @@ class MethodTable<T> {
     final normalized = canonicalizeMethod(method);
     final commonIndex = commonMethodIndex(normalized);
     if (commonIndex >= 0) {
-      return commonRoutes[commonIndex] ??= RouteSet<T>(caseSensitive);
+      return commonRoutes[commonIndex] ??= RouteSet(caseSensitive);
     }
     return (extraRoutes ??= {}).putIfAbsent(
       normalized,
-      () => RouteSet<T>(caseSensitive),
+      () => RouteSet(caseSensitive),
     );
   }
 
