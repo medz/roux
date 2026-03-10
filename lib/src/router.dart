@@ -246,7 +246,7 @@ class MethodTable<T> {
     if (commonIndex >= 0) {
       return commonRoutes[commonIndex] ??= RouteSet<T>(caseSensitive);
     }
-    return (extraRoutes ??= <String, RouteSet<T>>{}).putIfAbsent(
+    return (extraRoutes ??= {}).putIfAbsent(
       normalized,
       () => RouteSet<T>(caseSensitive),
     );

@@ -15,11 +15,10 @@ class TrieEngine<T> {
   RouteEntry<T>? globalFallback;
   int maxParamDepth = 0;
   bool straightDirty = false;
-  List<String?> straightSegments = <String?>[];
-  List<Map<String, RouteEntry<T>>?> straightLeaves =
-      <Map<String, RouteEntry<T>>?>[];
-  List<RouteEntry<T>?> straightExacts = <RouteEntry<T>?>[];
-  List<RouteEntry<T>?> straightWildcards = <RouteEntry<T>?>[];
+  List<String?> straightSegments = [];
+  List<Map<String, RouteEntry<T>>?> straightLeaves = [];
+  List<RouteEntry<T>?> straightExacts = [];
+  List<RouteEntry<T>?> straightWildcards = [];
   Map<String, RouteEntry<T>>? straightTailLeaves;
   int straightParamCount = 0;
   String? straightParam0;
@@ -260,7 +259,7 @@ class TrieEngine<T> {
 
   void rebuildStraightPlan() {
     straightSegments = <String?>[];
-    straightLeaves = <Map<String, RouteEntry<T>>?>[root.leafRoutes];
+    straightLeaves = [root.leafRoutes];
     straightExacts = <RouteEntry<T>?>[root.exactRoute];
     straightWildcards = <RouteEntry<T>?>[root.wildcardRoute];
     var node = root;
@@ -903,8 +902,8 @@ class CompactParamsMap extends MapBase<String, String> {
   late final _inlineEntries = _CompactEntries(_k0, _v0, _k1, _v1);
 
   Map<String, String> _promote() => switch (_count) {
-    1 => _backing ??= <String, String>{_k0: _v0},
-    _ => _backing ??= <String, String>{_k0: _v0, _k1!: _v1!},
+    1 => _backing ??= {_k0: _v0},
+    _ => _backing ??= {_k0: _v0, _k1!: _v1!},
   };
 
   @override
@@ -912,7 +911,7 @@ class CompactParamsMap extends MapBase<String, String> {
 
   @override
   Iterable<String> get keys =>
-      _backing?.keys ?? (_count == 1 ? <String>[_k0] : <String>[_k0, _k1!]);
+      _backing?.keys ?? (_count == 1 ? [_k0] : [_k0, _k1!]);
 
   @override
   String? operator [](Object? key) {
@@ -927,7 +926,7 @@ class CompactParamsMap extends MapBase<String, String> {
   void operator []=(String key, String value) => _promote()[key] = value;
 
   @override
-  void clear() => _backing = <String, String>{};
+  void clear() => _backing = {};
 
   @override
   String? remove(Object? key) => _promote().remove(key);

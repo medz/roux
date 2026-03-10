@@ -6,12 +6,11 @@ class PatternEngine<T> {
 
   final bool caseSensitive;
   bool hasRoutes = false;
-  final List<List<CompiledSlot<T>>> buckets =
-      List<List<CompiledSlot<T>>>.generate(
-        4,
-        (_) => <CompiledSlot<T>>[],
-        growable: false,
-      );
+  final List<List<CompiledSlot<T>>> buckets = List.generate(
+    4,
+    (_) => <CompiledSlot<T>>[],
+    growable: false,
+  );
 
   void add(
     String pattern,
