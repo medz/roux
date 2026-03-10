@@ -9,9 +9,8 @@ int classifyPathSegment(String path, int segmentStart, int segmentEnd) {
   if (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) return 1;
   if (segmentLength == 2 &&
       path.codeUnitAt(segmentStart) == 46 &&
-      path.codeUnitAt(segmentStart + 1) == 46) {
+      path.codeUnitAt(segmentStart + 1) == 46)
     return 2;
-  }
   return -1;
 }
 
@@ -22,14 +21,10 @@ String? normalizeExactRoutePath(String path) {
   var outStart = path.length;
   var skip = 0;
   var read = path.length - 1;
-  while (read >= 0 && path.codeUnitAt(read) == slashCode) {
-    read -= 1;
-  }
+  while (read >= 0 && path.codeUnitAt(read) == slashCode) read -= 1;
   while (read >= 0) {
     final segmentEnd = read + 1;
-    while (read >= 0 && path.codeUnitAt(read) != slashCode) {
-      read -= 1;
-    }
+    while (read >= 0 && path.codeUnitAt(read) != slashCode) read -= 1;
     final segmentStart = read + 1;
     switch (classifyPathSegment(path, segmentStart, segmentEnd)) {
       case 0:
@@ -62,14 +57,10 @@ int normalizePathSpans(String path, Uint32List spans) {
   var length = 0;
   var skip = 0;
   var read = path.length - 1;
-  while (read >= 0 && path.codeUnitAt(read) == slashCode) {
-    read -= 1;
-  }
+  while (read >= 0 && path.codeUnitAt(read) == slashCode) read -= 1;
   while (read >= 0) {
     final segmentEnd = read + 1;
-    while (read >= 0 && path.codeUnitAt(read) != slashCode) {
-      read -= 1;
-    }
+    while (read >= 0 && path.codeUnitAt(read) != slashCode) read -= 1;
     final segmentStart = read + 1;
     switch (classifyPathSegment(path, segmentStart, segmentEnd)) {
       case 0:
@@ -100,9 +91,8 @@ String? normalizeRoutePath(String path) {
   var segmentStart = 1;
   for (var i = 1; i < path.length; i++) {
     if (path.codeUnitAt(i) != slashCode) continue;
-    if (classifyPathSegment(path, segmentStart, i) >= 0) {
+    if (classifyPathSegment(path, segmentStart, i) >= 0)
       return normalizeExactRoutePath(path);
-    }
     segmentStart = i + 1;
   }
   switch (classifyPathSegment(path, segmentStart, path.length)) {
@@ -128,18 +118,14 @@ String canonicalizeRoutePath(String path, bool caseSensitive) =>
 
 int findSegmentEnd(String path, int start) {
   var i = start;
-  while (i < path.length && path.codeUnitAt(i) != slashCode) {
-    i += 1;
-  }
+  while (i < path.length && path.codeUnitAt(i) != slashCode) i += 1;
   return i;
 }
 
 bool containsEmptySegments(String path) {
   for (var i = 1; i < path.length; i++) {
-    if (path.codeUnitAt(i - 1) == slashCode &&
-        path.codeUnitAt(i) == slashCode) {
+    if (path.codeUnitAt(i - 1) == slashCode && path.codeUnitAt(i) == slashCode)
       return true;
-    }
   }
   return false;
 }
