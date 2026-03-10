@@ -7,8 +7,8 @@ class TrieEngine<T> {
   TrieEngine(this.caseSensitive);
 
   final bool caseSensitive;
-  final Map<String, RouteEntry<T>> exactRoutes = <String, RouteEntry<T>>{};
-  final SimpleNode<T> root = SimpleNode<T>();
+  final exactRoutes = <String, RouteEntry<T>>{};
+  final root = SimpleNode<T>();
   bool hasBranchingChoices = false;
   bool hasWildcardRoutes = false;
   bool needsStrictPathValidation = false;

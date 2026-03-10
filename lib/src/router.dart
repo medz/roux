@@ -21,7 +21,7 @@ class Router<T> {
   }
 
   final RouteSet<T> _sharedRoutes;
-  final MethodTable<T> _methodRoutes = MethodTable<T>();
+  final _methodRoutes = MethodTable<T>();
   final DuplicatePolicy _duplicatePolicy;
   final bool _caseSensitive;
   final bool _decodePath;
@@ -237,7 +237,7 @@ class RouteSet<T> {
 }
 
 class MethodTable<T> {
-  final List<RouteSet<T>?> commonRoutes = List<RouteSet<T>?>.filled(7, null);
+  final commonRoutes = List<RouteSet<T>?>.filled(7, null);
   Map<String, RouteSet<T>>? extraRoutes;
 
   RouteSet<T> forWriteMethod(String method, bool caseSensitive) {
