@@ -206,9 +206,8 @@ class _PatternCompiler<T> {
             quantifier == plusCode ||
             quantifier == asteriskCode) {
           final name = pattern.substring(cursor + 1, segmentEnd - 1);
-          if (!isValidParamName(name)) {
+          if (!isValidParamName(name))
             throw FormatException('Invalid parameter name in route: $pattern');
-          }
           if (quantifier == questionCode) {
             writeCapture(
               regex,
@@ -457,18 +456,16 @@ class _PatternCompiler<T> {
     StringBuffer outRegex,
     StringBuffer outShape,
   ) {
-    if (lastWasParam) {
+    if (lastWasParam)
       throw FormatException('Unsupported segment syntax in route: $pattern');
-    }
     var nameEnd = cursor + 1;
     while (nameEnd < end &&
         isParamNameCode(pattern.codeUnitAt(nameEnd), nameEnd == cursor + 1)) {
       nameEnd += 1;
     }
     final name = pattern.substring(cursor + 1, nameEnd);
-    if (!isValidParamName(name)) {
+    if (!isValidParamName(name))
       throw FormatException('Invalid parameter name in route: $pattern');
-    }
     if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {
       final regexEnd = findRegexEnd(pattern, nameEnd, end);
       final body = pattern.substring(nameEnd + 1, regexEnd);
@@ -525,9 +522,8 @@ int countCapturingGroups(String body) {
     } else if (code == 92) {
       escaped = true;
     } else if (code == 40 &&
-        (i + 1 >= body.length || body.codeUnitAt(i + 1) != questionCode)) {
+        (i + 1 >= body.length || body.codeUnitAt(i + 1) != questionCode))
       count += 1;
-    }
   }
   return count;
 }
