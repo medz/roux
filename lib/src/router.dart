@@ -293,7 +293,7 @@ class MethodTable<T> {
   final commonRoutes = List<RouteSet<T>?>.filled(7, null);
 
   /// Lazily allocated route sets for uncommon HTTP methods.
-  Map<String, RouteSet<T>>? extraRoutes;
+  final extraRoutes = <String, RouteSet<T>>{};
 
   /// Returns the route set used when registering [method].
   RouteSet<T> forWriteMethod(String method, bool caseSensitive) {
@@ -302,10 +302,7 @@ class MethodTable<T> {
     if (commonIndex >= 0) {
       return commonRoutes[commonIndex] ??= RouteSet(caseSensitive);
     }
-    return (extraRoutes ??= {}).putIfAbsent(
-      normalized,
-      () => RouteSet(caseSensitive),
-    );
+    return extraRoutes.putIfAbsent(normalized, () => RouteSet(caseSensitive));
   }
 
   /// Returns the route set used when matching [method].
@@ -314,7 +311,7 @@ class MethodTable<T> {
     final commonIndex = commonMethodIndex(normalized);
     return commonIndex >= 0
         ? commonRoutes[commonIndex]
-        : extraRoutes?[normalized];
+        : extraRoutes[normalized];
   }
 }
 
