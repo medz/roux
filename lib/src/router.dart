@@ -325,5 +325,3 @@ String canonicalizeMethod(String method) {
   }
   return normalized.toUpperCase();
 }
-
-int upperAsciiCode(int code) => code >= 97 && code <= 122 ? code - 32 : code;
