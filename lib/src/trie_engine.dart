@@ -900,8 +900,7 @@ class CompactParamsMap extends MapBase<String, String> {
   final String? _v1;
   final int _count;
   Map<String, String>? _backing;
-  late final Iterable<MapEntry<String, String>> _inlineEntries =
-      _CompactEntries(_k0, _v0, _k1, _v1);
+  late final _inlineEntries = _CompactEntries(_k0, _v0, _k1, _v1);
 
   Map<String, String> _promote() => switch (_count) {
     1 => _backing ??= <String, String>{_k0: _v0},

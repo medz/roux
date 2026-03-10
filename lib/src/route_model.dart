@@ -39,7 +39,7 @@ class RouteEntry<T> {
   final int registrationOrder;
   final int sortKey;
   RouteEntry<T>? next;
-  late final RouteMatch<T> noParamsMatch = RouteMatch<T>(data);
+  late final noParamsMatch = RouteMatch<T>(data);
 
   RouteEntry(
     this.data,
@@ -66,8 +66,7 @@ class RouteEntry<T> {
 
 class MatchAccumulator<T> {
   final bool sortBySpecificity;
-  final List<(RouteMatch<T>, RouteEntry<T>, int)> items =
-      <(RouteMatch<T>, RouteEntry<T>, int)>[];
+  final items = <(RouteMatch<T>, RouteEntry<T>, int)>[];
 
   MatchAccumulator(this.sortBySpecificity);
 
