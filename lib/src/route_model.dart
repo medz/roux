@@ -174,12 +174,12 @@ RouteEntry<T> mergeRouteEntries<T>(
   if (existing == null) return replacement;
   final a = existing.paramNames;
   final b = replacement.paramNames;
-  if (a.length != b.length) throw FormatException('$dupShape$pattern');
+  if (a.length != b.length ||
+      existing.wildcardName != replacement.wildcardName) {
+    throw FormatException('$dupShape$pattern');
+  }
   for (var i = 0; i < a.length; i++) {
     if (a[i] != b[i]) throw FormatException('$dupShape$pattern');
-  }
-  if (existing.wildcardName != replacement.wildcardName) {
-    throw FormatException('$dupShape$pattern');
   }
   return switch (duplicatePolicy) {
     DuplicatePolicy.reject => throw FormatException('$rejectPrefix$pattern'),
