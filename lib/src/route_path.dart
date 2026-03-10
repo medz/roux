@@ -7,6 +7,32 @@ String? sanitizeRoutePath(String path) {
 
 String? normalizeRoutePath(String path) {
   if (!path.startsWith('/')) return null;
+  if (path.length == 1) return path;
+  var segmentStart = 1;
+  for (var i = 1; i < path.length; i++) {
+    if (path.codeUnitAt(i) != slashCode) continue;
+    final segmentLength = i - segmentStart;
+    if (segmentLength == 0 ||
+        (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) ||
+        (segmentLength == 2 &&
+            path.codeUnitAt(segmentStart) == 46 &&
+            path.codeUnitAt(segmentStart + 1) == 46)) {
+      return _normalizeRoutePathSlow(path);
+    }
+    segmentStart = i + 1;
+  }
+  final trailingLength = path.length - segmentStart;
+  if (trailingLength == 0) return path.substring(0, path.length - 1);
+  if ((trailingLength == 1 && path.codeUnitAt(segmentStart) == 46) ||
+      (trailingLength == 2 &&
+          path.codeUnitAt(segmentStart) == 46 &&
+          path.codeUnitAt(segmentStart + 1) == 46)) {
+    return _normalizeRoutePathSlow(path);
+  }
+  return path;
+}
+
+String? _normalizeRoutePathSlow(String path) {
   final segments = <String>[];
   var cursor = 1;
   while (cursor < path.length) {

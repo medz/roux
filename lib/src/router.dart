@@ -61,7 +61,7 @@ class Router<T> {
   }
 
   RouteMatch<T>? match(String path, {String? method}) {
-    if (!_hasSharedRoutes && !_decodePath && !_normalizePath) {
+    if (!_hasSharedRoutes && !_decodePath) {
       RouteSet<T>? routeSet;
       if (method != null) {
         final commonIndex = commonMethodIndex(method);
@@ -70,13 +70,17 @@ class Router<T> {
       }
       if (routeSet != null && !routeSet.needsStrictPathValidation) {
         if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
-        final last = path.length - 1;
-        if (path.length > 1 &&
-            path.codeUnitAt(last) == slashCode &&
-            path.codeUnitAt(last - 1) != slashCode) {
-          path = path.substring(0, last);
+        if (!_normalizePath) {
+          final last = path.length - 1;
+          if (path.length > 1 &&
+              path.codeUnitAt(last) == slashCode &&
+              path.codeUnitAt(last - 1) != slashCode) {
+            path = path.substring(0, last);
+          }
+          return routeSet.matchBest(path);
         }
-        return routeSet.matchBest(path);
+        final normalized = normalizeRoutePath(path);
+        return normalized == null ? null : routeSet.matchBest(normalized);
       }
     }
     final routeSet = method == null ? null : _methodRoutes.lookupMethod(method);
