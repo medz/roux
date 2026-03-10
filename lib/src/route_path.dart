@@ -34,12 +34,9 @@ String? normalizeRoutePath(String path) {
 }
 
 String trimTrailingSlash(String path) {
-  final last = path.length - 1;
-  if (path.length > 1 && path.codeUnitAt(last) == slashCode) {
-    if (path.codeUnitAt(last - 1) == slashCode) return path;
-    return path.substring(0, last);
-  }
-  return path;
+  return path.length > 1 && path.endsWith('/') && !path.endsWith('//')
+      ? path.substring(0, path.length - 1)
+      : path;
 }
 
 String canonicalizeRoutePath(String path, bool caseSensitive) =>
