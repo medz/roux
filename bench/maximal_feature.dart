@@ -34,6 +34,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
       switch (i & 3) {
         case 0:
           requests.add(Request('/./static/../static/$routeIndex/home/', false));
+          break;
         case 1:
           final dynamicIndex = (i >> 2) % dynamicCardinality;
           final dynamicRouteIndex = dynamicIndex % routeCount;
@@ -43,6 +44,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
               true,
             ),
           );
+          break;
         case 2:
           final dynamicIndex = (i >> 2) % dynamicCardinality;
           final dynamicRouteIndex = dynamicIndex % routeCount;
@@ -52,6 +54,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
               false,
             ),
           );
+          break;
         case 3:
           final dynamicIndex = (i >> 2) % dynamicCardinality;
           requests.add(
@@ -60,6 +63,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
               false,
             ),
           );
+          break;
       }
     }
 
@@ -73,6 +77,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
           router.add('/archive/$i/**', i, method: 'GET');
         }
         _rouxRouter = router;
+        break;
       case Target.relic:
         final router = relic.Router<int>();
         for (var i = 0; i < routeCount; i++) {
@@ -82,6 +87,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
           router.get('/archive/$i/**', i);
         }
         _relicRouter = router;
+        break;
     }
   }
 
@@ -101,6 +107,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
             consumeStringParams(match.params, _mix);
           }
         }
+        return;
       case Target.relic:
         final router = _relicRouter!;
         const method = relic.Method.get;
@@ -114,6 +121,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
             consumeSymbolParams(match.parameters, _mix);
           }
         }
+        return;
     }
   }
 

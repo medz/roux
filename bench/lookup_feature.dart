@@ -62,11 +62,14 @@ class LookupFeatureBenchmark extends SingleScenarioBenchmark {
           requests.add(
             Request('/./static/../static/$hotStaticIndex/home/', false),
           );
+          break;
         case LookupScenario.staticCold:
           final routeIndex = i % routeCount;
           requests.add(Request('/./static/../static/$routeIndex/home/', false));
+          break;
         case LookupScenario.dynamicHot:
           requests.add(Request(hotDynamicPath, true));
+          break;
         case LookupScenario.dynamicCold:
           final dynamicIndex = i % dynamicCardinality;
           final routeIndex = dynamicIndex % routeCount;
@@ -76,6 +79,7 @@ class LookupFeatureBenchmark extends SingleScenarioBenchmark {
               true,
             ),
           );
+          break;
       }
     }
 
@@ -87,6 +91,7 @@ class LookupFeatureBenchmark extends SingleScenarioBenchmark {
           router.add('/users/:id/orders/:orderId/item$i', i, method: 'GET');
         }
         _rouxRouter = router;
+        break;
       case Target.relic:
         final router = relic.Router<int>();
         for (var i = 0; i < routeCount; i++) {
@@ -94,6 +99,7 @@ class LookupFeatureBenchmark extends SingleScenarioBenchmark {
           router.get('/users/:id/orders/:orderId/item$i', i);
         }
         _relicRouter = router;
+        break;
     }
   }
 
@@ -113,6 +119,7 @@ class LookupFeatureBenchmark extends SingleScenarioBenchmark {
             consumeStringParams(match.params, _mix);
           }
         }
+        return;
       case Target.relic:
         final router = _relicRouter!;
         const method = relic.Method.get;
@@ -126,6 +133,7 @@ class LookupFeatureBenchmark extends SingleScenarioBenchmark {
             consumeSymbolParams(match.parameters, _mix);
           }
         }
+        return;
     }
   }
 

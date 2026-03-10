@@ -121,12 +121,16 @@ class RelicOfficialBenchmark extends SingleScenarioBenchmark {
     switch (scenario) {
       case RelicOfficialScenario.addStatic:
         _runAddStatic();
+        return;
       case RelicOfficialScenario.lookupStatic:
         _runLookupStatic();
+        return;
       case RelicOfficialScenario.addDynamic:
         _runAddDynamic();
+        return;
       case RelicOfficialScenario.lookupDynamic:
         _runLookupDynamic();
+        return;
     }
   }
 
@@ -138,12 +142,14 @@ class RelicOfficialBenchmark extends SingleScenarioBenchmark {
           router.add('/path$i', i, method: 'GET');
         }
         sink ^= router.hashCode;
+        return;
       case Target.relic:
         final router = relic.Router<int>();
         for (final i in _data.indexes) {
           router.get('/path$i', i);
         }
         sink ^= router.hashCode;
+        return;
     }
   }
 
@@ -158,6 +164,7 @@ class RelicOfficialBenchmark extends SingleScenarioBenchmark {
             'GET',
           ).data;
         }
+        return;
       case Target.relic:
         final router = _relicRouter!;
         const method = relic.Method.get;
@@ -167,6 +174,7 @@ class RelicOfficialBenchmark extends SingleScenarioBenchmark {
             route,
           ).value;
         }
+        return;
     }
   }
 
@@ -178,12 +186,14 @@ class RelicOfficialBenchmark extends SingleScenarioBenchmark {
           router.add('/users/:id/items/:itemId/profile$i', i, method: 'GET');
         }
         sink ^= router.hashCode;
+        return;
       case Target.relic:
         final router = relic.Router<int>();
         for (final i in _data.indexes) {
           router.get('/users/:id/items/:itemId/profile$i', i);
         }
         sink ^= router.hashCode;
+        return;
     }
   }
 
@@ -198,6 +208,7 @@ class RelicOfficialBenchmark extends SingleScenarioBenchmark {
             'GET',
           ).data;
         }
+        return;
       case Target.relic:
         final router = _relicRouter!;
         const method = relic.Method.get;
@@ -207,6 +218,7 @@ class RelicOfficialBenchmark extends SingleScenarioBenchmark {
             route,
           ).value;
         }
+        return;
     }
   }
 

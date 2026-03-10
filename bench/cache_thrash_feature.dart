@@ -41,12 +41,14 @@ class CacheThrashFeatureBenchmark extends SingleScenarioBenchmark {
           router.add('/users/:id/orders/:orderId/item$i', i, method: 'GET');
         }
         _rouxRouter = router;
+        break;
       case Target.relic:
         final router = relic.Router<int>();
         for (var i = 0; i < routeCount; i++) {
           router.get('/users/:id/orders/:orderId/item$i', i);
         }
         _relicRouter = router;
+        break;
     }
   }
 
@@ -64,6 +66,7 @@ class CacheThrashFeatureBenchmark extends SingleScenarioBenchmark {
           sink ^= match.data;
           consumeStringParams(match.params, _mix);
         }
+        return;
       case Target.relic:
         final router = _relicRouter!;
         const method = relic.Method.get;
@@ -75,6 +78,7 @@ class CacheThrashFeatureBenchmark extends SingleScenarioBenchmark {
           sink ^= match.value;
           consumeSymbolParams(match.parameters, _mix);
         }
+        return;
     }
   }
 

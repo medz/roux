@@ -43,22 +43,28 @@ class AddFeatureBenchmark extends SingleScenarioBenchmark {
           switch (scenario) {
             case AddScenario.staticRoutes:
               router.add('/static/$i/home', i, method: 'GET');
+              break;
             case AddScenario.dynamicRoutes:
               router.add('/users/:id/orders/:orderId/item$i', i, method: 'GET');
+              break;
           }
         }
         sink ^= router.hashCode;
+        return;
       case Target.relic:
         final router = relic.Router<int>();
         for (var i = 0; i < routeCount; i++) {
           switch (scenario) {
             case AddScenario.staticRoutes:
               router.get('/static/$i/home', i);
+              break;
             case AddScenario.dynamicRoutes:
               router.get('/users/:id/orders/:orderId/item$i', i);
+              break;
           }
         }
         sink ^= router.hashCode;
+        return;
     }
   }
 

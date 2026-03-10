@@ -49,6 +49,7 @@ class MinimalFeatureBenchmark extends SingleScenarioBenchmark {
           router.add('/users/:id/orders/:orderId/item$i', i, method: 'GET');
         }
         _rouxRouter = router;
+        break;
       case Target.relic:
         final router = relic.Router<int>();
         for (var i = 0; i < routeCount; i++) {
@@ -56,6 +57,7 @@ class MinimalFeatureBenchmark extends SingleScenarioBenchmark {
           router.get('/users/:id/orders/:orderId/item$i', i);
         }
         _relicRouter = router;
+        break;
     }
   }
 
@@ -75,6 +77,7 @@ class MinimalFeatureBenchmark extends SingleScenarioBenchmark {
             consumeStringParams(match.params, _mix);
           }
         }
+        return;
       case Target.relic:
         final router = _relicRouter!;
         const method = relic.Method.get;
@@ -88,6 +91,7 @@ class MinimalFeatureBenchmark extends SingleScenarioBenchmark {
             consumeSymbolParams(match.parameters, _mix);
           }
         }
+        return;
     }
   }
 
