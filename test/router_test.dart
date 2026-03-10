@@ -594,6 +594,14 @@ void main() {
       expect(router.match('/users/9', method: 'GeT')?.data, 'get');
     });
 
+    test('trims surrounding whitespace in method names', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'get', method: ' get ');
+
+      expect(router.match('/users/9', method: 'GET')?.data, 'get');
+      expect(router.match('/users/9', method: '  get ')?.data, 'get');
+    });
+
     test('enforces duplicate conflicts per method bucket', () {
       final router = Router<String>();
       router.add('/users/:id', 'get', method: 'GET');

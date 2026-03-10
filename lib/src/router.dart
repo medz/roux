@@ -65,21 +65,10 @@ class Router<T> {
   RouteMatch<T>? match(String path, {String? method}) {
     if (!_hasSharedRoutes && !_decodePath && !_normalizePath) {
       RouteSet<T>? routeSet;
-      switch (method) {
-        case 'GET':
-          routeSet = _methodRoutes.commonRoutes[0];
-        case 'POST':
-          routeSet = _methodRoutes.commonRoutes[1];
-        case 'PUT':
-          routeSet = _methodRoutes.commonRoutes[2];
-        case 'PATCH':
-          routeSet = _methodRoutes.commonRoutes[3];
-        case 'DELETE':
-          routeSet = _methodRoutes.commonRoutes[4];
-        case 'HEAD':
-          routeSet = _methodRoutes.commonRoutes[5];
-        case 'OPTIONS':
-          routeSet = _methodRoutes.commonRoutes[6];
+      if (method != null) {
+        final commonIndex = commonMethodIndex(method);
+        if (commonIndex >= 0)
+          routeSet = _methodRoutes.commonRoutes[commonIndex];
       }
       if (routeSet != null && !routeSet.needsStrictPathValidation) {
         if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
@@ -252,47 +241,84 @@ class MethodTable<T> {
   Map<String, RouteSet<T>>? extraRoutes;
 
   RouteSet<T> forWriteMethod(String method, bool caseSensitive) {
-    final commonIndex = commonMethodIndex(method);
+    final normalized = canonicalizeMethod(method);
+    final commonIndex = commonMethodIndex(normalized);
     if (commonIndex >= 0) {
       return commonRoutes[commonIndex] ??= RouteSet<T>(caseSensitive);
     }
-    final (index, normalized) = classifyMethod(method);
-    if (index >= 0) {
-      return commonRoutes[index] ??= RouteSet<T>(caseSensitive);
-    }
     return (extraRoutes ??= <String, RouteSet<T>>{}).putIfAbsent(
-      normalized!,
+      normalized,
       () => RouteSet<T>(caseSensitive),
     );
   }
 
   RouteSet<T>? lookupMethod(String method) {
-    final commonIndex = commonMethodIndex(method);
-    if (commonIndex >= 0) return commonRoutes[commonIndex];
-    final (index, normalized) = classifyMethod(method);
-    return index >= 0 ? commonRoutes[index] : extraRoutes?[normalized!];
+    final normalized = canonicalizeMethod(method);
+    final commonIndex = commonMethodIndex(normalized);
+    return commonIndex >= 0
+        ? commonRoutes[commonIndex]
+        : extraRoutes?[normalized];
   }
 }
 
 int commonMethodIndex(String method) {
   switch (method.length) {
     case 3:
-      if (method == 'GET') return 0;
-      if (method == 'PUT') return 2;
+      if (method.codeUnitAt(0) == 71 &&
+          method.codeUnitAt(1) == 69 &&
+          method.codeUnitAt(2) == 84) {
+        return 0;
+      }
+      if (method.codeUnitAt(0) == 80 &&
+          method.codeUnitAt(1) == 85 &&
+          method.codeUnitAt(2) == 84) {
+        return 2;
+      }
     case 4:
-      if (method == 'POST') return 1;
-      if (method == 'HEAD') return 5;
+      if (method.codeUnitAt(0) == 80 &&
+          method.codeUnitAt(1) == 79 &&
+          method.codeUnitAt(2) == 83 &&
+          method.codeUnitAt(3) == 84) {
+        return 1;
+      }
+      if (method.codeUnitAt(0) == 72 &&
+          method.codeUnitAt(1) == 69 &&
+          method.codeUnitAt(2) == 65 &&
+          method.codeUnitAt(3) == 68) {
+        return 5;
+      }
     case 5:
-      if (method == 'PATCH') return 3;
+      if (method.codeUnitAt(0) == 80 &&
+          method.codeUnitAt(1) == 65 &&
+          method.codeUnitAt(2) == 84 &&
+          method.codeUnitAt(3) == 67 &&
+          method.codeUnitAt(4) == 72) {
+        return 3;
+      }
     case 6:
-      if (method == 'DELETE') return 4;
+      if (method.codeUnitAt(0) == 68 &&
+          method.codeUnitAt(1) == 69 &&
+          method.codeUnitAt(2) == 76 &&
+          method.codeUnitAt(3) == 69 &&
+          method.codeUnitAt(4) == 84 &&
+          method.codeUnitAt(5) == 69) {
+        return 4;
+      }
     case 7:
-      if (method == 'OPTIONS') return 6;
+      if (method.codeUnitAt(0) == 79 &&
+          method.codeUnitAt(1) == 80 &&
+          method.codeUnitAt(2) == 84 &&
+          method.codeUnitAt(3) == 73 &&
+          method.codeUnitAt(4) == 79 &&
+          method.codeUnitAt(5) == 78 &&
+          method.codeUnitAt(6) == 83) {
+        return 6;
+      }
   }
   return -1;
 }
 
-(int, String?) classifyMethod(String method) {
+String canonicalizeMethod(String method) {
   var start = 0;
   var end = method.length;
   while (start < end && method.codeUnitAt(start) <= 32) {
@@ -304,55 +330,22 @@ int commonMethodIndex(String method) {
   if (start == end) {
     throw ArgumentError.value(method, 'method', 'Method must not be empty.');
   }
-  final length = end - start;
-  if (length <= 7) {
-    final a = upperAsciiCode(method.codeUnitAt(start));
-    switch (length) {
-      case 3:
-        final b = upperAsciiCode(method.codeUnitAt(start + 1));
-        final c = upperAsciiCode(method.codeUnitAt(start + 2));
-        if (a == 71 && b == 69 && c == 84) return (0, null);
-        if (a == 80 && b == 85 && c == 84) return (2, null);
-      case 4:
-        final b = upperAsciiCode(method.codeUnitAt(start + 1));
-        final c = upperAsciiCode(method.codeUnitAt(start + 2));
-        final d = upperAsciiCode(method.codeUnitAt(start + 3));
-        if (a == 80 && b == 79 && c == 83 && d == 84) return (1, null);
-        if (a == 72 && b == 69 && c == 65 && d == 68) return (5, null);
-      case 5:
-        if (a == 80 &&
-            upperAsciiCode(method.codeUnitAt(start + 1)) == 65 &&
-            upperAsciiCode(method.codeUnitAt(start + 2)) == 84 &&
-            upperAsciiCode(method.codeUnitAt(start + 3)) == 67 &&
-            upperAsciiCode(method.codeUnitAt(start + 4)) == 72) {
-          return (3, null);
-        }
-      case 6:
-        if (a == 68 &&
-            upperAsciiCode(method.codeUnitAt(start + 1)) == 69 &&
-            upperAsciiCode(method.codeUnitAt(start + 2)) == 76 &&
-            upperAsciiCode(method.codeUnitAt(start + 3)) == 69 &&
-            upperAsciiCode(method.codeUnitAt(start + 4)) == 84 &&
-            upperAsciiCode(method.codeUnitAt(start + 5)) == 69) {
-          return (4, null);
-        }
-      case 7:
-        if (a == 79 &&
-            upperAsciiCode(method.codeUnitAt(start + 1)) == 80 &&
-            upperAsciiCode(method.codeUnitAt(start + 2)) == 84 &&
-            upperAsciiCode(method.codeUnitAt(start + 3)) == 73 &&
-            upperAsciiCode(method.codeUnitAt(start + 4)) == 79 &&
-            upperAsciiCode(method.codeUnitAt(start + 5)) == 78 &&
-            upperAsciiCode(method.codeUnitAt(start + 6)) == 83) {
-          return (6, null);
-        }
+  if (start == 0 && end == method.length) {
+    var allUpper = true;
+    for (var i = 0; i < end; i++) {
+      final code = method.codeUnitAt(i);
+      if (code >= 97 && code <= 122) {
+        allUpper = false;
+        break;
+      }
     }
+    if (allUpper) return method;
   }
   final buffer = StringBuffer();
   for (var i = start; i < end; i++) {
     buffer.writeCharCode(upperAsciiCode(method.codeUnitAt(i)));
   }
-  return (-1, buffer.toString());
+  return buffer.toString();
 }
 
 int upperAsciiCode(int code) => code >= 97 && code <= 122 ? code - 32 : code;
