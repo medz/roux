@@ -48,18 +48,17 @@ class PatternEngine<T> {
   ) {
     for (final current in buckets[bucket]) {
       final match = current.regex.firstMatch(path);
-      if (match != null) {
-        for (
-          RouteEntry<T>? route = current.route;
-          route != null;
-          route = route.next
-        ) {
-          output.add(
-            materializeCompiled(route, current.groupIndexes, match),
-            route,
-            methodRank,
-          );
-        }
+      if (match == null) continue;
+      for (
+        RouteEntry<T>? route = current.route;
+        route != null;
+        route = route.next
+      ) {
+        output.add(
+          materializeCompiled(route, current.groupIndexes, match),
+          route,
+          methodRank,
+        );
       }
     }
   }
@@ -141,8 +140,7 @@ class _PatternCompiler<T> {
   final int registrationOrder;
   final regex = StringBuffer('^');
   final shape = StringBuffer('^');
-  final paramNames = <String>[];
-  final groupIndexes = <int>[];
+  final paramNames = <String>[], groupIndexes = <int>[];
   var groupCount = 0;
   var unnamedCount = 0;
   var staticChars = 0;
@@ -156,7 +154,23 @@ class _PatternCompiler<T> {
       writeGrouped(0, pattern.length, false, regex, shape);
       regex.write(r'$');
       shape.write(r'$');
-      return finish(compiledBucketDeferred, structuredDynamicSpecificity, 1);
+      return CompiledSlot(
+        RegExp(regex.toString(), caseSensitive: caseSensitive),
+        shape.toString(),
+        compiledBucketDeferred,
+        groupIndexes,
+        newRoute(
+          data,
+          paramNames,
+          null,
+          pattern,
+          segmentCount(pattern),
+          structuredDynamicSpecificity,
+          staticChars,
+          1,
+          registrationOrder,
+        ),
+      );
     }
     for (
       var cursor = pattern.length == 1 ? pattern.length : 1;
@@ -239,27 +253,24 @@ class _PatternCompiler<T> {
     regex.write(r'$');
     shape.write(r'$');
     if (!needsCompiled) return null;
-    return finish(bucket, specificity, constraintScore);
+    return CompiledSlot(
+      RegExp(regex.toString(), caseSensitive: caseSensitive),
+      shape.toString(),
+      bucket,
+      groupIndexes,
+      newRoute(
+        data,
+        paramNames,
+        null,
+        pattern,
+        segmentCount(pattern),
+        specificity,
+        staticChars,
+        constraintScore,
+        registrationOrder,
+      ),
+    );
   }
-
-  CompiledSlot<T> finish(int bucket, int specificity, int constraintScore) =>
-      CompiledSlot(
-        RegExp(regex.toString(), caseSensitive: caseSensitive),
-        shape.toString(),
-        bucket,
-        groupIndexes,
-        newRoute(
-          data,
-          paramNames,
-          null,
-          pattern,
-          segmentCount(pattern),
-          specificity,
-          staticChars,
-          constraintScore,
-          registrationOrder,
-        ),
-      );
 
   void writeCapture(
     StringBuffer outRegex,

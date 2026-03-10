@@ -21,9 +21,7 @@ class Router<T> {
   final RouteSet<T> _sharedRoutes;
   final _methodRoutes = MethodTable<T>();
   final DuplicatePolicy _duplicatePolicy;
-  final bool _caseSensitive;
-  final bool _decodePath;
-  final bool _normalizePath;
+  final bool _caseSensitive, _decodePath, _normalizePath;
   bool _hasSharedRoutes = false;
   int _nextRegistrationOrder = 0;
 
@@ -138,7 +136,9 @@ class Router<T> {
     }
     final normalized = _normalizePath
         ? normalizeRoutePath(path)
-        : sanitizeRoutePath(path);
+        : path.startsWith('/')
+        ? trimTrailingSlash(path)
+        : null;
     if (normalized == null || !strict) return normalized;
     return containsEmptySegments(normalized) ? null : normalized;
   }
@@ -217,9 +217,13 @@ class RouteSet<T> {
             : simple.materialize(simple.globalFallback!, normalized, null, 1));
   }
 
-  RouteMatch<T>? matchBestNormalized(String path) => canMatchExactNormalized
-      ? simple.matchExactNormalized(path)
-      : simple.matchStraightNormalized(path);
+  RouteMatch<T>? matchBestNormalized(String path) {
+    if (!canMatchExactNormalized) return simple.matchStraightNormalized(path);
+    final normalized = normalizeRoutePath(path);
+    return normalized == null
+        ? null
+        : simple.exactRoutes[normalized]?.noParamsMatch;
+  }
 
   void _refreshMatchMode() {
     _matchMode = patterns.hasRoutes || simple.globalFallback != null
@@ -247,7 +251,13 @@ class RouteSet<T> {
     simple.collect(normalized, methodRank, output);
     patterns.collectBucket(compiledBucketHigh, normalized, methodRank, output);
     patterns.collectBucket(compiledBucketLate, normalized, methodRank, output);
-    simple.collectExact(normalized, methodRank, output);
+    if (simple.exactRoutes.isNotEmpty) {
+      final exact = simple
+          .exactRoutes[canonicalizeRoutePath(normalized, simple.caseSensitive)];
+      if (exact != null) {
+        simple.collectSlot(exact, normalized, null, 0, methodRank, output);
+      }
+    }
     patterns.collectBucket(
       compiledBucketDeferred,
       normalized,

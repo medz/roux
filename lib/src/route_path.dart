@@ -15,11 +15,6 @@ int classifyPathSegment(String path, int segmentStart, int segmentEnd) {
   return -1;
 }
 
-String? sanitizeRoutePath(String path) {
-  if (!path.startsWith('/')) return null;
-  return trimTrailingSlash(path);
-}
-
 String? normalizeExactRoutePath(String path) {
   if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
   if (path.length == 1) return path;
@@ -123,11 +118,10 @@ String? normalizeRoutePath(String path) {
 Uint32List ensureSpanBuffer(Uint32List buffer, int pathLength) =>
     buffer.length >= pathLength * 2 ? buffer : Uint32List(pathLength * 2);
 
-String trimTrailingSlash(String path) {
-  return path.length > 1 && path.endsWith('/') && !path.endsWith('//')
-      ? path.substring(0, path.length - 1)
-      : path;
-}
+String trimTrailingSlash(String path) =>
+    path.length > 1 && path.endsWith('/') && !path.endsWith('//')
+    ? path.substring(0, path.length - 1)
+    : path;
 
 String canonicalizeRoutePath(String path, bool caseSensitive) =>
     caseSensitive ? path : path.toLowerCase();

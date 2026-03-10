@@ -8,22 +8,19 @@ class TrieEngine<T> {
   TrieEngine(this.caseSensitive);
 
   final bool caseSensitive;
-  final exactRoutes = <String, RouteEntry<T>>{};
-  final root = SimpleNode<T>();
-  bool hasBranchingChoices = false;
-  bool hasWildcardRoutes = false;
-  bool needsStrictPathValidation = false;
+  final exactRoutes = <String, RouteEntry<T>>{}, root = SimpleNode<T>();
+  bool hasBranchingChoices = false,
+      hasWildcardRoutes = false,
+      needsStrictPathValidation = false;
   RouteEntry<T>? globalFallback;
   int maxParamDepth = 0;
   bool straightDirty = false;
   List<String?> straightSegments = [];
   List<Map<String, RouteEntry<T>>?> straightLeaves = [];
-  List<RouteEntry<T>?> straightExacts = [];
-  List<RouteEntry<T>?> straightWildcards = [];
+  List<RouteEntry<T>?> straightExacts = [], straightWildcards = [];
   Map<String, RouteEntry<T>>? straightTailLeaves;
   int straightParamCount = 0;
-  String? straightParam0;
-  String? straightParam1;
+  String? straightParam0, straightParam1;
   var _normalizedSpans = Uint32List(0);
 
   bool add(
@@ -90,6 +87,12 @@ class TrieEngine<T> {
       constraintScore,
       registrationOrder,
     );
+    RouteEntry<T> mergeSlot(
+      RouteEntry<T>? existing,
+      RouteEntry<T> route,
+      String rejectPrefix,
+    ) =>
+        mergeRouteEntries(existing, route, path, duplicatePolicy, rejectPrefix);
 
     void finishSimple() {
       if (paramCount > maxParamDepth) maxParamDepth = paramCount;
@@ -136,20 +139,12 @@ class TrieEngine<T> {
         if (cursor == 1 && paramCount == 0) {
           hasWildcardRoutes = true;
           needsStrictPathValidation = true;
-          globalFallback = mergeRouteEntries(
-            globalFallback,
-            route,
-            path,
-            duplicatePolicy,
-            dupFallback,
-          );
+          globalFallback = mergeSlot(globalFallback, route, dupFallback);
         } else {
           hasWildcardRoutes = true;
-          node.wildcardRoute = mergeRouteEntries(
+          node.wildcardRoute = mergeSlot(
             node.wildcardRoute,
             route,
-            path,
-            duplicatePolicy,
             dupWildcard,
           );
         }
@@ -179,7 +174,7 @@ class TrieEngine<T> {
             hasBranchingChoices = true;
           }
           final routes = node.leafRoutes ??= {};
-          routes[key] = mergeRouteEntries(
+          routes[key] = mergeSlot(
             routes[key],
             buildRoute(
               null,
@@ -188,8 +183,6 @@ class TrieEngine<T> {
               staticChars + segmentEnd - cursor,
               0,
             ),
-            path,
-            duplicatePolicy,
             dupShape,
           );
           finishSimple();
@@ -204,7 +197,7 @@ class TrieEngine<T> {
       cursor = segmentEnd + 1;
     }
 
-    node.exactRoute = mergeRouteEntries(
+    node.exactRoute = mergeSlot(
       node.exactRoute,
       buildRoute(
         null,
@@ -213,8 +206,6 @@ class TrieEngine<T> {
         staticChars,
         0,
       ),
-      path,
-      duplicatePolicy,
       dupShape,
     );
     finishSimple();
@@ -252,18 +243,6 @@ class TrieEngine<T> {
   RouteMatch<T>? matchExact(String path) => exactRoutes.isEmpty
       ? null
       : exactRoutes[canonicalizeRoutePath(path, caseSensitive)]?.noParamsMatch;
-
-  RouteMatch<T>? matchExactNormalized(String path) {
-    if (exactRoutes.isEmpty) return null;
-    final normalized = normalizeRoutePath(path);
-    return normalized == null ? null : exactRoutes[normalized]?.noParamsMatch;
-  }
-
-  void collectExact(String path, int methodRank, MatchAccumulator<T> output) {
-    if (exactRoutes.isEmpty) return;
-    final exact = exactRoutes[canonicalizeRoutePath(path, caseSensitive)];
-    if (exact != null) collectSlot(exact, path, null, 0, methodRank, output);
-  }
 
   void rebuildStraightPlan() {
     straightSegments = [];
@@ -313,11 +292,15 @@ class TrieEngine<T> {
     straightParam1 = straightParamCount > 1 ? sample.paramNames[1] : null;
   }
 
-  RouteMatch<T>? matchStraight(String path) {
+  void ensureStraightPlan() {
     if (straightDirty || straightExacts.isEmpty) {
       rebuildStraightPlan();
       straightDirty = false;
     }
+  }
+
+  RouteMatch<T>? matchStraight(String path) {
+    ensureStraightPlan();
     if (caseSensitive && !hasWildcardRoutes && maxParamDepth <= 2) {
       final tailLeaves = straightTailLeaves;
       if (tailLeaves != null) {
@@ -329,10 +312,7 @@ class TrieEngine<T> {
   }
 
   bool get canMatchStraightNormalized {
-    if (straightDirty || straightExacts.isEmpty) {
-      rebuildStraightPlan();
-      straightDirty = false;
-    }
+    ensureStraightPlan();
     return caseSensitive &&
         !hasWildcardRoutes &&
         maxParamDepth <= 2 &&
@@ -906,14 +886,11 @@ class TrieEngine<T> {
 
 class SimpleNode<T> {
   final String? staticKey;
-  SimpleNode<T>? staticChild;
-  SimpleNode<T>? staticNext;
-  SimpleNode<T>? paramChild;
+  SimpleNode<T>? staticChild, staticNext, paramChild;
   Map<String, SimpleNode<T>>? staticMap;
   Map<String, RouteEntry<T>>? leafRoutes;
   int staticCount = 0;
-  RouteEntry<T>? exactRoute;
-  RouteEntry<T>? wildcardRoute;
+  RouteEntry<T>? exactRoute, wildcardRoute;
 
   SimpleNode([this.staticKey]);
 
@@ -1035,7 +1012,6 @@ class ParamStack {
   void truncate(int value) => length = value;
 
   int startAt(int index) => values[index * 2];
-
   int endAt(int index) => values[index * 2 + 1];
 }
 
