@@ -23,6 +23,7 @@ class TrieEngine<T> {
   int straightParamCount = 0;
   String? straightParam0;
   String? straightParam1;
+  final _normalizedSpans = <int>[];
 
   bool add(
     String path,
@@ -320,6 +321,80 @@ class TrieEngine<T> {
     return matchStraightGeneric(path);
   }
 
+  bool get canMatchStraightNormalized {
+    if (straightDirty || straightExacts.isEmpty) {
+      rebuildStraightPlan();
+      straightDirty = false;
+    }
+    return caseSensitive &&
+        !hasWildcardRoutes &&
+        maxParamDepth <= 2 &&
+        straightTailLeaves != null;
+  }
+
+  RouteMatch<T>? matchStraightNormalized(String path) {
+    if (!canMatchStraightNormalized) return null;
+    final tailLeaves = straightTailLeaves!;
+    final segments = straightSegments;
+    var cursor = 1;
+    var depth = 0;
+    var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
+
+    while (depth < segments.length) {
+      if (cursor >= path.length) return null;
+      final segmentEnd = findSegmentEnd(path, cursor);
+      if (segmentEnd == cursor)
+        return matchStraightTailLeafDirtyNormalized(path);
+      final segmentLength = segmentEnd - cursor;
+      if ((segmentLength == 1 && path.codeUnitAt(cursor) == 46) ||
+          (segmentLength == 2 &&
+              path.codeUnitAt(cursor) == 46 &&
+              path.codeUnitAt(cursor + 1) == 46)) {
+        return matchStraightTailLeafDirtyNormalized(path);
+      }
+      final staticKey = segments[depth];
+      if (staticKey != null) {
+        if (!equalsPathSlice(staticKey, path, cursor, segmentEnd)) return null;
+      } else if (p0End == 0) {
+        p0Start = cursor;
+        p0End = segmentEnd;
+      } else {
+        p1Start = cursor;
+        p1End = segmentEnd;
+      }
+      depth += 1;
+      cursor = segmentEnd < path.length ? segmentEnd + 1 : path.length;
+    }
+
+    if (cursor >= path.length) return null;
+    final segmentEnd = findSegmentEnd(path, cursor);
+    if (segmentEnd == cursor) return matchStraightTailLeafDirtyNormalized(path);
+    final segmentLength = segmentEnd - cursor;
+    if ((segmentLength == 1 && path.codeUnitAt(cursor) == 46) ||
+        (segmentLength == 2 &&
+            path.codeUnitAt(cursor) == 46 &&
+            path.codeUnitAt(cursor + 1) == 46) ||
+        segmentEnd != path.length) {
+      return matchStraightTailLeafDirtyNormalized(path);
+    }
+    final leaf = tailLeaves[path.substring(cursor, segmentEnd)];
+    return leaf == null
+        ? null
+        : buildStraightTailLeafMatch(
+            leaf,
+            path,
+            p0Start,
+            p0End,
+            p1Start,
+            p1End,
+          );
+  }
+
+  RouteMatch<T>? matchStraightTailLeafDirtyNormalized(String path) {
+    if (!normalizePathSpans(path, _normalizedSpans)) return null;
+    return matchStraightTailLeafNormalized(path, _normalizedSpans);
+  }
+
   RouteMatch<T>? matchStraightTailLeaf(
     String path,
     Map<String, RouteEntry<T>> tailLeaves,
@@ -346,7 +421,6 @@ class TrieEngine<T> {
       depth += 1;
       cursor = segmentEnd < path.length ? segmentEnd + 1 : path.length;
     }
-
     if (cursor >= path.length) return null;
     final segmentEnd = findSegmentEnd(path, cursor);
     if (segmentEnd == cursor || segmentEnd != path.length) return null;
@@ -372,6 +446,40 @@ class TrieEngine<T> {
         );
     }
     return buildSmallMatch(leaf, path, p0Start, p0End, p1Start, p1End);
+  }
+
+  RouteMatch<T>? matchStraightTailLeafNormalized(String path, List<int> spans) {
+    final segments = straightSegments;
+    if (spans.length != (segments.length + 1) * 2) return null;
+    var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
+    for (var depth = 0; depth < segments.length; depth++) {
+      final pair = spans.length - 2 - depth * 2;
+      final start = spans[pair];
+      final end = spans[pair + 1];
+      final staticKey = segments[depth];
+      if (staticKey != null) {
+        if (!equalsPathSlice(staticKey, path, start, end)) return null;
+      } else if (p0End == 0) {
+        p0Start = start;
+        p0End = end;
+      } else {
+        p1Start = start;
+        p1End = end;
+      }
+    }
+    final leafStart = spans[0];
+    final leafEnd = spans[1];
+    final leaf = straightTailLeaves?[path.substring(leafStart, leafEnd)];
+    return leaf == null
+        ? null
+        : buildStraightTailLeafMatch(
+            leaf,
+            path,
+            p0Start,
+            p0End,
+            p1Start,
+            p1End,
+          );
   }
 
   RouteMatch<T>? matchStraightFast(String path) {
@@ -550,6 +658,36 @@ class TrieEngine<T> {
       );
     }
     return materialize(route, path, captures, wildcardStart);
+  }
+
+  RouteMatch<T> buildStraightTailLeafMatch(
+    RouteEntry<T> leaf,
+    String path,
+    int p0Start,
+    int p0End,
+    int p1Start,
+    int p1End,
+  ) {
+    switch (straightParamCount) {
+      case 0:
+        return leaf.noParamsMatch;
+      case 1:
+        return RouteMatch(
+          leaf.data,
+          CompactParamsMap.one(straightParam0!, path.substring(p0Start, p0End)),
+        );
+      case 2:
+        return RouteMatch(
+          leaf.data,
+          CompactParamsMap.two(
+            straightParam0!,
+            path.substring(p0Start, p0End),
+            straightParam1!,
+            path.substring(p1Start, p1End),
+          ),
+        );
+    }
+    return buildSmallMatch(leaf, path, p0Start, p0End, p1Start, p1End);
   }
 
   RouteMatch<T>? match(String path, bool allowWildcards) {

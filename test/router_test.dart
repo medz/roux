@@ -1224,6 +1224,20 @@ void main() {
       expect(local.match('/users//42')?.params, {'id': '42'});
     });
 
+    test('supports normalized matching for straight dynamic routes', () {
+      final local = Router<String>(
+        normalizePath: true,
+        routes: {'/users/:id/items/:itemId/profile9': 'profile'},
+      );
+
+      expect(
+        local
+            .match('/users//tmp/../alice/items//./tmp/../book/profile9/')
+            ?.params,
+        {'id': 'alice', 'itemId': 'book'},
+      );
+    });
+
     test('supports combining decodePath with path normalization', () {
       final local = Router<String>(
         decodePath: true,
