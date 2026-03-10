@@ -13,11 +13,7 @@ class PatternEngine<T> {
   bool hasRoutes = false;
 
   /// Pattern buckets ordered by matching precedence.
-  final List<List<CompiledSlot<T>>> buckets = List.generate(
-    4,
-    (_) => [],
-    growable: false,
-  );
+  final List<List<CompiledSlot<T>>> buckets = List.generate(4, (_) => []);
 
   /// Compiles and registers a pattern route.
   void add(
