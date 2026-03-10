@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'route_model.dart';
 
 String? sanitizeRoutePath(String path) {
@@ -52,7 +54,7 @@ String? normalizeExactRoutePath(String path) {
   return outStart == path.length ? '/' : String.fromCharCodes(out, outStart);
 }
 
-int normalizePathSpans(String path, List<int> spans) {
+int normalizePathSpans(String path, Uint32List spans) {
   if (path.isEmpty || path.codeUnitAt(0) != slashCode) return -1;
   if (path.length == 1) return 0;
   var length = 0;
@@ -123,10 +125,8 @@ String? normalizeRoutePath(String path) {
   return path;
 }
 
-List<int> ensureSpanBuffer(List<int> buffer, int pathLength) =>
-    buffer.length >= pathLength * 2
-    ? buffer
-    : List<int>.filled(pathLength * 2, 0, growable: false);
+Uint32List ensureSpanBuffer(Uint32List buffer, int pathLength) =>
+    buffer.length >= pathLength * 2 ? buffer : Uint32List(pathLength * 2);
 
 String trimTrailingSlash(String path) {
   return path.length > 1 && path.endsWith('/') && !path.endsWith('//')

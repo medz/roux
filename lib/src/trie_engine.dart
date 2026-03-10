@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:typed_data';
 
 import 'route_model.dart';
 import 'route_path.dart';
@@ -23,7 +24,7 @@ class TrieEngine<T> {
   int straightParamCount = 0;
   String? straightParam0;
   String? straightParam1;
-  var _normalizedSpans = const <int>[];
+  var _normalizedSpans = Uint32List(0);
 
   bool add(
     String path,
