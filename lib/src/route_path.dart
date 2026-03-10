@@ -108,7 +108,7 @@ String? normalizeRoutePath(String path) {
         (segmentLength == 2 &&
             path.codeUnitAt(segmentStart) == 46 &&
             path.codeUnitAt(segmentStart + 1) == 46)) {
-      return _normalizeRoutePathSlow(path);
+      return normalizeExactRoutePath(path);
     }
     segmentStart = i + 1;
   }
@@ -118,13 +118,9 @@ String? normalizeRoutePath(String path) {
       (trailingLength == 2 &&
           path.codeUnitAt(segmentStart) == 46 &&
           path.codeUnitAt(segmentStart + 1) == 46)) {
-    return _normalizeRoutePathSlow(path);
+    return normalizeExactRoutePath(path);
   }
   return path;
-}
-
-String? _normalizeRoutePathSlow(String path) {
-  return normalizeExactRoutePath(path);
 }
 
 List<int> ensureSpanBuffer(List<int> buffer, int pathLength) =>
