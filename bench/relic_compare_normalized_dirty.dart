@@ -32,11 +32,27 @@ void _setupBenchmarkData(int routeCount) {
   _indexes = List<int>.generate(routeCount, (i) => i, growable: false);
   final permutedIndexes = _indexes.toList()..shuffle(Random(123));
 
-  _staticRoutesToLookup = permutedIndexes.map((i) => '/./path$i/').toList();
+  _staticRoutesToLookup = permutedIndexes.map((i) {
+    switch (i % 3) {
+      case 0:
+        return '/./path$i/';
+      case 1:
+        return '/static/../path$i';
+      default:
+        return '/prefix//./../path$i/';
+    }
+  }).toList();
   _dynamicRoutesToLookup = permutedIndexes.map((i) {
     final userId = 'user_${Random(i).nextInt(1000)}';
     final itemId = 'item_${Random(i + 1).nextInt(5000)}';
-    return '/users//./$userId/items/./$itemId/profile$i/';
+    switch (i % 3) {
+      case 0:
+        return '/users//./$userId/items/./$itemId/profile$i/';
+      case 1:
+        return '/users/tmp/../$userId/items/tmp/../$itemId/profile$i';
+      default:
+        return '/users//tmp/.././$userId/items//./tmp/../$itemId/profile$i/';
+    }
   }).toList();
 }
 
@@ -232,7 +248,7 @@ void main(List<String> args) {
     'dirty normalized benchmark (benchmark_harness/perf_benchmark_harness)',
   );
   print('routeCount=$routeCount seed=123');
-  print('note: lookup inputs include //, ./, and trailing slash');
+  print("note: lookup inputs include //, ./, ../, and trailing slash");
   print('format=test;metric;value;unit');
   print('lower is better (us)');
 
