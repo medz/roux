@@ -21,9 +21,7 @@ String? normalizeExactRoutePath(String path) {
   if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
   if (path.length == 1) return path;
   final out = Uint16List(path.length);
-  var outStart = path.length;
-  var skip = 0;
-  var read = path.length - 1;
+  var outStart = path.length, skip = 0, read = path.length - 1;
   while (read >= 0 && path.codeUnitAt(read) == slashCode) {
     read -= 1;
   }
@@ -62,9 +60,7 @@ String? normalizeExactRoutePath(String path) {
 int normalizePathSpans(String path, Uint32List spans) {
   if (path.isEmpty || path.codeUnitAt(0) != slashCode) return -1;
   if (path.length == 1) return 0;
-  var length = 0;
-  var skip = 0;
-  var read = path.length - 1;
+  var length = 0, skip = 0, read = path.length - 1;
   while (read >= 0 && path.codeUnitAt(read) == slashCode) {
     read -= 1;
   }

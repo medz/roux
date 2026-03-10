@@ -727,14 +727,12 @@ class TrieEngine<T> {
   }
 
   /// Matches a path against the general trie walker.
-  RouteMatch<T>? match(String path, bool allowWildcards) {
-    return walkNode(root, path, allowWildcards, 1, 0, null);
-  }
+  RouteMatch<T>? match(String path, bool allowWildcards) =>
+      walkNode(root, path, allowWildcards, 1, 0, null);
 
   /// Collects every trie match for [path].
-  void collect(String path, int methodRank, MatchAccumulator<T> output) {
-    walkNode(root, path, true, 1, 0, null, methodRank, output);
-  }
+  void collect(String path, int methodRank, MatchAccumulator<T> output) =>
+      walkNode(root, path, true, 1, 0, null, methodRank, output);
 
   /// Materializes a route match from captured trie state.
   RouteMatch<T> materialize(
@@ -1111,7 +1109,6 @@ class CompactParamsMap extends MapBase<String, String> {
   final String? _v1;
   final int _count;
   Map<String, String>? _backing;
-  late final _inlineEntries = _CompactEntries(_k0, _v0, _k1, _v1);
 
   /// Promotes the compact map to a regular mutable backing map.
   Map<String, String> _promote() => switch (_count) {
@@ -1145,45 +1142,13 @@ class CompactParamsMap extends MapBase<String, String> {
   String? remove(Object? key) => _promote().remove(key);
 
   @override
-  Iterable<MapEntry<String, String>> get entries =>
-      _backing?.entries ?? _inlineEntries;
-}
-
-/// Inline iterable used before a compact map is promoted.
-class _CompactEntries extends Iterable<MapEntry<String, String>> {
-  /// Creates an inline entry iterable.
-  _CompactEntries(this._k0, this._v0, this._k1, this._v1);
-
-  final String _k0;
-  final String _v0;
-  final String? _k1;
-  final String? _v1;
-
-  @override
-  Iterator<MapEntry<String, String>> get iterator =>
-      _CompactEntriesIterator(_k0, _v0, _k1, _v1);
-}
-
-/// Iterator for inline compact-map entries.
-class _CompactEntriesIterator implements Iterator<MapEntry<String, String>> {
-  /// Creates an inline entry iterator.
-  _CompactEntriesIterator(this._k0, this._v0, this._k1, this._v1);
-
-  final String _k0;
-  final String _v0;
-  final String? _k1;
-  final String? _v1;
-  int _index = -1;
-
-  @override
-  MapEntry<String, String> get current =>
-      _index == 0 ? MapEntry(_k0, _v0) : MapEntry(_k1!, _v1!);
-
-  @override
-  bool moveNext() {
-    if (_index >= 0 && _k1 == null) return false;
-    if (_index >= 1) return false;
-    _index += 1;
-    return true;
+  Iterable<MapEntry<String, String>> get entries sync* {
+    final backing = _backing;
+    if (backing != null) {
+      yield* backing.entries;
+      return;
+    }
+    yield MapEntry(_k0, _v0);
+    if (_count == 2) yield MapEntry(_k1!, _v1!);
   }
 }
