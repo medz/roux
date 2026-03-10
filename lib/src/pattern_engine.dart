@@ -387,16 +387,16 @@ class _PatternCompiler<T> {
         final optional =
             groupEnd + 1 < pattern.length &&
             pattern.codeUnitAt(groupEnd + 1) == questionCode;
+        final bodyRegex = optional ? StringBuffer() : outRegex;
+        final bodyShape = optional ? StringBuffer() : outShape;
+        lastWasParam = writeGrouped(
+          cursor + 1,
+          groupEnd,
+          lastWasParam,
+          bodyRegex,
+          bodyShape,
+        );
         if (optional) {
-          final bodyRegex = StringBuffer();
-          final bodyShape = StringBuffer();
-          lastWasParam = writeGrouped(
-            cursor + 1,
-            groupEnd,
-            lastWasParam,
-            bodyRegex,
-            bodyShape,
-          );
           outRegex
             ..write('(?:')
             ..write(bodyRegex)
@@ -405,17 +405,8 @@ class _PatternCompiler<T> {
             ..write('(?:')
             ..write(bodyShape)
             ..write(')?');
-          cursor = groupEnd + 2;
-        } else {
-          lastWasParam = writeGrouped(
-            cursor + 1,
-            groupEnd,
-            lastWasParam,
-            outRegex,
-            outShape,
-          );
-          cursor = groupEnd + 1;
         }
+        cursor = groupEnd + (optional ? 2 : 1);
         needsCompiled = true;
         continue;
       }
