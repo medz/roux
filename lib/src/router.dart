@@ -319,33 +319,11 @@ int commonMethodIndex(String method) {
 }
 
 String canonicalizeMethod(String method) {
-  var start = 0;
-  var end = method.length;
-  while (start < end && method.codeUnitAt(start) <= 32) {
-    start += 1;
-  }
-  while (end > start && method.codeUnitAt(end - 1) <= 32) {
-    end -= 1;
-  }
-  if (start == end) {
+  final normalized = method.trim();
+  if (normalized.isEmpty) {
     throw ArgumentError.value(method, 'method', 'Method must not be empty.');
   }
-  if (start == 0 && end == method.length) {
-    var allUpper = true;
-    for (var i = 0; i < end; i++) {
-      final code = method.codeUnitAt(i);
-      if (code >= 97 && code <= 122) {
-        allUpper = false;
-        break;
-      }
-    }
-    if (allUpper) return method;
-  }
-  final buffer = StringBuffer();
-  for (var i = start; i < end; i++) {
-    buffer.writeCharCode(upperAsciiCode(method.codeUnitAt(i)));
-  }
-  return buffer.toString();
+  return normalized.toUpperCase();
 }
 
 int upperAsciiCode(int code) => code >= 97 && code <= 122 ? code - 32 : code;
