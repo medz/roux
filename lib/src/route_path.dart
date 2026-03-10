@@ -1,12 +1,12 @@
 import 'route_model.dart';
 
 String? sanitizeRoutePath(String path) {
-  if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
+  if (!path.startsWith('/')) return null;
   return trimTrailingSlash(path);
 }
 
 String? normalizeRoutePath(String path) {
-  if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
+  if (!path.startsWith('/')) return null;
   final segments = <String>[];
   var cursor = 1;
   while (cursor < path.length) {

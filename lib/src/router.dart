@@ -118,7 +118,7 @@ class Router<T> {
 
   String? _preparePath(String path, bool strict) {
     if (!_decodePath && !_normalizePath) {
-      if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
+      if (!path.startsWith('/')) return null;
       if (!strict) return trimTrailingSlash(path);
       final trimmed = trimTrailingSlash(path);
       return containsEmptySegments(trimmed) ? null : trimmed;
@@ -163,7 +163,7 @@ class RouteSet<T> {
     DuplicatePolicy duplicatePolicy,
     int registrationOrder,
   ) {
-    if (patternPath.isEmpty || patternPath.codeUnitAt(0) != slashCode) {
+    if (!patternPath.startsWith('/')) {
       throw FormatException('Route pattern must start with "/": $patternPath');
     }
 
