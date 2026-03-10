@@ -5,6 +5,9 @@ import '_shared.dart';
 
 const _defaultRouteCount = 500;
 const _defaultQueryCount = 50000;
+const _benchmarkNote =
+    'primary comparison benchmark; roux uses normalizePath=true, '
+    'relic uses its built-in always-normalized lookup';
 
 class AlignedFeatureBenchmark extends SingleScenarioBenchmark {
   AlignedFeatureBenchmark(
@@ -97,7 +100,7 @@ void main(List<String> args) {
     target,
     routeCount: routeCount,
     queryCount: queryCount,
-    note: 'shared feature set with dirty normalized inputs and params consumed',
+    note: _benchmarkNote,
   );
   final bench = AlignedFeatureBenchmark(
     target,
