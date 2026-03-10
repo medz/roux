@@ -13,7 +13,7 @@ class TrieEngine<T> {
   final bool caseSensitive;
 
   /// Exact routes and root trie node for this engine.
-  final exactRoutes = <String, RouteEntry<T>>{}, root = SimpleNode<T>();
+  final exactRoutes = <String, RouteEntry<T>>{}, root = _SimpleNode<T>();
 
   /// Flags describing trie shape and validation requirements.
   bool hasBranchingChoices = false,
@@ -188,7 +188,7 @@ class TrieEngine<T> {
           hasBranchingChoices = true;
         }
         final paramName = path.substring(cursor + 1, segmentEnd);
-        node = node.paramChild ??= SimpleNode<T>();
+        node = node.paramChild ??= _SimpleNode<T>();
         (paramNames ??= <String>[]).add(paramName);
         paramCount += 1;
       } else {
@@ -353,7 +353,7 @@ class TrieEngine<T> {
       }
       return matchStraightFast(path);
     }
-    return walkNode(root, path, true, 1, 0, null);
+    return _walkNode(root, path, true, 1, 0, null);
   }
 
   /// Whether normalized matching can stay on the straight fast path.
@@ -471,12 +471,15 @@ class TrieEngine<T> {
       case 1:
         return RouteMatch(
           leaf.data,
-          CompactParamsMap.one(straightParam0!, path.substring(p0Start, p0End)),
+          _CompactParamsMap.one(
+            straightParam0!,
+            path.substring(p0Start, p0End),
+          ),
         );
       case 2:
         return RouteMatch(
           leaf.data,
-          CompactParamsMap.two(
+          _CompactParamsMap.two(
             straightParam0!,
             path.substring(p0Start, p0End),
             straightParam1!,
@@ -600,13 +603,13 @@ class TrieEngine<T> {
     if (names.length == 1) {
       return RouteMatch(
         route.data,
-        CompactParamsMap.one(names[0], path.substring(p0Start, p0End)),
+        _CompactParamsMap.one(names[0], path.substring(p0Start, p0End)),
       );
     }
     if (names.length == 2) {
       return RouteMatch(
         route.data,
-        CompactParamsMap.two(
+        _CompactParamsMap.two(
           names[0],
           path.substring(p0Start, p0End),
           names[1],
@@ -632,12 +635,15 @@ class TrieEngine<T> {
       case 1:
         return RouteMatch(
           leaf.data,
-          CompactParamsMap.one(straightParam0!, path.substring(p0Start, p0End)),
+          _CompactParamsMap.one(
+            straightParam0!,
+            path.substring(p0Start, p0End),
+          ),
         );
       case 2:
         return RouteMatch(
           leaf.data,
-          CompactParamsMap.two(
+          _CompactParamsMap.two(
             straightParam0!,
             path.substring(p0Start, p0End),
             straightParam1!,
@@ -650,11 +656,11 @@ class TrieEngine<T> {
 
   /// Matches a path against the general trie walker.
   RouteMatch<T>? match(String path, bool allowWildcards) =>
-      walkNode(root, path, allowWildcards, 1, 0, null);
+      _walkNode(root, path, allowWildcards, 1, 0, null);
 
   /// Collects every trie match for [path].
   void collect(String path, int methodRank, MatchAccumulator<T> output) =>
-      walkNode(root, path, true, 1, 0, null, methodRank, output);
+      _walkNode(root, path, true, 1, 0, null, methodRank, output);
 
   /// Materializes a route match from captured trie state.
   RouteMatch<T> materialize(
@@ -703,7 +709,7 @@ class TrieEngine<T> {
     if (wildcardName == null) {
       if (names.length == 1) {
         final requiredCaptures = captures!;
-        return CompactParamsMap.one(
+        return _CompactParamsMap.one(
           names[0],
           path.substring(
             requiredCaptures.startAt(0),
@@ -713,7 +719,7 @@ class TrieEngine<T> {
       }
       if (names.length == 2) {
         final requiredCaptures = captures!;
-        return CompactParamsMap.two(
+        return _CompactParamsMap.two(
           names[0],
           path.substring(
             requiredCaptures.startAt(0),
@@ -746,8 +752,8 @@ class TrieEngine<T> {
   }
 
   /// Walks the trie recursively for general matching and collection.
-  RouteMatch<T>? walkNode(
-    SimpleNode<T> node,
+  RouteMatch<T>? _walkNode(
+    _SimpleNode<T> node,
     String path,
     bool allowWildcards,
     int cursor,
@@ -814,7 +820,7 @@ class TrieEngine<T> {
       caseSensitive,
     );
     if (staticChild != null) {
-      final match = walkNode(
+      final match = _walkNode(
         staticChild,
         path,
         allowWildcards,
@@ -833,7 +839,7 @@ class TrieEngine<T> {
       final params = captures ?? ParamStack(maxParamDepth);
       params.truncate(paramLength);
       params.push(cursor, segmentEnd);
-      final match = walkNode(
+      final match = _walkNode(
         paramChild,
         path,
         allowWildcards,
@@ -854,15 +860,15 @@ class TrieEngine<T> {
 }
 
 /// Trie node for simple segment-based routing.
-class SimpleNode<T> {
+class _SimpleNode<T> {
   /// The canonical static segment held by this node, if any.
   final String? staticKey;
 
   /// Linked-list and map-based child references.
-  SimpleNode<T>? staticChild, staticNext, paramChild;
+  _SimpleNode<T>? staticChild, staticNext, paramChild;
 
   /// Static and leaf route tables stored on this node.
-  Map<String, SimpleNode<T>>? staticMap;
+  Map<String, _SimpleNode<T>>? staticMap;
 
   /// Leaf routes keyed by the final segment.
   Map<String, RouteEntry<T>>? leafRoutes;
@@ -874,19 +880,19 @@ class SimpleNode<T> {
   RouteEntry<T>? exactRoute, wildcardRoute;
 
   /// Creates a trie node for an optional static segment.
-  SimpleNode([this.staticKey]);
+  _SimpleNode([this.staticKey]);
 
   /// Returns an existing static child or creates one for [key].
-  SimpleNode<T> getOrCreateStaticChildSlice(String key) {
+  _SimpleNode<T> getOrCreateStaticChildSlice(String key) {
     final map = staticMap;
-    if (map != null) return map[key] ??= SimpleNode<T>(key);
+    if (map != null) return map[key] ??= _SimpleNode<T>(key);
     final child = findStaticChild(key);
     if (child != null) return child;
-    final created = SimpleNode<T>(key);
+    final created = _SimpleNode<T>(key);
     created.staticNext = staticChild;
     staticChild = created;
     if (++staticCount >= mapAt) {
-      final upgraded = <String, SimpleNode<T>>{};
+      final upgraded = <String, _SimpleNode<T>>{};
       for (var node = staticChild; node != null; node = node.staticNext) {
         upgraded[node.staticKey!] = node;
       }
@@ -896,7 +902,7 @@ class SimpleNode<T> {
   }
 
   /// Finds a static child matching a path slice.
-  SimpleNode<T>? findStaticChildSlice(
+  _SimpleNode<T>? findStaticChildSlice(
     String path,
     int start,
     int end,
@@ -907,7 +913,7 @@ class SimpleNode<T> {
     }
     final map = staticMap;
     if (map != null) return map[path.substring(start, end)];
-    SimpleNode<T>? prev;
+    _SimpleNode<T>? prev;
     var child = staticChild;
     while (child != null) {
       if (equalsPathSlice(child.staticKey!, path, start, end)) {
@@ -921,10 +927,10 @@ class SimpleNode<T> {
   }
 
   /// Finds a static child matching an already canonicalized key.
-  SimpleNode<T>? findStaticChild(String key) {
+  _SimpleNode<T>? findStaticChild(String key) {
     final map = staticMap;
     if (map != null) return map[key];
-    SimpleNode<T>? prev;
+    _SimpleNode<T>? prev;
     var child = staticChild;
     while (child != null) {
       if (child.staticKey == key) {
@@ -952,7 +958,7 @@ class SimpleNode<T> {
   }
 
   /// Promotes a recently matched static child to the front of the list.
-  void promoteStaticChild(SimpleNode<T>? prev, SimpleNode<T> child) {
+  void promoteStaticChild(_SimpleNode<T>? prev, _SimpleNode<T> child) {
     if (prev == null) return;
     prev.staticNext = child.staticNext;
     child.staticNext = staticChild;
@@ -1018,12 +1024,15 @@ class ParamStack {
 }
 
 /// Small-map implementation optimized for one or two parameters.
-class CompactParamsMap extends MapBase<String, String> {
+class _CompactParamsMap extends MapBase<String, String> {
   /// Creates a compact map containing one entry.
-  CompactParamsMap.one(this._k0, this._v0) : _k1 = null, _v1 = null, _count = 1;
+  _CompactParamsMap.one(this._k0, this._v0)
+    : _k1 = null,
+      _v1 = null,
+      _count = 1;
 
   /// Creates a compact map containing two entries.
-  CompactParamsMap.two(this._k0, this._v0, this._k1, this._v1) : _count = 2;
+  _CompactParamsMap.two(this._k0, this._v0, this._k1, this._v1) : _count = 2;
 
   final String _k0, _v0;
   final String? _k1, _v1;
