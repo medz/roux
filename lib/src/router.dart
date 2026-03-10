@@ -79,7 +79,8 @@ class Router<T> {
           }
           return routeSet.matchBest(path);
         }
-        if (routeSet.canMatchBestNormalized) {
+        if (routeSet.canMatchBestNormalized ||
+            routeSet.canMatchExactNormalized) {
           return routeSet.matchBestNormalized(path);
         }
         final normalized = normalizeRoutePath(path);
@@ -167,6 +168,14 @@ class RouteSet<T> {
       !patterns.hasRoutes &&
       simple.canMatchStraightNormalized;
 
+  bool get canMatchExactNormalized =>
+      !patterns.hasRoutes &&
+      simple.exactRoutes.isNotEmpty &&
+      !simple.hasBranchingChoices &&
+      simple.root.paramChild == null &&
+      simple.root.wildcardRoute == null &&
+      simple.globalFallback == null;
+
   void addRoute(
     String patternPath,
     T data,
@@ -208,8 +217,9 @@ class RouteSet<T> {
             : simple.materialize(simple.globalFallback!, normalized, null, 1));
   }
 
-  RouteMatch<T>? matchBestNormalized(String path) =>
-      simple.matchStraightNormalized(path);
+  RouteMatch<T>? matchBestNormalized(String path) => canMatchExactNormalized
+      ? simple.matchExactNormalized(path)
+      : simple.matchStraightNormalized(path);
 
   void _refreshMatchMode() {
     if (patterns.hasRoutes || simple.globalFallback != null) {

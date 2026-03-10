@@ -252,6 +252,12 @@ class TrieEngine<T> {
       ? null
       : exactRoutes[canonicalizeRoutePath(path, caseSensitive)]?.noParamsMatch;
 
+  RouteMatch<T>? matchExactNormalized(String path) {
+    if (exactRoutes.isEmpty) return null;
+    final normalized = normalizeRoutePath(path);
+    return normalized == null ? null : exactRoutes[normalized]?.noParamsMatch;
+  }
+
   void collectExact(String path, int methodRank, MatchAccumulator<T> output) {
     if (exactRoutes.isEmpty) return;
     final exact = exactRoutes[canonicalizeRoutePath(path, caseSensitive)];

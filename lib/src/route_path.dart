@@ -5,6 +5,53 @@ String? sanitizeRoutePath(String path) {
   return trimTrailingSlash(path);
 }
 
+String? normalizeExactRoutePath(String path) {
+  if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
+  if (path.length == 1) return path;
+  final out = List<int>.filled(path.length, 0, growable: false);
+  var outStart = path.length;
+  var skip = 0;
+  var read = path.length - 1;
+  while (read >= 0 && path.codeUnitAt(read) == slashCode) {
+    read -= 1;
+  }
+  while (read >= 0) {
+    final segmentEnd = read + 1;
+    while (read >= 0 && path.codeUnitAt(read) != slashCode) {
+      read -= 1;
+    }
+    final segmentStart = read + 1;
+    final segmentLength = segmentEnd - segmentStart;
+    if (segmentLength == 0) {
+      read -= 1;
+      continue;
+    }
+    if (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) {
+      read -= 1;
+      continue;
+    }
+    if (segmentLength == 2 &&
+        path.codeUnitAt(segmentStart) == 46 &&
+        path.codeUnitAt(segmentStart + 1) == 46) {
+      skip += 1;
+      read -= 1;
+      continue;
+    }
+    if (skip > 0) {
+      skip -= 1;
+      read -= 1;
+      continue;
+    }
+    for (var i = segmentEnd - 1; i >= segmentStart; i--) {
+      out[--outStart] = path.codeUnitAt(i);
+    }
+    out[--outStart] = slashCode;
+    read -= 1;
+  }
+  if (skip > 0) return null;
+  return outStart == path.length ? '/' : String.fromCharCodes(out, outStart);
+}
+
 int normalizePathSpans(String path, List<int> spans) {
   if (path.isEmpty || path.codeUnitAt(0) != slashCode) return -1;
   if (path.length == 1) return 0;
@@ -77,48 +124,7 @@ String? normalizeRoutePath(String path) {
 }
 
 String? _normalizeRoutePathSlow(String path) {
-  final out = List<int>.filled(path.length, 0, growable: false);
-  var outStart = path.length;
-  var skip = 0;
-  var read = path.length - 1;
-  while (read >= 0 && path.codeUnitAt(read) == slashCode) {
-    read -= 1;
-  }
-  while (read >= 0) {
-    final segmentEnd = read + 1;
-    while (read >= 0 && path.codeUnitAt(read) != slashCode) {
-      read -= 1;
-    }
-    final segmentStart = read + 1;
-    final segmentLength = segmentEnd - segmentStart;
-    if (segmentLength == 0) {
-      read -= 1;
-      continue;
-    }
-    if (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) {
-      read -= 1;
-      continue;
-    }
-    if (segmentLength == 2 &&
-        path.codeUnitAt(segmentStart) == 46 &&
-        path.codeUnitAt(segmentStart + 1) == 46) {
-      skip += 1;
-      read -= 1;
-      continue;
-    }
-    if (skip > 0) {
-      skip -= 1;
-      read -= 1;
-      continue;
-    }
-    for (var i = segmentEnd - 1; i >= segmentStart; i--) {
-      out[--outStart] = path.codeUnitAt(i);
-    }
-    out[--outStart] = slashCode;
-    read -= 1;
-  }
-  if (skip > 0) return null;
-  return outStart == path.length ? '/' : String.fromCharCodes(out, outStart);
+  return normalizeExactRoutePath(path);
 }
 
 List<int> ensureSpanBuffer(List<int> buffer, int pathLength) =>
