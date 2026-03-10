@@ -100,7 +100,7 @@ class Router<T> {
         (routeSet?.needsStrictPathValidation ?? false);
     final normalized = _preparePath(path, strict);
     if (normalized == null) {
-      return <RouteMatch<T>>[];
+      return [];
     }
     final collected = MatchAccumulator<T>(
       routeSet != null ||

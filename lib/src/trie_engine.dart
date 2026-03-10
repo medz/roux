@@ -80,7 +80,7 @@ class TrieEngine<T> {
       int constraintScore,
     ) => newRoute(
       data,
-      paramNames ?? const <String>[],
+      paramNames ?? const [],
       wildcardName,
       path,
       routeDepth,
@@ -233,7 +233,7 @@ class TrieEngine<T> {
       exactRoutes[canonical],
       newRoute(
         data,
-        const <String>[],
+        const [],
         null,
         path,
         depth,

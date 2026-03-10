@@ -83,7 +83,7 @@ class MatchAccumulator<T> {
         return a.$2.registrationOrder - b.$2.registrationOrder;
       });
     }
-    return <RouteMatch<T>>[for (final item in items) item.$1];
+    return [for (final item in items) item.$1];
   }
 }
 
