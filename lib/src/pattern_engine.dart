@@ -170,28 +170,38 @@ class _PatternCompiler<T> {
   var specificity = singleDynamicSpecificity;
   var constraintScore = 0;
 
+  CompiledSlot<T> buildCompiledSlot(
+    int bucket,
+    int specificity,
+    int constraintScore,
+  ) => CompiledSlot(
+    RegExp(regex.toString(), caseSensitive: caseSensitive),
+    shape.toString(),
+    bucket,
+    groupIndexes,
+    newRoute(
+      data,
+      paramNames,
+      null,
+      pattern,
+      segmentCount(pattern),
+      specificity,
+      staticChars,
+      constraintScore,
+      registrationOrder,
+    ),
+  );
+
   /// Compiles the current pattern or returns `null` for simple trie routes.
   CompiledSlot<T>? compile() {
     if (pattern.contains('{')) {
       writeGrouped(0, pattern.length, false, regex, shape);
       regex.write(r'$');
       shape.write(r'$');
-      return CompiledSlot(
-        RegExp(regex.toString(), caseSensitive: caseSensitive),
-        shape.toString(),
+      return buildCompiledSlot(
         compiledBucketDeferred,
-        groupIndexes,
-        newRoute(
-          data,
-          paramNames,
-          null,
-          pattern,
-          segmentCount(pattern),
-          structuredDynamicSpecificity,
-          staticChars,
-          1,
-          registrationOrder,
-        ),
+        structuredDynamicSpecificity,
+        1,
       );
     }
     for (
@@ -236,33 +246,26 @@ class _PatternCompiler<T> {
           if (!isValidParamName(name)) {
             throw FormatException('Invalid parameter name in route: $pattern');
           }
-          if (quantifier == questionCode) {
-            writeCapture(
-              regex,
-              shape,
-              '([^/]+)',
-              name,
-              slashPrefixed: true,
-              optional: true,
-            );
-            needsCompiled = true;
-            bucket = compiledBucketDeferred;
-            specificity = structuredDynamicSpecificity;
-            constraintScore = 1;
-          } else {
-            writeCapture(
-              regex,
-              shape,
-              quantifier == plusCode ? '(.+(?:/.+)*)' : '(.*)',
-              name,
-              slashPrefixed: true,
-              optional: quantifier != plusCode,
-            );
-            needsCompiled = true;
-            bucket = compiledBucketRepeated;
-            specificity = remainderSpecificity;
-            constraintScore = 1;
-          }
+          writeCapture(
+            regex,
+            shape,
+            quantifier == questionCode
+                ? '([^/]+)'
+                : quantifier == plusCode
+                ? '(.+(?:/.+)*)'
+                : '(.*)',
+            name,
+            slashPrefixed: true,
+            optional: quantifier != plusCode,
+          );
+          needsCompiled = true;
+          bucket = quantifier == questionCode
+              ? compiledBucketDeferred
+              : compiledBucketRepeated;
+          specificity = quantifier == questionCode
+              ? structuredDynamicSpecificity
+              : remainderSpecificity;
+          constraintScore = 1;
           cursor = segmentEnd + 1;
           continue;
         }
@@ -275,23 +278,7 @@ class _PatternCompiler<T> {
     regex.write(r'$');
     shape.write(r'$');
     if (!needsCompiled) return null;
-    return CompiledSlot(
-      RegExp(regex.toString(), caseSensitive: caseSensitive),
-      shape.toString(),
-      bucket,
-      groupIndexes,
-      newRoute(
-        data,
-        paramNames,
-        null,
-        pattern,
-        segmentCount(pattern),
-        specificity,
-        staticChars,
-        constraintScore,
-        registrationOrder,
-      ),
-    );
+    return buildCompiledSlot(bucket, specificity, constraintScore);
   }
 
   /// Writes a capture expression to both regex and duplicate-shape buffers.
