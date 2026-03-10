@@ -141,14 +141,11 @@ void validateCaptureNames(
   String? wildcardName,
   String pattern,
 ) {
-  if (paramNames.isEmpty) return;
-  final seen = <String>{};
-  for (final name in paramNames) {
-    if (!seen.add(name)) {
-      throw FormatException('Duplicate capture name in route: $pattern');
-    }
-  }
-  if (wildcardName != null && wildcardName != '_' && !seen.add(wildcardName)) {
+  final seen = {...paramNames};
+  if (seen.length != paramNames.length ||
+      (wildcardName != null &&
+          wildcardName != '_' &&
+          !seen.add(wildcardName))) {
     throw FormatException('Duplicate capture name in route: $pattern');
   }
 }

@@ -222,11 +222,9 @@ class RouteSet<T> {
       : simple.matchStraightNormalized(path);
 
   void _refreshMatchMode() {
-    if (patterns.hasRoutes || simple.globalFallback != null) {
-      _matchMode = _hybridMode;
-      return;
-    }
-    _matchMode = simple.exactRoutes.isEmpty && !simple.hasBranchingChoices
+    _matchMode = patterns.hasRoutes || simple.globalFallback != null
+        ? _hybridMode
+        : simple.exactRoutes.isEmpty && !simple.hasBranchingChoices
         ? _straightMode
         : _simpleMode;
   }
