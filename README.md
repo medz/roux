@@ -219,27 +219,36 @@ Each process runs one target only to avoid cross-target warmup bias.
 Primary comparison benchmark:
 
 ```bash
-dart run bench/aligned_feature.dart roux 500 50000
-dart run bench/aligned_feature.dart relic 500 50000
+dart run bench/aligned_feature.dart roux 500 50000 4096
+dart run bench/aligned_feature.dart relic 500 50000 4096
 ```
 
 This is the benchmark to use for ongoing roux vs relic comparison.
 It compares a shared dirty-normalized pathname contract with params consumed.
 `roux` runs with `normalizePath: true`.
 `relic` uses its built-in always-normalized lookup behavior.
+Dynamic paths are intentionally reused under a bounded cardinality so the
+comparison measures routing work instead of `relic` intern-cache thrash.
 
 Minimal feature set:
 
 ```bash
-dart run bench/minimal_feature.dart roux 500 50000
-dart run bench/minimal_feature.dart relic 500 50000
+dart run bench/minimal_feature.dart roux 500 50000 4096
+dart run bench/minimal_feature.dart relic 500 50000 4096
 ```
 
 Maximal feature contract:
 
 ```bash
-dart run bench/maximal_feature.dart roux 500 50000
-dart run bench/maximal_feature.dart relic 500 50000
+dart run bench/maximal_feature.dart roux 500 50000 4096
+dart run bench/maximal_feature.dart relic 500 50000 4096
+```
+
+Cache-thrash stress benchmark:
+
+```bash
+dart run bench/cache_thrash_feature.dart roux 500 50000
+dart run bench/cache_thrash_feature.dart relic 500 50000
 ```
 
 ## License

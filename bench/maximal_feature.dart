@@ -5,18 +5,22 @@ import '_shared.dart';
 
 const _defaultRouteCount = 500;
 const _defaultQueryCount = 50000;
+const _defaultDynamicCardinality = 4096;
 const _benchmarkNote =
-    'largest native shared contract: normalized dirty input, static, params, * and **';
+    'largest native shared contract: normalized dirty input, static, params, * and **; '
+    'dynamic paths are reused to avoid cache-thrash dominating the result';
 
 class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
   MaximalFeatureBenchmark(
     Target target, {
     required this.routeCount,
     required this.queryCount,
+    required this.dynamicCardinality,
   }) : super(target, 'maximal-feature');
 
   final int routeCount;
   final int queryCount;
+  final int dynamicCardinality;
   final requests = <Request>[];
   var sink = 0;
   roux.Router<int>? _rouxRouter;
@@ -31,19 +35,30 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
         case 0:
           requests.add(Request('/./static/../static/$routeIndex/home/', false));
         case 1:
+          final dynamicIndex = (i >> 2) % dynamicCardinality;
+          final dynamicRouteIndex = dynamicIndex % routeCount;
           requests.add(
             Request(
-              '/users//tmp/../user_$i/orders/./order_$i/item$routeIndex/',
+              '/users//tmp/../user_$dynamicIndex/orders/./order_$dynamicIndex/item$dynamicRouteIndex/',
               true,
             ),
           );
         case 2:
+          final dynamicIndex = (i >> 2) % dynamicCardinality;
+          final dynamicRouteIndex = dynamicIndex % routeCount;
           requests.add(
-            Request('/assets//segment_$i/./item$routeIndex/', false),
+            Request(
+              '/assets//segment_$dynamicIndex/./item$dynamicRouteIndex/',
+              false,
+            ),
           );
         case 3:
+          final dynamicIndex = (i >> 2) % dynamicCardinality;
           requests.add(
-            Request('/archive//$routeIndex/./month_${i % 12}/entry_$i/', false),
+            Request(
+              '/archive//$routeIndex/./month_${dynamicIndex % 12}/entry_$dynamicIndex/',
+              false,
+            ),
           );
       }
     }
@@ -107,17 +122,19 @@ void main(List<String> args) {
   final target = parseTarget(args);
   final routeCount = parseIntArg(args, 1, _defaultRouteCount);
   final queryCount = parseIntArg(args, 2, _defaultQueryCount);
+  final dynamicCardinality = parseIntArg(args, 3, _defaultDynamicCardinality);
   printHeader(
     'maximal-feature',
     target,
     routeCount: routeCount,
     queryCount: queryCount,
-    note: _benchmarkNote,
+    note: '$_benchmarkNote dynamicCardinality=$dynamicCardinality',
   );
   final bench = MaximalFeatureBenchmark(
     target,
     routeCount: routeCount,
     queryCount: queryCount,
+    dynamicCardinality: dynamicCardinality,
   );
   final score = bench.measure();
   print('score(us)=${score.toStringAsFixed(1)}');

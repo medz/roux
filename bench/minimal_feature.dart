@@ -5,16 +5,19 @@ import '_shared.dart';
 
 const _defaultRouteCount = 500;
 const _defaultQueryCount = 50000;
+const _defaultDynamicCardinality = 4096;
 
 class MinimalFeatureBenchmark extends SingleScenarioBenchmark {
   MinimalFeatureBenchmark(
     Target target, {
     required this.routeCount,
     required this.queryCount,
+    required this.dynamicCardinality,
   }) : super(target, 'minimal-feature');
 
   final int routeCount;
   final int queryCount;
+  final int dynamicCardinality;
   final requests = <Request>[];
   var sink = 0;
   roux.Router<int>? _rouxRouter;
@@ -27,9 +30,13 @@ class MinimalFeatureBenchmark extends SingleScenarioBenchmark {
       if ((i & 1) == 0) {
         requests.add(Request('/static/${i % routeCount}/home', false));
       } else {
-        final routeIndex = i % routeCount;
+        final dynamicIndex = (i >> 1) % dynamicCardinality;
+        final routeIndex = dynamicIndex % routeCount;
         requests.add(
-          Request('/users/user_$i/orders/order_$i/item$routeIndex', true),
+          Request(
+            '/users/user_$dynamicIndex/orders/order_$dynamicIndex/item$routeIndex',
+            true,
+          ),
         );
       }
     }
@@ -89,17 +96,21 @@ void main(List<String> args) {
   final target = parseTarget(args);
   final routeCount = parseIntArg(args, 1, _defaultRouteCount);
   final queryCount = parseIntArg(args, 2, _defaultQueryCount);
+  final dynamicCardinality = parseIntArg(args, 3, _defaultDynamicCardinality);
   printHeader(
     'minimal-feature',
     target,
     routeCount: routeCount,
     queryCount: queryCount,
-    note: 'clean paths, fixed GET, static + simple dynamic, params consumed',
+    note:
+        'clean paths, fixed GET, static + simple dynamic, params consumed, '
+        'dynamicCardinality=$dynamicCardinality',
   );
   final bench = MinimalFeatureBenchmark(
     target,
     routeCount: routeCount,
     queryCount: queryCount,
+    dynamicCardinality: dynamicCardinality,
   );
   final score = bench.measure();
   print('score(us)=${score.toStringAsFixed(1)}');
