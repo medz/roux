@@ -1064,13 +1064,52 @@ class CompactParamsMap extends MapBase<String, String> {
   String? remove(Object? key) => _promote().remove(key);
 
   @override
-  Iterable<MapEntry<String, String>> get entries sync* {
+  Iterable<MapEntry<String, String>> get entries {
     final backing = _backing;
-    if (backing != null) {
-      yield* backing.entries;
-      return;
+    return backing?.entries ?? _CompactEntries(_k0, _v0, _k1, _v1, _count);
+  }
+}
+
+class _CompactEntries extends IterableBase<MapEntry<String, String>> {
+  _CompactEntries(this._k0, this._v0, this._k1, this._v1, this._count);
+
+  final String _k0;
+  final String _v0;
+  final String? _k1;
+  final String? _v1;
+  final int _count;
+
+  @override
+  Iterator<MapEntry<String, String>> get iterator =>
+      _CompactEntriesIterator(_k0, _v0, _k1, _v1, _count);
+}
+
+class _CompactEntriesIterator implements Iterator<MapEntry<String, String>> {
+  _CompactEntriesIterator(this._k0, this._v0, this._k1, this._v1, this._count);
+
+  final String _k0;
+  final String _v0;
+  final String? _k1;
+  final String? _v1;
+  final int _count;
+  int _index = -1;
+  MapEntry<String, String>? _current;
+
+  @override
+  MapEntry<String, String> get current => _current!;
+
+  @override
+  bool moveNext() {
+    switch (++_index) {
+      case 0:
+        _current = MapEntry(_k0, _v0);
+        return true;
+      case 1 when _count == 2:
+        _current = MapEntry(_k1!, _v1!);
+        return true;
+      default:
+        _current = null;
+        return false;
     }
-    yield MapEntry(_k0, _v0);
-    if (_count == 2) yield MapEntry(_k1!, _v1!);
   }
 }
