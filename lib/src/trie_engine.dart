@@ -23,7 +23,7 @@ class TrieEngine<T> {
   int straightParamCount = 0;
   String? straightParam0;
   String? straightParam1;
-  final _normalizedSpans = <int>[];
+  var _normalizedSpans = const <int>[];
 
   bool add(
     String path,
@@ -391,8 +391,10 @@ class TrieEngine<T> {
   }
 
   RouteMatch<T>? matchStraightTailLeafDirtyNormalized(String path) {
-    if (!normalizePathSpans(path, _normalizedSpans)) return null;
-    return matchStraightTailLeafNormalized(path, _normalizedSpans);
+    _normalizedSpans = ensureSpanBuffer(_normalizedSpans, path.length);
+    final spanLength = normalizePathSpans(path, _normalizedSpans);
+    if (spanLength < 0) return null;
+    return matchStraightTailLeafNormalized(path, _normalizedSpans, spanLength);
   }
 
   RouteMatch<T>? matchStraightTailLeaf(
@@ -448,12 +450,16 @@ class TrieEngine<T> {
     return buildSmallMatch(leaf, path, p0Start, p0End, p1Start, p1End);
   }
 
-  RouteMatch<T>? matchStraightTailLeafNormalized(String path, List<int> spans) {
+  RouteMatch<T>? matchStraightTailLeafNormalized(
+    String path,
+    List<int> spans,
+    int spanLength,
+  ) {
     final segments = straightSegments;
-    if (spans.length != (segments.length + 1) * 2) return null;
+    if (spanLength != (segments.length + 1) * 2) return null;
     var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
     for (var depth = 0; depth < segments.length; depth++) {
-      final pair = spans.length - 2 - depth * 2;
+      final pair = spanLength - 2 - depth * 2;
       final start = spans[pair];
       final end = spans[pair + 1];
       final staticKey = segments[depth];

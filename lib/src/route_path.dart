@@ -5,10 +5,10 @@ String? sanitizeRoutePath(String path) {
   return trimTrailingSlash(path);
 }
 
-bool normalizePathSpans(String path, List<int> spans) {
-  if (path.isEmpty || path.codeUnitAt(0) != slashCode) return false;
-  spans.clear();
-  if (path.length == 1) return true;
+int normalizePathSpans(String path, List<int> spans) {
+  if (path.isEmpty || path.codeUnitAt(0) != slashCode) return -1;
+  if (path.length == 1) return 0;
+  var length = 0;
   var skip = 0;
   var read = path.length - 1;
   while (read >= 0 && path.codeUnitAt(read) == slashCode) {
@@ -41,13 +41,12 @@ bool normalizePathSpans(String path, List<int> spans) {
       read -= 1;
       continue;
     }
-    spans
-      ..add(segmentStart)
-      ..add(segmentEnd);
+    spans[length++] = segmentStart;
+    spans[length++] = segmentEnd;
     read -= 1;
   }
-  if (skip > 0) return false;
-  return true;
+  if (skip > 0) return -1;
+  return length;
 }
 
 String? normalizeRoutePath(String path) {
@@ -78,12 +77,13 @@ String? normalizeRoutePath(String path) {
 }
 
 String? _normalizeRoutePathSlow(String path) {
-  final spans = <int>[];
-  if (!normalizePathSpans(path, spans)) return null;
-  if (spans.isEmpty) return '/';
+  final spans = List<int>.filled(path.length * 2, 0, growable: false);
+  final spanLength = normalizePathSpans(path, spans);
+  if (spanLength < 0) return null;
+  if (spanLength == 0) return '/';
   final out = List<int>.filled(path.length, 0, growable: false);
   var outLength = 0;
-  for (var i = spans.length - 2; i >= 0; i -= 2) {
+  for (var i = spanLength - 2; i >= 0; i -= 2) {
     out[outLength++] = slashCode;
     for (var j = spans[i]; j < spans[i + 1]; j++) {
       out[outLength++] = path.codeUnitAt(j);
@@ -91,6 +91,11 @@ String? _normalizeRoutePathSlow(String path) {
   }
   return String.fromCharCodes(out, 0, outLength);
 }
+
+List<int> ensureSpanBuffer(List<int> buffer, int pathLength) =>
+    buffer.length >= pathLength * 2
+    ? buffer
+    : List<int>.filled(pathLength * 2, 0, growable: false);
 
 String trimTrailingSlash(String path) {
   return path.length > 1 && path.endsWith('/') && !path.endsWith('//')
