@@ -213,16 +213,28 @@ Parameter-name drift remains a hard error under all policies. For example,
 
 ## Benchmarks
 
-Relic-style comparison benchmark:
+Benchmarks are split into three single-scenario scripts.
+Each process runs one target only to avoid cross-target warmup bias.
+
+Minimal feature set:
 
 ```bash
-dart run bench/relic_compare.dart 500
+dart run bench/minimal_feature.dart roux 500 50000
+dart run bench/minimal_feature.dart relic 500 50000
 ```
 
-Lookup scenario matrix benchmark:
+Aligned feature set:
 
 ```bash
-dart run bench/compare.dart 500
+dart run bench/aligned_feature.dart roux 500 50000
+dart run bench/aligned_feature.dart relic 500 50000
+```
+
+Maximal feature contract:
+
+```bash
+dart run bench/maximal_feature.dart roux 500 50000
+dart run bench/maximal_feature.dart relic 500 50000
 ```
 
 ## License
