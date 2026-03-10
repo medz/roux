@@ -633,6 +633,7 @@ class TrieEngine<T> {
   }
 
   /// Builds the specialized tail-leaf straight-path match.
+  @pragma('vm:prefer-inline')
   RouteMatch<T> buildStraightTailLeafMatch(
     RouteEntry<T> leaf,
     String path,
@@ -936,6 +937,7 @@ class _SimpleNode<T> {
     return null;
   }
 
+  @pragma('vm:prefer-inline')
   RouteEntry<T>? findLeafRouteSlice(
     String path,
     int start,
@@ -957,6 +959,7 @@ class _SimpleNode<T> {
   }
 }
 
+@pragma('vm:prefer-inline')
 bool _equalsPathSlice(String key, String path, int start, int end) {
   if (key.length != end - start) return false;
   for (var i = 0; i < key.length; i++) {
