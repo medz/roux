@@ -1,5 +1,6 @@
 import 'package:relic/relic.dart' as relic;
 import 'package:roux/roux.dart' as roux;
+import 'package:spanner/spanner.dart' as spanner;
 
 import '_shared.dart';
 
@@ -19,6 +20,7 @@ class MinimalFeatureBenchmark extends SingleScenarioBenchmark {
   var sink = 0;
   roux.Router<int>? _rouxRouter;
   relic.Router<int>? _relicRouter;
+  spanner.Spanner? _spannerRouter;
 
   @override
   void setup() {
@@ -49,6 +51,14 @@ class MinimalFeatureBenchmark extends SingleScenarioBenchmark {
           router.get('/users/:id/orders/:orderId/item$i', i);
         }
         _relicRouter = router;
+      case Target.spanner:
+        final router = spanner.Spanner();
+        final method = constGetHttpMethod();
+        for (var i = 0; i < routeCount; i++) {
+          router.addRoute(method, '/static/$i/home', i);
+          router.addRoute(method, '/users/<id>/orders/<orderId>/item$i', i);
+        }
+        _spannerRouter = router;
     }
   }
 
@@ -72,6 +82,18 @@ class MinimalFeatureBenchmark extends SingleScenarioBenchmark {
           sink ^= match.value;
           if (request.needsParams) {
             consumeSymbolParams(match.parameters, _mix);
+          }
+        }
+      case Target.spanner:
+        final router = _spannerRouter!;
+        final method = constGetHttpMethod();
+        for (final request in requests) {
+          final match = router.lookup(method, request.path)!;
+          for (final value in match.values) {
+            sink ^= value as int;
+          }
+          if (request.needsParams) {
+            consumeDynamicParams(match.params, _mix);
           }
         }
     }

@@ -1,10 +1,14 @@
 import 'package:relic/relic.dart' as relic;
 import 'package:roux/roux.dart' as roux;
+import 'package:spanner/spanner.dart' as spanner;
 
 import '_shared.dart';
 
 const _defaultRouteCount = 500;
 const _defaultQueryCount = 50000;
+const _benchmarkNote =
+    'normalize + decode + case folding contract; non-roux targets use '
+    'caller-side preprocessing';
 
 class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
   MaximalFeatureBenchmark(
@@ -19,6 +23,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
   var sink = 0;
   roux.Router<int>? _rouxRouter;
   relic.Router<int>? _relicRouter;
+  spanner.Spanner? _spannerRouter;
 
   @override
   void setup() {
@@ -56,6 +61,16 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
           router.get('/users/:id/orders/:orderId/item$i', i);
         }
         _relicRouter = router;
+      case Target.spanner:
+        final router = spanner.Spanner(
+          config: const spanner.RouterConfig(caseSensitive: false),
+        );
+        final method = constGetHttpMethod();
+        for (var i = 0; i < routeCount; i++) {
+          router.addRoute(method, '/static/$i/home', i);
+          router.addRoute(method, '/users/<id>/orders/<orderId>/item$i', i);
+        }
+        _spannerRouter = router;
     }
   }
 
@@ -88,6 +103,25 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
             consumeSymbolParams(match.parameters, _mix);
           }
         }
+      case Target.spanner:
+        final router = _spannerRouter!;
+        final method = constGetHttpMethod();
+        for (final request in requests) {
+          final prepared = prepareComparablePath(
+            request.path,
+            decode: true,
+            normalize: true,
+            ignoreCase: true,
+          );
+          if (prepared == null) continue;
+          final match = router.lookup(method, prepared)!;
+          for (final value in match.values) {
+            sink ^= value as int;
+          }
+          if (request.needsParams) {
+            consumeDynamicParams(match.params, _mix);
+          }
+        }
     }
   }
 
@@ -108,8 +142,7 @@ void main(List<String> args) {
     target,
     routeCount: routeCount,
     queryCount: queryCount,
-    note:
-        'normalize + decode + case folding contract; relic side uses caller preprocessing',
+    note: _benchmarkNote,
   );
   final bench = MaximalFeatureBenchmark(
     target,

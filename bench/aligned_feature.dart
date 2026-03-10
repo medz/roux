@@ -1,5 +1,6 @@
 import 'package:relic/relic.dart' as relic;
 import 'package:roux/roux.dart' as roux;
+import 'package:spanner/spanner.dart' as spanner;
 
 import '_shared.dart';
 
@@ -8,6 +9,9 @@ const _defaultQueryCount = 50000;
 const _benchmarkNote =
     'primary comparison benchmark; roux uses normalizePath=true, '
     'relic uses its built-in always-normalized lookup';
+const _spannerNote =
+    'spanner uses caller-side normalization because it has no built-in '
+    'dirty path normalization contract';
 
 class AlignedFeatureBenchmark extends SingleScenarioBenchmark {
   AlignedFeatureBenchmark(
@@ -22,6 +26,7 @@ class AlignedFeatureBenchmark extends SingleScenarioBenchmark {
   var sink = 0;
   roux.Router<int>? _rouxRouter;
   relic.Router<int>? _relicRouter;
+  spanner.Spanner? _spannerRouter;
 
   @override
   void setup() {
@@ -55,6 +60,14 @@ class AlignedFeatureBenchmark extends SingleScenarioBenchmark {
           router.get('/users/:id/orders/:orderId/item$i', i);
         }
         _relicRouter = router;
+      case Target.spanner:
+        final router = spanner.Spanner();
+        final method = constGetHttpMethod();
+        for (var i = 0; i < routeCount; i++) {
+          router.addRoute(method, '/static/$i/home', i);
+          router.addRoute(method, '/users/<id>/orders/<orderId>/item$i', i);
+        }
+        _spannerRouter = router;
     }
   }
 
@@ -80,6 +93,25 @@ class AlignedFeatureBenchmark extends SingleScenarioBenchmark {
             consumeSymbolParams(match.parameters, _mix);
           }
         }
+      case Target.spanner:
+        final router = _spannerRouter!;
+        final method = constGetHttpMethod();
+        for (final request in requests) {
+          final prepared = prepareComparablePath(
+            request.path,
+            decode: false,
+            normalize: true,
+            ignoreCase: false,
+          );
+          if (prepared == null) continue;
+          final match = router.lookup(method, prepared)!;
+          for (final value in match.values) {
+            sink ^= value as int;
+          }
+          if (request.needsParams) {
+            consumeDynamicParams(match.params, _mix);
+          }
+        }
     }
   }
 
@@ -100,7 +132,7 @@ void main(List<String> args) {
     target,
     routeCount: routeCount,
     queryCount: queryCount,
-    note: _benchmarkNote,
+    note: target == Target.spanner ? _spannerNote : _benchmarkNote,
   );
   final bench = AlignedFeatureBenchmark(
     target,

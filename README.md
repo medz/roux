@@ -221,18 +221,22 @@ Primary comparison benchmark:
 ```bash
 dart run bench/aligned_feature.dart roux 500 50000
 dart run bench/aligned_feature.dart relic 500 50000
+dart run bench/aligned_feature.dart spanner 500 50000
 ```
 
 This is the benchmark to use for ongoing roux vs relic comparison.
 It compares a shared dirty-normalized pathname contract with params consumed.
 `roux` runs with `normalizePath: true`.
 `relic` uses its built-in always-normalized lookup behavior.
+`spanner` uses caller-side normalization because it does not provide the same
+dirty-path normalization contract.
 
 Minimal feature set:
 
 ```bash
 dart run bench/minimal_feature.dart roux 500 50000
 dart run bench/minimal_feature.dart relic 500 50000
+dart run bench/minimal_feature.dart spanner 500 50000
 ```
 
 Maximal feature contract:
@@ -240,6 +244,7 @@ Maximal feature contract:
 ```bash
 dart run bench/maximal_feature.dart roux 500 50000
 dart run bench/maximal_feature.dart relic 500 50000
+dart run bench/maximal_feature.dart spanner 500 50000
 ```
 
 ## License

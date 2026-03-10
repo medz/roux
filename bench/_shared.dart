@@ -1,8 +1,9 @@
 import 'package:benchmark_harness/benchmark_harness.dart';
 import 'package:relic/relic.dart' as relic;
 import 'package:roux/roux.dart' as roux;
+import 'package:spanner/spanner.dart' as spanner;
 
-enum Target { roux, relic }
+enum Target { roux, relic, spanner }
 
 Target parseTarget(List<String> args) {
   if (args.isEmpty) {
@@ -11,6 +12,7 @@ Target parseTarget(List<String> args) {
   return switch (args.first.toLowerCase()) {
     'roux' => Target.roux,
     'relic' => Target.relic,
+    'spanner' => Target.spanner,
     _ => throw ArgumentError('Unknown target: ${args.first}'),
   };
 }
@@ -49,6 +51,17 @@ void consumeSymbolParams(Map<Symbol, String> params, void Function(int) sink) {
   for (final entry in params.entries) {
     sink(entry.key.hashCode);
     sink(entry.value.length);
+  }
+}
+
+void consumeDynamicParams(
+  Map<String, dynamic> params,
+  void Function(int) sink,
+) {
+  sink(params.length);
+  for (final entry in params.entries) {
+    sink(entry.key.length);
+    sink('${entry.value}'.length);
   }
 }
 
@@ -109,6 +122,8 @@ String? normalizeForBench(String path) {
 }
 
 relic.Method constGetMethod() => relic.Method.get;
+
+spanner.HTTPMethod constGetHttpMethod() => spanner.HTTPMethod.GET;
 
 roux.Router<int> newRouxRouter({
   bool caseSensitive = true,
