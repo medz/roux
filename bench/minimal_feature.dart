@@ -65,17 +65,24 @@ class MinimalFeatureBenchmark extends SingleScenarioBenchmark {
       case Target.roux:
         final router = _rouxRouter!;
         for (final request in requests) {
-          final match = router.match(request.path, method: 'GET');
-          sink ^= match?.data ?? 0;
+          final match = requireRouxMatch<int>(
+            router.match(request.path, method: 'GET'),
+            request.path,
+            'GET',
+          );
+          sink ^= match.data;
           if (request.needsParams) {
-            consumeStringParams(match?.params, _mix);
+            consumeStringParams(match.params, _mix);
           }
         }
       case Target.relic:
         final router = _relicRouter!;
         const method = relic.Method.get;
         for (final request in requests) {
-          final match = router.lookup(method, request.path).asMatch;
+          final match = requireRelicMatch<int>(
+            router.lookup(method, request.path),
+            request.path,
+          );
           sink ^= match.value;
           if (request.needsParams) {
             consumeSymbolParams(match.parameters, _mix);

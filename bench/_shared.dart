@@ -1,4 +1,6 @@
 import 'package:benchmark_harness/benchmark_harness.dart';
+import 'package:relic/relic.dart' as relic;
+import 'package:roux/roux.dart' as roux;
 
 enum Target { roux, relic }
 
@@ -48,6 +50,20 @@ void consumeSymbolParams(Map<Symbol, String> params, void Function(int) sink) {
     sink(entry.key.hashCode);
     sink(entry.value.length);
   }
+}
+
+roux.RouteMatch<T> requireRouxMatch<T>(
+  roux.RouteMatch<T>? match,
+  String path,
+  String method,
+) {
+  if (match != null) return match;
+  throw StateError('Expected router match for benchmark $method $path');
+}
+
+relic.RouterMatch<T> requireRelicMatch<T>(Object result, String path) {
+  if (result is relic.RouterMatch<T>) return result;
+  throw StateError('Expected router match for benchmark path: $path');
 }
 
 class Request {
