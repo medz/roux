@@ -1,9 +1,8 @@
 import 'package:benchmark_harness/benchmark_harness.dart';
 import 'package:relic/relic.dart' as relic;
 import 'package:roux/roux.dart' as roux;
-import 'package:spanner/spanner.dart' as spanner;
 
-enum Target { roux, relic, spanner }
+enum Target { roux, relic }
 
 Target parseTarget(List<String> args) {
   if (args.isEmpty) {
@@ -12,7 +11,6 @@ Target parseTarget(List<String> args) {
   return switch (args.first.toLowerCase()) {
     'roux' => Target.roux,
     'relic' => Target.relic,
-    'spanner' => Target.spanner,
     _ => throw ArgumentError('Unknown target: ${args.first}'),
   };
 }
@@ -54,34 +52,6 @@ void consumeSymbolParams(Map<Symbol, String> params, void Function(int) sink) {
   }
 }
 
-void consumeDynamicParams(
-  Map<String, dynamic> params,
-  void Function(int) sink,
-) {
-  sink(params.length);
-  for (final entry in params.entries) {
-    sink(entry.key.length);
-    sink('${entry.value}'.length);
-  }
-}
-
-class Request {
-  final String path;
-  final bool needsParams;
-
-  const Request(this.path, this.needsParams);
-}
-
-abstract class SingleScenarioBenchmark extends BenchmarkBase {
-  SingleScenarioBenchmark(this.target, String name)
-    : super('$name;${target.name}');
-
-  final Target target;
-
-  @override
-  void exercise() => run();
-}
-
 String? prepareComparablePath(
   String path, {
   required bool decode,
@@ -121,9 +91,24 @@ String? normalizeForBench(String path) {
   return segments.isEmpty ? '/' : '/${segments.join('/')}';
 }
 
-relic.Method constGetMethod() => relic.Method.get;
+class Request {
+  final String path;
+  final bool needsParams;
 
-spanner.HTTPMethod constGetHttpMethod() => spanner.HTTPMethod.GET;
+  const Request(this.path, this.needsParams);
+}
+
+abstract class SingleScenarioBenchmark extends BenchmarkBase {
+  SingleScenarioBenchmark(this.target, String name)
+    : super('$name;${target.name}');
+
+  final Target target;
+
+  @override
+  void exercise() => run();
+}
+
+relic.Method constGetMethod() => relic.Method.get;
 
 roux.Router<int> newRouxRouter({
   bool caseSensitive = true,
