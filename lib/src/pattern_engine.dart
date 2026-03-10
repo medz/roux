@@ -138,12 +138,9 @@ class _PatternCompiler<T> {
   final T data;
   final bool caseSensitive;
   final int registrationOrder;
-  final regex = StringBuffer('^');
-  final shape = StringBuffer('^');
+  final regex = StringBuffer('^'), shape = StringBuffer('^');
   final paramNames = <String>[], groupIndexes = <int>[];
-  var groupCount = 0;
-  var unnamedCount = 0;
-  var staticChars = 0;
+  var groupCount = 0, unnamedCount = 0, staticChars = 0;
   var needsCompiled = false;
   var bucket = compiledBucketHigh;
   var specificity = singleDynamicSpecificity;
