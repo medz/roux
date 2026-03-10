@@ -1,17 +1,25 @@
 import 'route_model.dart';
 import 'route_path.dart';
 
+/// Matches pathname patterns that require compiled regular expressions.
 class PatternEngine<T> {
+  /// Creates a pattern matcher with optional case folding.
   PatternEngine(this.caseSensitive);
 
+  /// Whether static literals are matched case-sensitively.
   final bool caseSensitive;
+
+  /// Indicates whether any compiled pattern routes have been registered.
   bool hasRoutes = false;
+
+  /// Pattern buckets ordered by matching precedence.
   final List<List<CompiledSlot<T>>> buckets = List.generate(
     4,
     (_) => [],
     growable: false,
   );
 
+  /// Compiles and registers a pattern route.
   void add(
     String pattern,
     T data,
@@ -24,20 +32,24 @@ class PatternEngine<T> {
       caseSensitive,
       registrationOrder,
     ).compile();
-    if (compiled == null)
+    if (compiled == null) {
       throw FormatException('Unsupported segment syntax in route: $pattern');
+    }
     addCompiled(compiled, pattern, duplicatePolicy);
   }
 
+  /// Returns the first matching compiled route from a bucket.
   RouteMatch<T>? matchBucket(int bucket, String path) {
     for (final current in buckets[bucket]) {
       final match = current.regex.firstMatch(path);
-      if (match != null)
+      if (match != null) {
         return materializeCompiled(current.route, current.groupIndexes, match);
+      }
     }
     return null;
   }
 
+  /// Collects every matching compiled route from a bucket.
   void collectBucket(
     int bucket,
     String path,
@@ -61,6 +73,7 @@ class PatternEngine<T> {
     }
   }
 
+  /// Inserts a compiled route into its precedence bucket.
   void addCompiled(
     CompiledSlot<T> compiled,
     String pattern,
@@ -92,13 +105,24 @@ class PatternEngine<T> {
   }
 }
 
+/// Stores a compiled route together with its precedence metadata.
 class CompiledSlot<T> {
+  /// The regular expression used for matching.
   final RegExp regex;
+
+  /// The normalized shape string used for duplicate detection.
   final String shape;
+
+  /// The precedence bucket used during matching.
   final int bucket;
+
+  /// Capturing-group indexes mapped to parameter positions.
   final List<int> groupIndexes;
+
+  /// The route chain stored in this compiled slot.
   RouteEntry<T> route;
 
+  /// Creates a compiled slot.
   CompiledSlot(
     this.regex,
     this.shape,
@@ -108,6 +132,7 @@ class CompiledSlot<T> {
   );
 }
 
+/// Builds a route match from a regular-expression result.
 RouteMatch<T> materializeCompiled<T>(
   RouteEntry<T> route,
   List<int> groupIndexes,
@@ -124,6 +149,7 @@ RouteMatch<T> materializeCompiled<T>(
   return RouteMatch(route.data, params);
 }
 
+/// Compiles richer pathname syntax into regexp-backed route slots.
 class _PatternCompiler<T> {
   _PatternCompiler(
     this.pattern,
@@ -144,6 +170,7 @@ class _PatternCompiler<T> {
   var specificity = singleDynamicSpecificity;
   var constraintScore = 0;
 
+  /// Compiles the current pattern or returns `null` for simple trie routes.
   CompiledSlot<T>? compile() {
     if (pattern.contains('{')) {
       writeGrouped(0, pattern.length, false, regex, shape);
@@ -206,8 +233,9 @@ class _PatternCompiler<T> {
             quantifier == plusCode ||
             quantifier == asteriskCode) {
           final name = pattern.substring(cursor + 1, segmentEnd - 1);
-          if (!isValidParamName(name))
+          if (!isValidParamName(name)) {
             throw FormatException('Invalid parameter name in route: $pattern');
+          }
           if (quantifier == questionCode) {
             writeCapture(
               regex,
@@ -266,6 +294,7 @@ class _PatternCompiler<T> {
     );
   }
 
+  /// Writes a capture expression to both regex and duplicate-shape buffers.
   void writeCapture(
     StringBuffer outRegex,
     StringBuffer outShape,
@@ -300,6 +329,7 @@ class _PatternCompiler<T> {
     groupCount += extraGroups;
   }
 
+  /// Writes literal content to both regex and duplicate-shape buffers.
   void writeLiteral(
     String literal,
     StringBuffer outRegex,
@@ -312,6 +342,7 @@ class _PatternCompiler<T> {
     );
   }
 
+  /// Compiles a non-grouped segment into regexp fragments.
   void writeSegment(int start, int end) {
     var cursor = start;
     var lastWasParam = false;
@@ -353,6 +384,7 @@ class _PatternCompiler<T> {
     }
   }
 
+  /// Compiles grouped route syntax recursively.
   bool writeGrouped(
     int start,
     int end,
@@ -449,6 +481,7 @@ class _PatternCompiler<T> {
     return lastWasParam;
   }
 
+  /// Compiles a named capture and returns the next unread offset.
   int writeNamedCapture(
     int cursor,
     int end,
@@ -456,16 +489,18 @@ class _PatternCompiler<T> {
     StringBuffer outRegex,
     StringBuffer outShape,
   ) {
-    if (lastWasParam)
+    if (lastWasParam) {
       throw FormatException('Unsupported segment syntax in route: $pattern');
+    }
     var nameEnd = cursor + 1;
     while (nameEnd < end &&
         isParamNameCode(pattern.codeUnitAt(nameEnd), nameEnd == cursor + 1)) {
       nameEnd += 1;
     }
     final name = pattern.substring(cursor + 1, nameEnd);
-    if (!isValidParamName(name))
+    if (!isValidParamName(name)) {
       throw FormatException('Invalid parameter name in route: $pattern');
+    }
     if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {
       final regexEnd = findRegexEnd(pattern, nameEnd, end);
       final body = pattern.substring(nameEnd + 1, regexEnd);
@@ -484,6 +519,7 @@ class _PatternCompiler<T> {
   }
 }
 
+/// Finds the matching closing brace for a grouped route section.
 int findGroupEnd(String pattern, int start) {
   var depth = 0;
   for (var i = start; i < pattern.length; i++) {
@@ -494,6 +530,7 @@ int findGroupEnd(String pattern, int start) {
   throw FormatException('Unclosed group in route: $pattern');
 }
 
+/// Finds the matching closing parenthesis for an inline regex.
 int findRegexEnd(String pattern, int start, int segmentEnd) {
   var depth = 0;
   var escaped = false;
@@ -512,6 +549,7 @@ int findRegexEnd(String pattern, int start, int segmentEnd) {
   throw FormatException('Unclosed regex in route: $pattern');
 }
 
+/// Counts capturing groups inside a user-supplied regex body.
 int countCapturingGroups(String body) {
   var count = 0;
   var escaped = false;
@@ -522,8 +560,9 @@ int countCapturingGroups(String body) {
     } else if (code == 92) {
       escaped = true;
     } else if (code == 40 &&
-        (i + 1 >= body.length || body.codeUnitAt(i + 1) != questionCode))
+        (i + 1 >= body.length || body.codeUnitAt(i + 1) != questionCode)) {
       count += 1;
+    }
   }
   return count;
 }

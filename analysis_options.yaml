@@ -1,7 +1,6 @@
 include: package:lints/recommended.yaml
 linter:
   rules:
-    curly_braces_in_flow_control_structures: false
-    prefer_final_fields: true
-    prefer_final_locals: true
-    public_member_api_docs: false
+    - public_member_api_docs
+    - prefer_final_fields
+    - prefer_final_locals

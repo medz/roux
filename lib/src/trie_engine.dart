@@ -4,25 +4,51 @@ import 'dart:typed_data';
 import 'route_model.dart';
 import 'route_path.dart';
 
+/// Matches exact and segment-level routes with a trie-backed engine.
 class TrieEngine<T> {
+  /// Creates a trie engine with optional case folding.
   TrieEngine(this.caseSensitive);
 
+  /// Whether static literals are matched case-sensitively.
   final bool caseSensitive;
+
+  /// Exact routes and root trie node for this engine.
   final exactRoutes = <String, RouteEntry<T>>{}, root = SimpleNode<T>();
+
+  /// Flags describing trie shape and validation requirements.
   bool hasBranchingChoices = false,
       hasWildcardRoutes = false,
       needsStrictPathValidation = false;
+
+  /// Shared fallback route for `/**`-style matches.
   RouteEntry<T>? globalFallback;
+
+  /// The deepest number of params seen in simple routes.
   int maxParamDepth = 0;
+
+  /// Straight-plan state used by the hot matching path.
   bool straightDirty = false;
+
+  /// Straight-plan segments and leaf route tables.
   List<String?> straightSegments = [];
+
+  /// Straight-plan leaf routes aligned with [straightSegments].
   List<Map<String, RouteEntry<T>>?> straightLeaves = [];
+
+  /// Straight-plan exact and wildcard slots.
   List<RouteEntry<T>?> straightExacts = [], straightWildcards = [];
+
+  /// Tail-leaf routes for the specialized straight matcher.
   Map<String, RouteEntry<T>>? straightTailLeaves;
+
+  /// Captured metadata for the straight tail-leaf matcher.
   int straightParamCount = 0;
+
+  /// Cached parameter names for the straight tail-leaf matcher.
   String? straightParam0, straightParam1;
   var _normalizedSpans = Uint32List(0);
 
+  /// Adds a route to the trie engine, returning `false` for compiled syntax.
   bool add(
     String path,
     T data,
@@ -188,7 +214,9 @@ class TrieEngine<T> {
           finishSimple();
           return true;
         }
-        if (node.paramChild != null) hasBranchingChoices = true;
+        if (node.paramChild != null) {
+          hasBranchingChoices = true;
+        }
         node = node.getOrCreateStaticChildSlice(key);
         staticChars += segmentEnd - cursor;
       }
@@ -212,6 +240,7 @@ class TrieEngine<T> {
     return true;
   }
 
+  /// Adds an exact route directly to the exact-route table.
   void addExact(
     String path,
     T data,
@@ -240,10 +269,12 @@ class TrieEngine<T> {
     );
   }
 
+  /// Returns an exact-route match if present.
   RouteMatch<T>? matchExact(String path) => exactRoutes.isEmpty
       ? null
       : exactRoutes[canonicalizeRoutePath(path, caseSensitive)]?.noParamsMatch;
 
+  /// Rebuilds the cached straight matching plan.
   void rebuildStraightPlan() {
     straightSegments = [];
     straightLeaves = [root.leafRoutes];
@@ -292,6 +323,7 @@ class TrieEngine<T> {
     straightParam1 = straightParamCount > 1 ? sample.paramNames[1] : null;
   }
 
+  /// Ensures the straight matching plan is ready.
   void ensureStraightPlan() {
     if (straightDirty || straightExacts.isEmpty) {
       rebuildStraightPlan();
@@ -299,6 +331,7 @@ class TrieEngine<T> {
     }
   }
 
+  /// Matches a path using the most efficient simple-route strategy.
   RouteMatch<T>? matchStraight(String path) {
     ensureStraightPlan();
     if (caseSensitive && !hasWildcardRoutes && maxParamDepth <= 2) {
@@ -311,6 +344,7 @@ class TrieEngine<T> {
     return matchStraightGeneric(path);
   }
 
+  /// Whether normalized matching can stay on the straight fast path.
   bool get canMatchStraightNormalized {
     ensureStraightPlan();
     return caseSensitive &&
@@ -319,6 +353,7 @@ class TrieEngine<T> {
         straightTailLeaves != null;
   }
 
+  /// Matches a normalized path on the straight fast path when possible.
   RouteMatch<T>? matchStraightNormalized(String path) {
     if (!canMatchStraightNormalized) return null;
     final tailLeaves = straightTailLeaves!;
@@ -330,8 +365,9 @@ class TrieEngine<T> {
     while (depth < segments.length) {
       if (cursor >= path.length) return null;
       final segmentEnd = findSegmentEnd(path, cursor);
-      if (segmentEnd == cursor)
+      if (segmentEnd == cursor) {
         return matchStraightTailLeafDirtyNormalized(path);
+      }
       final segmentLength = segmentEnd - cursor;
       if ((segmentLength == 1 && path.codeUnitAt(cursor) == 46) ||
           (segmentLength == 2 &&
@@ -377,6 +413,7 @@ class TrieEngine<T> {
           );
   }
 
+  /// Normalizes a dirty path into spans and retries straight matching.
   RouteMatch<T>? matchStraightTailLeafDirtyNormalized(String path) {
     _normalizedSpans = ensureSpanBuffer(_normalizedSpans, path.length);
     final spanLength = normalizePathSpans(path, _normalizedSpans);
@@ -384,6 +421,7 @@ class TrieEngine<T> {
     return matchStraightTailLeafNormalized(path, _normalizedSpans, spanLength);
   }
 
+  /// Matches a tail-leaf straight path without normalization.
   RouteMatch<T>? matchStraightTailLeaf(
     String path,
     Map<String, RouteEntry<T>> tailLeaves,
@@ -437,6 +475,7 @@ class TrieEngine<T> {
     return buildSmallMatch(leaf, path, p0Start, p0End, p1Start, p1End);
   }
 
+  /// Matches a tail-leaf straight path using prepared normalized spans.
   RouteMatch<T>? matchStraightTailLeafNormalized(
     String path,
     List<int> spans,
@@ -475,6 +514,7 @@ class TrieEngine<T> {
           );
   }
 
+  /// Matches a straight path without wildcard handling.
   RouteMatch<T>? matchStraightFast(String path) {
     final segments = straightSegments;
     final leaves = straightLeaves;
@@ -520,6 +560,7 @@ class TrieEngine<T> {
     }
   }
 
+  /// Matches a straight path with generic wildcard and param handling.
   RouteMatch<T>? matchStraightGeneric(String path) {
     final allowWildcards = hasWildcardRoutes;
     final smallParams = maxParamDepth <= 2;
@@ -618,6 +659,7 @@ class TrieEngine<T> {
     }
   }
 
+  /// Builds a small parameter match without the generic materializer.
   RouteMatch<T> buildSmallMatch(
     RouteEntry<T> route,
     String path,
@@ -653,6 +695,7 @@ class TrieEngine<T> {
     return materialize(route, path, captures, wildcardStart);
   }
 
+  /// Builds the specialized tail-leaf straight-path match.
   RouteMatch<T> buildStraightTailLeafMatch(
     RouteEntry<T> leaf,
     String path,
@@ -683,14 +726,17 @@ class TrieEngine<T> {
     return buildSmallMatch(leaf, path, p0Start, p0End, p1Start, p1End);
   }
 
+  /// Matches a path against the general trie walker.
   RouteMatch<T>? match(String path, bool allowWildcards) {
     return walkNode(root, path, allowWildcards, 1, 0, null);
   }
 
+  /// Collects every trie match for [path].
   void collect(String path, int methodRank, MatchAccumulator<T> output) {
     walkNode(root, path, true, 1, 0, null, methodRank, output);
   }
 
+  /// Materializes a route match from captured trie state.
   RouteMatch<T> materialize(
     RouteEntry<T> route,
     String path,
@@ -703,6 +749,7 @@ class TrieEngine<T> {
         )
       : route.noParamsMatch;
 
+  /// Collects every route chained from a trie slot.
   void collectSlot(
     RouteEntry<T> slot,
     String path,
@@ -724,6 +771,7 @@ class TrieEngine<T> {
     }
   }
 
+  /// Materializes route parameters from captured trie state.
   Map<String, String> materializeParams(
     RouteEntry<T> route,
     String path,
@@ -777,6 +825,7 @@ class TrieEngine<T> {
     return params;
   }
 
+  /// Walks the trie recursively for general matching and collection.
   RouteMatch<T>? walkNode(
     SimpleNode<T> node,
     String path,
@@ -884,16 +933,30 @@ class TrieEngine<T> {
   }
 }
 
+/// Trie node for simple segment-based routing.
 class SimpleNode<T> {
+  /// The canonical static segment held by this node, if any.
   final String? staticKey;
+
+  /// Linked-list and map-based child references.
   SimpleNode<T>? staticChild, staticNext, paramChild;
+
+  /// Static and leaf route tables stored on this node.
   Map<String, SimpleNode<T>>? staticMap;
+
+  /// Leaf routes keyed by the final segment.
   Map<String, RouteEntry<T>>? leafRoutes;
+
+  /// Static child count and terminal routes for this node.
   int staticCount = 0;
+
+  /// Exact and wildcard terminal routes for this node.
   RouteEntry<T>? exactRoute, wildcardRoute;
 
+  /// Creates a trie node for an optional static segment.
   SimpleNode([this.staticKey]);
 
+  /// Returns an existing static child or creates one for [key].
   SimpleNode<T> getOrCreateStaticChildSlice(String key) {
     final map = staticMap;
     if (map != null) return map[key] ??= SimpleNode<T>(key);
@@ -912,13 +975,16 @@ class SimpleNode<T> {
     return created;
   }
 
+  /// Finds a static child matching a path slice.
   SimpleNode<T>? findStaticChildSlice(
     String path,
     int start,
     int end,
     bool caseSensitive,
   ) {
-    if (!caseSensitive) return findStaticChild(sliceKey(path, start, end));
+    if (!caseSensitive) {
+      return findStaticChild(sliceKey(path, start, end));
+    }
     final map = staticMap;
     if (map != null) return map[path.substring(start, end)];
     SimpleNode<T>? prev;
@@ -934,6 +1000,7 @@ class SimpleNode<T> {
     return null;
   }
 
+  /// Finds a static child matching an already canonicalized key.
   SimpleNode<T>? findStaticChild(String key) {
     final map = staticMap;
     if (map != null) return map[key];
@@ -950,6 +1017,7 @@ class SimpleNode<T> {
     return null;
   }
 
+  /// Finds a leaf route matching a path slice.
   RouteEntry<T>? findLeafRouteSlice(
     String path,
     int start,
@@ -963,6 +1031,7 @@ class SimpleNode<T> {
         : sliceKey(path, start, end)];
   }
 
+  /// Promotes a recently matched static child to the front of the list.
   void promoteStaticChild(SimpleNode<T>? prev, SimpleNode<T> child) {
     if (prev == null) return;
     prev.staticNext = child.staticNext;
@@ -971,6 +1040,7 @@ class SimpleNode<T> {
   }
 }
 
+/// Compares a canonical key against a raw path slice.
 bool equalsPathSlice(String key, String path, int start, int end) {
   if (key.length != end - start) return false;
   for (var i = 0; i < key.length; i++) {
@@ -979,6 +1049,7 @@ bool equalsPathSlice(String key, String path, int start, int end) {
   return true;
 }
 
+/// Compares a lowercased key against a path slice without allocating.
 bool equalsFoldedPathSlice(String key, String path, int start, int end) {
   if (key.length != end - start) return false;
   for (var i = 0; i < key.length; i++) {
@@ -989,13 +1060,19 @@ bool equalsFoldedPathSlice(String key, String path, int start, int end) {
   return true;
 }
 
+/// Builds a folded key for case-insensitive static lookups.
 String sliceKey(String path, int start, int end) =>
     path.substring(start, end).toLowerCase();
 
+/// Stores parameter capture spans for generic trie matching.
 class ParamStack {
+  /// Packed start/end offsets for captured parameters.
   final List<int> values;
+
+  /// The active length within [values].
   int length = 0;
 
+  /// Creates a stack sized for the current trie depth.
   ParamStack(int capacity)
     : values = List.filled(
         (capacity == 0 ? 1 : capacity) * 2,
@@ -1003,21 +1080,29 @@ class ParamStack {
         growable: false,
       );
 
+  /// Pushes a captured segment span.
   void push(int start, int end) {
     values[length] = start;
     values[length + 1] = end;
     length += 2;
   }
 
+  /// Truncates the stack to a packed offset length.
   void truncate(int value) => length = value;
 
+  /// Returns the captured segment start at [index].
   int startAt(int index) => values[index * 2];
+
+  /// Returns the captured segment end at [index].
   int endAt(int index) => values[index * 2 + 1];
 }
 
+/// Small-map implementation optimized for one or two parameters.
 class CompactParamsMap extends MapBase<String, String> {
+  /// Creates a compact map containing one entry.
   CompactParamsMap.one(this._k0, this._v0) : _k1 = null, _v1 = null, _count = 1;
 
+  /// Creates a compact map containing two entries.
   CompactParamsMap.two(this._k0, this._v0, this._k1, this._v1) : _count = 2;
 
   final String _k0;
@@ -1028,6 +1113,7 @@ class CompactParamsMap extends MapBase<String, String> {
   Map<String, String>? _backing;
   late final _inlineEntries = _CompactEntries(_k0, _v0, _k1, _v1);
 
+  /// Promotes the compact map to a regular mutable backing map.
   Map<String, String> _promote() => switch (_count) {
     1 => _backing ??= {_k0: _v0},
     _ => _backing ??= {_k0: _v0, _k1!: _v1!},
@@ -1063,7 +1149,9 @@ class CompactParamsMap extends MapBase<String, String> {
       _backing?.entries ?? _inlineEntries;
 }
 
+/// Inline iterable used before a compact map is promoted.
 class _CompactEntries extends Iterable<MapEntry<String, String>> {
+  /// Creates an inline entry iterable.
   _CompactEntries(this._k0, this._v0, this._k1, this._v1);
 
   final String _k0;
@@ -1076,7 +1164,9 @@ class _CompactEntries extends Iterable<MapEntry<String, String>> {
       _CompactEntriesIterator(_k0, _v0, _k1, _v1);
 }
 
+/// Iterator for inline compact-map entries.
 class _CompactEntriesIterator implements Iterator<MapEntry<String, String>> {
+  /// Creates an inline entry iterator.
   _CompactEntriesIterator(this._k0, this._v0, this._k1, this._v1);
 
   final String _k0;

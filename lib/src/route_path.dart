@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'route_model.dart';
 
+/// Classifies a path segment as empty, dot, dot-dot, or ordinary text.
 @pragma('vm:prefer-inline')
 int classifyPathSegment(String path, int segmentStart, int segmentEnd) {
   final segmentLength = segmentEnd - segmentStart;
@@ -9,11 +10,13 @@ int classifyPathSegment(String path, int segmentStart, int segmentEnd) {
   if (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) return 1;
   if (segmentLength == 2 &&
       path.codeUnitAt(segmentStart) == 46 &&
-      path.codeUnitAt(segmentStart + 1) == 46)
+      path.codeUnitAt(segmentStart + 1) == 46) {
     return 2;
+  }
   return -1;
 }
 
+/// Normalizes a path for exact-route lookup and returns `null` if invalid.
 String? normalizeExactRoutePath(String path) {
   if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
   if (path.length == 1) return path;
@@ -21,10 +24,14 @@ String? normalizeExactRoutePath(String path) {
   var outStart = path.length;
   var skip = 0;
   var read = path.length - 1;
-  while (read >= 0 && path.codeUnitAt(read) == slashCode) read -= 1;
+  while (read >= 0 && path.codeUnitAt(read) == slashCode) {
+    read -= 1;
+  }
   while (read >= 0) {
     final segmentEnd = read + 1;
-    while (read >= 0 && path.codeUnitAt(read) != slashCode) read -= 1;
+    while (read >= 0 && path.codeUnitAt(read) != slashCode) {
+      read -= 1;
+    }
     final segmentStart = read + 1;
     switch (classifyPathSegment(path, segmentStart, segmentEnd)) {
       case 0:
@@ -51,16 +58,21 @@ String? normalizeExactRoutePath(String path) {
   return outStart == path.length ? '/' : String.fromCharCodes(out, outStart);
 }
 
+/// Produces normalized segment spans in reverse order and returns their length.
 int normalizePathSpans(String path, Uint32List spans) {
   if (path.isEmpty || path.codeUnitAt(0) != slashCode) return -1;
   if (path.length == 1) return 0;
   var length = 0;
   var skip = 0;
   var read = path.length - 1;
-  while (read >= 0 && path.codeUnitAt(read) == slashCode) read -= 1;
+  while (read >= 0 && path.codeUnitAt(read) == slashCode) {
+    read -= 1;
+  }
   while (read >= 0) {
     final segmentEnd = read + 1;
-    while (read >= 0 && path.codeUnitAt(read) != slashCode) read -= 1;
+    while (read >= 0 && path.codeUnitAt(read) != slashCode) {
+      read -= 1;
+    }
     final segmentStart = read + 1;
     switch (classifyPathSegment(path, segmentStart, segmentEnd)) {
       case 0:
@@ -85,14 +97,16 @@ int normalizePathSpans(String path, Uint32List spans) {
   return length;
 }
 
+/// Normalizes an input path while preserving the original casing.
 String? normalizeRoutePath(String path) {
   if (!path.startsWith('/')) return null;
   if (path.length == 1) return path;
   var segmentStart = 1;
   for (var i = 1; i < path.length; i++) {
     if (path.codeUnitAt(i) != slashCode) continue;
-    if (classifyPathSegment(path, segmentStart, i) >= 0)
+    if (classifyPathSegment(path, segmentStart, i) >= 0) {
       return normalizeExactRoutePath(path);
+    }
     segmentStart = i + 1;
   }
   switch (classifyPathSegment(path, segmentStart, path.length)) {
@@ -105,31 +119,41 @@ String? normalizeRoutePath(String path) {
   return path;
 }
 
+/// Ensures the reusable normalized span buffer can hold a given path.
 Uint32List ensureSpanBuffer(Uint32List buffer, int pathLength) =>
     buffer.length >= pathLength * 2 ? buffer : Uint32List(pathLength * 2);
 
+/// Removes a single trailing slash from a non-root path.
 String trimTrailingSlash(String path) =>
     path.length > 1 && path.endsWith('/') && !path.endsWith('//')
     ? path.substring(0, path.length - 1)
     : path;
 
+/// Canonicalizes a path key according to case-sensitivity settings.
 String canonicalizeRoutePath(String path, bool caseSensitive) =>
     caseSensitive ? path : path.toLowerCase();
 
+/// Finds the exclusive end offset of the segment starting at [start].
 int findSegmentEnd(String path, int start) {
   var i = start;
-  while (i < path.length && path.codeUnitAt(i) != slashCode) i += 1;
+  while (i < path.length && path.codeUnitAt(i) != slashCode) {
+    i += 1;
+  }
   return i;
 }
 
+/// Reports whether a path contains consecutive slash separators.
 bool containsEmptySegments(String path) {
   for (var i = 1; i < path.length; i++) {
-    if (path.codeUnitAt(i - 1) == slashCode && path.codeUnitAt(i) == slashCode)
+    if (path.codeUnitAt(i - 1) == slashCode &&
+        path.codeUnitAt(i) == slashCode) {
       return true;
+    }
   }
   return false;
 }
 
+/// Counts slash-delimited segments in a path.
 int segmentCount(String path) {
   var count = path.length == 1 ? 0 : 1;
   for (var i = 1; i < path.length; i++) {
@@ -138,6 +162,7 @@ int segmentCount(String path) {
   return count;
 }
 
+/// Counts non-slash characters in a path.
 int staticCharCount(String path) {
   var count = 0;
   for (var i = 0; i < path.length; i++) {

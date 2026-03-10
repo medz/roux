@@ -3,7 +3,9 @@ import 'pattern_engine.dart';
 import 'route_model.dart';
 import 'trie_engine.dart';
 
+/// Public facade for pathname route registration and lookup.
 class Router<T> {
+  /// Creates a router with duplicate, case, decode, and normalization options.
   Router({
     Map<String, T>? routes,
     DuplicatePolicy duplicatePolicy = DuplicatePolicy.reject,
@@ -25,13 +27,16 @@ class Router<T> {
   bool _hasSharedRoutes = false;
   int _nextRegistrationOrder = 0;
 
+  /// Registers a single route.
   void add(
     String path,
     T data, {
     String? method,
     DuplicatePolicy? duplicatePolicy,
   }) {
-    if (method == null) _hasSharedRoutes = true;
+    if (method == null) {
+      _hasSharedRoutes = true;
+    }
     _routeSetFor(method).addRoute(
       path,
       data,
@@ -40,6 +45,7 @@ class Router<T> {
     );
   }
 
+  /// Registers multiple routes with shared options.
   void addAll(
     Map<String, T> routes, {
     String? method,
@@ -58,13 +64,15 @@ class Router<T> {
     }
   }
 
+  /// Returns the best match for [path].
   RouteMatch<T>? match(String path, {String? method}) {
     if (!_hasSharedRoutes && !_decodePath) {
       RouteSet<T>? routeSet;
       if (method != null) {
         final commonIndex = commonMethodIndex(method);
-        if (commonIndex >= 0)
+        if (commonIndex >= 0) {
           routeSet = _methodRoutes.commonRoutes[commonIndex];
+        }
       }
       if (routeSet != null && !routeSet.needsStrictPathValidation) {
         if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
@@ -95,6 +103,7 @@ class Router<T> {
         _sharedRoutes.matchBest(normalized);
   }
 
+  /// Returns every match for [path] from broadest to most specific.
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
     final routeSet = method == null ? null : _methodRoutes.lookupMethod(method);
     final strict =
@@ -116,6 +125,7 @@ class Router<T> {
       ? _sharedRoutes
       : _methodRoutes.forWriteMethod(method, _caseSensitive);
 
+  /// Applies decode and normalization options to an input path.
   String? _preparePath(String path, bool strict) {
     if (!_decodePath && !_normalizePath) {
       if (!path.startsWith('/')) return null;
@@ -140,30 +150,39 @@ class Router<T> {
   }
 }
 
+/// Stores the simple trie and compiled pattern engines for one method bucket.
 class RouteSet<T> {
+  /// Creates an empty route set.
   RouteSet(bool caseSensitive)
     : simple = TrieEngine(caseSensitive),
       patterns = PatternEngine(caseSensitive);
 
   static const int _hybridMode = 0, _simpleMode = 1, _straightMode = 2;
 
+  /// The trie engine for exact and segment-level routes.
   final TrieEngine<T> simple;
+
+  /// The compiled matcher for richer pathname syntax.
   final PatternEngine<T> patterns;
   int _matchMode = _straightMode;
 
+  /// Whether collected matches must be sorted by specificity.
   bool get needsSpecificitySort =>
       simple.hasBranchingChoices ||
       simple.root.paramChild != null ||
       patterns.hasRoutes;
 
+  /// Whether the route set requires strict path validation.
   bool get needsStrictPathValidation =>
       simple.needsStrictPathValidation || patterns.hasRoutes;
 
+  /// Whether normalized matching can stay on the straight fast path.
   bool get canMatchBestNormalized =>
       _matchMode == _straightMode &&
       !patterns.hasRoutes &&
       simple.canMatchStraightNormalized;
 
+  /// Whether normalized matching can use exact lookup only.
   bool get canMatchExactNormalized =>
       !patterns.hasRoutes &&
       simple.exactRoutes.isNotEmpty &&
@@ -172,14 +191,16 @@ class RouteSet<T> {
       simple.root.wildcardRoute == null &&
       simple.globalFallback == null;
 
+  /// Adds a route to the route set.
   void addRoute(
     String patternPath,
     T data,
     DuplicatePolicy duplicatePolicy,
     int registrationOrder,
   ) {
-    if (!patternPath.startsWith('/'))
+    if (!patternPath.startsWith('/')) {
       throw FormatException('Route pattern must start with "/": $patternPath');
+    }
 
     final normalized = trimTrailingSlash(patternPath);
     if (simple.add(normalized, data, duplicatePolicy, registrationOrder)) {
@@ -190,6 +211,7 @@ class RouteSet<T> {
     _refreshMatchMode();
   }
 
+  /// Returns the highest-priority match for a normalized path.
   RouteMatch<T>? matchBest(String normalized) {
     switch (_matchMode) {
       case _straightMode:
@@ -212,6 +234,7 @@ class RouteSet<T> {
             : simple.materialize(simple.globalFallback!, normalized, null, 1));
   }
 
+  /// Returns the highest-priority match for a path that may need normalization.
   RouteMatch<T>? matchBestNormalized(String path) {
     if (!canMatchExactNormalized) return simple.matchStraightNormalized(path);
     final normalized = normalizeRoutePath(path);
@@ -220,6 +243,7 @@ class RouteSet<T> {
         : simple.exactRoutes[normalized]?.noParamsMatch;
   }
 
+  /// Refreshes the internal matching strategy after route changes.
   void _refreshMatchMode() {
     _matchMode = patterns.hasRoutes || simple.globalFallback != null
         ? _hybridMode
@@ -228,6 +252,7 @@ class RouteSet<T> {
         : _simpleMode;
   }
 
+  /// Collects every match for a normalized path.
   void collectMatches(
     String normalized,
     int methodRank,
@@ -249,8 +274,9 @@ class RouteSet<T> {
     if (simple.exactRoutes.isNotEmpty) {
       final exact = simple
           .exactRoutes[canonicalizeRoutePath(normalized, simple.caseSensitive)];
-      if (exact != null)
+      if (exact != null) {
         simple.collectSlot(exact, normalized, null, 0, methodRank, output);
+      }
     }
     patterns.collectBucket(
       compiledBucketDeferred,
@@ -261,21 +287,28 @@ class RouteSet<T> {
   }
 }
 
+/// Stores shared and per-method route sets.
 class MethodTable<T> {
+  /// Slots for common HTTP methods.
   final commonRoutes = List<RouteSet<T>?>.filled(7, null);
+
+  /// Lazily allocated route sets for uncommon HTTP methods.
   Map<String, RouteSet<T>>? extraRoutes;
 
+  /// Returns the route set used when registering [method].
   RouteSet<T> forWriteMethod(String method, bool caseSensitive) {
     final normalized = canonicalizeMethod(method);
     final commonIndex = commonMethodIndex(normalized);
-    if (commonIndex >= 0)
+    if (commonIndex >= 0) {
       return commonRoutes[commonIndex] ??= RouteSet(caseSensitive);
+    }
     return (extraRoutes ??= {}).putIfAbsent(
       normalized,
       () => RouteSet(caseSensitive),
     );
   }
 
+  /// Returns the route set used when matching [method].
   RouteSet<T>? lookupMethod(String method) {
     final normalized = canonicalizeMethod(method);
     final commonIndex = commonMethodIndex(normalized);
@@ -285,6 +318,7 @@ class MethodTable<T> {
   }
 }
 
+/// Maps common HTTP methods to their fixed route-set slots.
 int commonMethodIndex(String method) {
   return switch (method) {
     'GET' => 0,
@@ -298,9 +332,11 @@ int commonMethodIndex(String method) {
   };
 }
 
+/// Normalizes an HTTP method name for lookup and registration.
 String canonicalizeMethod(String method) {
   final normalized = method.trim();
-  if (normalized.isEmpty)
+  if (normalized.isEmpty) {
     throw ArgumentError.value(method, 'method', 'Method must not be empty.');
+  }
   return normalized.toUpperCase();
 }
