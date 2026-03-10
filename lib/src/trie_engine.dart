@@ -341,7 +341,7 @@ class TrieEngine<T> {
       }
       return matchStraightFast(path);
     }
-    return matchStraightGeneric(path);
+    return walkNode(root, path, true, 1, 0, null);
   }
 
   /// Whether normalized matching can stay on the straight fast path.
@@ -554,105 +554,6 @@ class TrieEngine<T> {
       } else {
         p1Start = cursor;
         p1End = segmentEnd;
-      }
-      depth += 1;
-      cursor = nextCursor;
-    }
-  }
-
-  /// Matches a straight path with generic wildcard and param handling.
-  RouteMatch<T>? matchStraightGeneric(String path) {
-    final allowWildcards = hasWildcardRoutes;
-    final smallParams = maxParamDepth <= 2;
-    ParamStack? paramStack;
-    var cursor = 1;
-    var depth = 0;
-    var paramCount = 0;
-    var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
-
-    ParamStack? captureStack() {
-      if (!smallParams || paramCount == 0) return paramStack;
-      final captures = ParamStack(paramCount);
-      captures.push(p0Start, p0End);
-      if (paramCount > 1) captures.push(p1Start, p1End);
-      return captures;
-    }
-
-    RouteMatch<T> buildMatch(RouteEntry<T> route, int wildcardStart) {
-      return !smallParams
-          ? materialize(route, path, paramStack, wildcardStart)
-          : buildSmallMatch(
-              route,
-              path,
-              p0Start,
-              p0End,
-              p1Start,
-              p1End,
-              captures: captureStack(),
-              wildcardStart: wildcardStart,
-            );
-    }
-
-    while (true) {
-      if (cursor >= path.length) {
-        final exact = straightExacts[depth];
-        if (exact != null) {
-          return buildMatch(exact, 0);
-        }
-        final wildcard = allowWildcards ? straightWildcards[depth] : null;
-        if (wildcard != null) {
-          return buildMatch(wildcard, path.length);
-        }
-        return null;
-      }
-      var segmentEnd = cursor;
-      while (segmentEnd < path.length &&
-          path.codeUnitAt(segmentEnd) != slashCode) {
-        segmentEnd += 1;
-      }
-      if (segmentEnd == cursor) return null;
-      final nextCursor = segmentEnd < path.length
-          ? segmentEnd + 1
-          : path.length;
-      if (nextCursor == path.length) {
-        final leafRoutes = straightLeaves[depth];
-        final leaf = leafRoutes == null
-            ? null
-            : leafRoutes[caseSensitive
-                  ? path.substring(cursor, segmentEnd)
-                  : path.substring(cursor, segmentEnd).toLowerCase()];
-        if (leaf != null) return buildMatch(leaf, 0);
-      }
-      if (depth >= straightSegments.length) {
-        final wildcard = allowWildcards ? straightWildcards[depth] : null;
-        if (wildcard != null) return buildMatch(wildcard, cursor);
-        return null;
-      }
-      final staticKey = straightSegments[depth];
-      if (staticKey != null &&
-          (caseSensitive
-              ? equalsPathSlice(staticKey, path, cursor, segmentEnd)
-              : equalsFoldedPathSlice(staticKey, path, cursor, segmentEnd))) {
-        depth += 1;
-        cursor = nextCursor;
-        continue;
-      }
-      final wildcard = allowWildcards ? straightWildcards[depth] : null;
-      if (staticKey != null) {
-        if (wildcard != null) return buildMatch(wildcard, cursor);
-        return null;
-      }
-      if (smallParams) {
-        if (paramCount == 0) {
-          p0Start = cursor;
-          p0End = segmentEnd;
-        } else {
-          p1Start = cursor;
-          p1End = segmentEnd;
-        }
-        paramCount += 1;
-      } else {
-        (paramStack ??= ParamStack(maxParamDepth)).push(cursor, segmentEnd);
       }
       depth += 1;
       cursor = nextCursor;

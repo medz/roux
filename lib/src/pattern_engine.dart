@@ -35,15 +35,10 @@ class PatternEngine<T> {
   }
 
   /// Returns the first matching compiled route from a bucket.
-  RouteMatch<T>? matchBucket(int bucket, String path) {
-    for (final current in buckets[bucket]) {
-      final match = current.regex.firstMatch(path);
-      if (match != null) {
+  RouteMatch<T>? matchBucket(int bucket, String path) =>
+      visitBucket(bucket, path, (current, match) {
         return materializeCompiled(current.route, current.groupIndexes, match);
-      }
-    }
-    return null;
-  }
+      });
 
   /// Collects every matching compiled route from a bucket.
   void collectBucket(
@@ -51,23 +46,19 @@ class PatternEngine<T> {
     String path,
     int methodRank,
     MatchAccumulator<T> output,
-  ) {
-    for (final current in buckets[bucket]) {
-      final match = current.regex.firstMatch(path);
-      if (match == null) continue;
-      for (
-        RouteEntry<T>? route = current.route;
-        route != null;
-        route = route.next
-      ) {
-        output.add(
-          materializeCompiled(route, current.groupIndexes, match),
-          route,
-          methodRank,
-        );
-      }
+  ) => visitBucket<void>(bucket, path, (current, match) {
+    for (
+      RouteEntry<T>? route = current.route;
+      route != null;
+      route = route.next
+    ) {
+      output.add(
+        materializeCompiled(route, current.groupIndexes, match),
+        route,
+        methodRank,
+      );
     }
-  }
+  });
 
   /// Inserts a compiled route into its precedence bucket.
   void addCompiled(
@@ -98,6 +89,21 @@ class PatternEngine<T> {
       }
     }
     routes.add(compiled);
+  }
+
+  /// Visits every regexp match in a precedence bucket.
+  R? visitBucket<R>(
+    int bucket,
+    String path,
+    R? Function(CompiledSlot<T> current, RegExpMatch match) visit,
+  ) {
+    for (final current in buckets[bucket]) {
+      final match = current.regex.firstMatch(path);
+      if (match == null) continue;
+      final result = visit(current, match);
+      if (result != null) return result;
+    }
+    return null;
   }
 }
 
