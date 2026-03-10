@@ -430,7 +430,19 @@ class TrieEngine<T> {
     _normalizedSpans = ensureSpanBuffer(_normalizedSpans, path.length);
     final spanLength = normalizePathSpans(path, _normalizedSpans);
     if (spanLength < 0) return null;
-    return matchStraightTailLeafNormalized(path, _normalizedSpans, spanLength);
+    final match = matchStraightTailLeafNormalized(
+      path,
+      _normalizedSpans,
+      spanLength,
+    );
+    if (match != null || exactRoutes.isEmpty) return match;
+    final normalized = normalizedPathFromSpans(
+      path,
+      _normalizedSpans,
+      spanLength,
+    );
+    return exactRoutes[canonicalizeRoutePath(normalized, caseSensitive)]
+        ?.noParamsMatch;
   }
 
   /// Matches a tail-leaf straight path without normalization.

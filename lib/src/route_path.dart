@@ -118,6 +118,26 @@ String? normalizeRoutePath(String path) {
 Uint32List ensureSpanBuffer(Uint32List buffer, int pathLength) =>
     buffer.length >= pathLength * 2 ? buffer : Uint32List(pathLength * 2);
 
+/// Reconstructs a normalized path from reverse-ordered segment spans.
+String normalizedPathFromSpans(String path, List<int> spans, int spanLength) {
+  if (spanLength == 0) return '/';
+  var length = spanLength >> 1;
+  for (var i = 0; i < spanLength; i += 2) {
+    length += spans[i + 1] - spans[i];
+  }
+  final out = Uint16List(length);
+  var write = 0;
+  for (var pair = spanLength - 2; pair >= 0; pair -= 2) {
+    out[write++] = slashCode;
+    final start = spans[pair];
+    final end = spans[pair + 1];
+    for (var i = start; i < end; i++) {
+      out[write++] = path.codeUnitAt(i);
+    }
+  }
+  return String.fromCharCodes(out);
+}
+
 /// Removes a single trailing slash from a non-root path.
 String trimTrailingSlash(String path) =>
     path.length > 1 && path.endsWith('/') && !path.endsWith('//')
