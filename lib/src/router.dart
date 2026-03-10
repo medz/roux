@@ -293,60 +293,16 @@ class MethodTable<T> {
 }
 
 int commonMethodIndex(String method) {
-  switch (method.length) {
-    case 3:
-      if (method.codeUnitAt(0) == 71 &&
-          method.codeUnitAt(1) == 69 &&
-          method.codeUnitAt(2) == 84) {
-        return 0;
-      }
-      if (method.codeUnitAt(0) == 80 &&
-          method.codeUnitAt(1) == 85 &&
-          method.codeUnitAt(2) == 84) {
-        return 2;
-      }
-    case 4:
-      if (method.codeUnitAt(0) == 80 &&
-          method.codeUnitAt(1) == 79 &&
-          method.codeUnitAt(2) == 83 &&
-          method.codeUnitAt(3) == 84) {
-        return 1;
-      }
-      if (method.codeUnitAt(0) == 72 &&
-          method.codeUnitAt(1) == 69 &&
-          method.codeUnitAt(2) == 65 &&
-          method.codeUnitAt(3) == 68) {
-        return 5;
-      }
-    case 5:
-      if (method.codeUnitAt(0) == 80 &&
-          method.codeUnitAt(1) == 65 &&
-          method.codeUnitAt(2) == 84 &&
-          method.codeUnitAt(3) == 67 &&
-          method.codeUnitAt(4) == 72) {
-        return 3;
-      }
-    case 6:
-      if (method.codeUnitAt(0) == 68 &&
-          method.codeUnitAt(1) == 69 &&
-          method.codeUnitAt(2) == 76 &&
-          method.codeUnitAt(3) == 69 &&
-          method.codeUnitAt(4) == 84 &&
-          method.codeUnitAt(5) == 69) {
-        return 4;
-      }
-    case 7:
-      if (method.codeUnitAt(0) == 79 &&
-          method.codeUnitAt(1) == 80 &&
-          method.codeUnitAt(2) == 84 &&
-          method.codeUnitAt(3) == 73 &&
-          method.codeUnitAt(4) == 79 &&
-          method.codeUnitAt(5) == 78 &&
-          method.codeUnitAt(6) == 83) {
-        return 6;
-      }
-  }
-  return -1;
+  return switch (method) {
+    'GET' => 0,
+    'POST' => 1,
+    'PUT' => 2,
+    'PATCH' => 3,
+    'DELETE' => 4,
+    'HEAD' => 5,
+    'OPTIONS' => 6,
+    _ => -1,
+  };
 }
 
 String canonicalizeMethod(String method) {
