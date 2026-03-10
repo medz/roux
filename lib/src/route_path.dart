@@ -33,42 +33,48 @@ String? normalizeRoutePath(String path) {
 }
 
 String? _normalizeRoutePathSlow(String path) {
-  final spans = <int>[];
-  var cursor = 1;
-  while (cursor < path.length) {
-    while (cursor < path.length && path.codeUnitAt(cursor) == slashCode) {
-      cursor += 1;
+  final out = List<int>.filled(path.length, 0, growable: false);
+  var write = path.length;
+  var skip = 0;
+  var read = path.length - 1;
+  while (read >= 0 && path.codeUnitAt(read) == slashCode) {
+    read -= 1;
+  }
+  while (read >= 0) {
+    final segmentEnd = read + 1;
+    while (read >= 0 && path.codeUnitAt(read) != slashCode) {
+      read -= 1;
     }
-    if (cursor >= path.length) break;
-    final segmentEnd = findSegmentEnd(path, cursor);
-    final segmentLength = segmentEnd - cursor;
-    if (segmentLength == 1 && path.codeUnitAt(cursor) == 46) {
-      cursor = segmentEnd + 1;
+    final segmentStart = read + 1;
+    final segmentLength = segmentEnd - segmentStart;
+    if (segmentLength == 0) {
+      read -= 1;
+      continue;
+    }
+    if (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) {
+      read -= 1;
       continue;
     }
     if (segmentLength == 2 &&
-        path.codeUnitAt(cursor) == 46 &&
-        path.codeUnitAt(cursor + 1) == 46) {
-      if (spans.isEmpty) return null;
-      spans.length -= 2;
-      cursor = segmentEnd + 1;
+        path.codeUnitAt(segmentStart) == 46 &&
+        path.codeUnitAt(segmentStart + 1) == 46) {
+      skip += 1;
+      read -= 1;
       continue;
     }
-    spans
-      ..add(cursor)
-      ..add(segmentEnd);
-    cursor = segmentEnd + 1;
-  }
-  if (spans.isEmpty) return '/';
-  final out = List<int>.filled(path.length, 0, growable: false);
-  var outLength = 0;
-  for (var i = 0; i < spans.length; i += 2) {
-    out[outLength++] = slashCode;
-    for (var j = spans[i]; j < spans[i + 1]; j++) {
-      out[outLength++] = path.codeUnitAt(j);
+    if (skip > 0) {
+      skip -= 1;
+      read -= 1;
+      continue;
     }
+    for (var i = segmentEnd - 1; i >= segmentStart; i--) {
+      out[--write] = path.codeUnitAt(i);
+    }
+    out[--write] = slashCode;
+    read -= 1;
   }
-  return String.fromCharCodes(out, 0, outLength);
+  if (skip > 0) return null;
+  return write == path.length ? '/' : String.fromCharCodes(out, write);
 }
 
 String trimTrailingSlash(String path) {
