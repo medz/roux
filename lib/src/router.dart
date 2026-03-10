@@ -249,9 +249,8 @@ class RouteSet<T> {
     if (simple.exactRoutes.isNotEmpty) {
       final exact = simple
           .exactRoutes[canonicalizeRoutePath(normalized, simple.caseSensitive)];
-      if (exact != null) {
+      if (exact != null)
         simple.collectSlot(exact, normalized, null, 0, methodRank, output);
-      }
     }
     patterns.collectBucket(
       compiledBucketDeferred,
@@ -269,9 +268,8 @@ class MethodTable<T> {
   RouteSet<T> forWriteMethod(String method, bool caseSensitive) {
     final normalized = canonicalizeMethod(method);
     final commonIndex = commonMethodIndex(normalized);
-    if (commonIndex >= 0) {
+    if (commonIndex >= 0)
       return commonRoutes[commonIndex] ??= RouteSet(caseSensitive);
-    }
     return (extraRoutes ??= {}).putIfAbsent(
       normalized,
       () => RouteSet(caseSensitive),
