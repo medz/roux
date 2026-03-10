@@ -2,6 +2,19 @@ import 'dart:typed_data';
 
 import 'route_model.dart';
 
+@pragma('vm:prefer-inline')
+int classifyPathSegment(String path, int segmentStart, int segmentEnd) {
+  final segmentLength = segmentEnd - segmentStart;
+  if (segmentLength == 0) return 0;
+  if (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) return 1;
+  if (segmentLength == 2 &&
+      path.codeUnitAt(segmentStart) == 46 &&
+      path.codeUnitAt(segmentStart + 1) == 46) {
+    return 2;
+  }
+  return -1;
+}
+
 String? sanitizeRoutePath(String path) {
   if (!path.startsWith('/')) return null;
   return trimTrailingSlash(path);
@@ -23,21 +36,15 @@ String? normalizeExactRoutePath(String path) {
       read -= 1;
     }
     final segmentStart = read + 1;
-    final segmentLength = segmentEnd - segmentStart;
-    if (segmentLength == 0) {
-      read -= 1;
-      continue;
-    }
-    if (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) {
-      read -= 1;
-      continue;
-    }
-    if (segmentLength == 2 &&
-        path.codeUnitAt(segmentStart) == 46 &&
-        path.codeUnitAt(segmentStart + 1) == 46) {
-      skip += 1;
-      read -= 1;
-      continue;
+    switch (classifyPathSegment(path, segmentStart, segmentEnd)) {
+      case 0:
+      case 1:
+        read -= 1;
+        continue;
+      case 2:
+        skip += 1;
+        read -= 1;
+        continue;
     }
     if (skip > 0) {
       skip -= 1;
@@ -69,21 +76,15 @@ int normalizePathSpans(String path, Uint32List spans) {
       read -= 1;
     }
     final segmentStart = read + 1;
-    final segmentLength = segmentEnd - segmentStart;
-    if (segmentLength == 0) {
-      read -= 1;
-      continue;
-    }
-    if (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) {
-      read -= 1;
-      continue;
-    }
-    if (segmentLength == 2 &&
-        path.codeUnitAt(segmentStart) == 46 &&
-        path.codeUnitAt(segmentStart + 1) == 46) {
-      skip += 1;
-      read -= 1;
-      continue;
+    switch (classifyPathSegment(path, segmentStart, segmentEnd)) {
+      case 0:
+      case 1:
+        read -= 1;
+        continue;
+      case 2:
+        skip += 1;
+        read -= 1;
+        continue;
     }
     if (skip > 0) {
       skip -= 1;
@@ -104,23 +105,17 @@ String? normalizeRoutePath(String path) {
   var segmentStart = 1;
   for (var i = 1; i < path.length; i++) {
     if (path.codeUnitAt(i) != slashCode) continue;
-    final segmentLength = i - segmentStart;
-    if (segmentLength == 0 ||
-        (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) ||
-        (segmentLength == 2 &&
-            path.codeUnitAt(segmentStart) == 46 &&
-            path.codeUnitAt(segmentStart + 1) == 46)) {
+    if (classifyPathSegment(path, segmentStart, i) >= 0) {
       return normalizeExactRoutePath(path);
     }
     segmentStart = i + 1;
   }
-  final trailingLength = path.length - segmentStart;
-  if (trailingLength == 0) return path.substring(0, path.length - 1);
-  if ((trailingLength == 1 && path.codeUnitAt(segmentStart) == 46) ||
-      (trailingLength == 2 &&
-          path.codeUnitAt(segmentStart) == 46 &&
-          path.codeUnitAt(segmentStart + 1) == 46)) {
-    return normalizeExactRoutePath(path);
+  switch (classifyPathSegment(path, segmentStart, path.length)) {
+    case 0:
+      return path.substring(0, path.length - 1);
+    case 1:
+    case 2:
+      return normalizeExactRoutePath(path);
   }
   return path;
 }
