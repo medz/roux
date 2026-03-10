@@ -12,8 +12,7 @@ class PatternEngine<T> {
   /// Indicates whether any compiled pattern routes have been registered.
   bool hasRoutes = false;
 
-  /// Pattern buckets ordered by matching precedence.
-  final List<List<CompiledSlot<T>>> buckets = List.generate(4, (_) => []);
+  final _buckets = List.generate(4, (_) => <_CompiledSlot<T>>[]);
 
   /// Compiles and registers a pattern route.
   void add(
@@ -31,13 +30,13 @@ class PatternEngine<T> {
     if (compiled == null) {
       throw FormatException('Unsupported segment syntax in route: $pattern');
     }
-    addCompiled(compiled, pattern, duplicatePolicy);
+    _addCompiled(compiled, pattern, duplicatePolicy);
   }
 
   /// Returns the first matching compiled route from a bucket.
   RouteMatch<T>? matchBucket(int bucket, String path) =>
-      visitBucket(bucket, path, (current, match) {
-        return materializeCompiled(current.route, current.groupIndexes, match);
+      _visitBucket(bucket, path, (current, match) {
+        return _materializeCompiled(current.route, current.groupIndexes, match);
       });
 
   /// Collects every matching compiled route from a bucket.
@@ -46,28 +45,27 @@ class PatternEngine<T> {
     String path,
     int methodRank,
     MatchAccumulator<T> output,
-  ) => visitBucket<void>(bucket, path, (current, match) {
+  ) => _visitBucket<void>(bucket, path, (current, match) {
     for (
       RouteEntry<T>? route = current.route;
       route != null;
       route = route.next
     ) {
       output.add(
-        materializeCompiled(route, current.groupIndexes, match),
+        _materializeCompiled(route, current.groupIndexes, match),
         route,
         methodRank,
       );
     }
   });
 
-  /// Inserts a compiled route into its precedence bucket.
-  void addCompiled(
-    CompiledSlot<T> compiled,
+  void _addCompiled(
+    _CompiledSlot<T> compiled,
     String pattern,
     DuplicatePolicy duplicatePolicy,
   ) {
     hasRoutes = true;
-    final routes = buckets[compiled.bucket];
+    final routes = _buckets[compiled.bucket];
     for (var i = 0; i < routes.length; i++) {
       final current = routes[i];
       if (current.shape == compiled.shape) {
@@ -91,13 +89,12 @@ class PatternEngine<T> {
     routes.add(compiled);
   }
 
-  /// Visits every regexp match in a precedence bucket.
-  R? visitBucket<R>(
+  R? _visitBucket<R>(
     int bucket,
     String path,
-    R? Function(CompiledSlot<T> current, RegExpMatch match) visit,
+    R? Function(_CompiledSlot<T> current, RegExpMatch match) visit,
   ) {
-    for (final current in buckets[bucket]) {
+    for (final current in _buckets[bucket]) {
       final match = current.regex.firstMatch(path);
       if (match == null) continue;
       final result = visit(current, match);
@@ -107,25 +104,14 @@ class PatternEngine<T> {
   }
 }
 
-/// Stores a compiled route together with its precedence metadata.
-class CompiledSlot<T> {
-  /// The regular expression used for matching.
+class _CompiledSlot<T> {
   final RegExp regex;
-
-  /// The normalized shape string used for duplicate detection.
   final String shape;
-
-  /// The precedence bucket used during matching.
   final int bucket;
-
-  /// Capturing-group indexes mapped to parameter positions.
   final List<int> groupIndexes;
-
-  /// The route chain stored in this compiled slot.
   RouteEntry<T> route;
 
-  /// Creates a compiled slot.
-  CompiledSlot(
+  _CompiledSlot(
     this.regex,
     this.shape,
     this.bucket,
@@ -134,8 +120,7 @@ class CompiledSlot<T> {
   );
 }
 
-/// Builds a route match from a regular-expression result.
-RouteMatch<T> materializeCompiled<T>(
+RouteMatch<T> _materializeCompiled<T>(
   RouteEntry<T> route,
   List<int> groupIndexes,
   RegExpMatch match,
@@ -172,11 +157,11 @@ class _PatternCompiler<T> {
   var specificity = singleDynamicSpecificity;
   var constraintScore = 0;
 
-  CompiledSlot<T> buildCompiledSlot(
+  _CompiledSlot<T> buildCompiledSlot(
     int bucket,
     int specificity,
     int constraintScore,
-  ) => CompiledSlot(
+  ) => _CompiledSlot(
     RegExp(regex.toString(), caseSensitive: caseSensitive),
     shape.toString(),
     bucket,
@@ -194,8 +179,7 @@ class _PatternCompiler<T> {
     ),
   );
 
-  /// Compiles the current pattern or returns `null` for simple trie routes.
-  CompiledSlot<T>? compile() {
+  _CompiledSlot<T>? compile() {
     if (pattern.contains('{')) {
       needsCompiled = true;
       specificity = structuredDynamicSpecificity;
@@ -282,7 +266,6 @@ class _PatternCompiler<T> {
     return buildCompiledSlot(bucket, specificity, constraintScore);
   }
 
-  /// Writes a capture expression to both regex and duplicate-shape buffers.
   void writeCapture(
     StringBuffer outRegex,
     StringBuffer outShape,
@@ -317,7 +300,6 @@ class _PatternCompiler<T> {
     groupCount += extraGroups;
   }
 
-  /// Writes literal content to both regex and duplicate-shape buffers.
   void writeLiteral(
     String literal,
     StringBuffer outRegex,
@@ -330,7 +312,6 @@ class _PatternCompiler<T> {
     );
   }
 
-  /// Compiles a non-grouped segment into regexp fragments.
   void writeSegment(int start, int end) {
     var cursor = start;
     var lastWasParam = false;
@@ -372,7 +353,6 @@ class _PatternCompiler<T> {
     }
   }
 
-  /// Compiles grouped route syntax recursively.
   bool writeGrouped(
     int start,
     int end,
@@ -384,7 +364,7 @@ class _PatternCompiler<T> {
     while (cursor < end) {
       final code = pattern.codeUnitAt(cursor);
       if (code == openBraceCode) {
-        final groupEnd = findGroupEnd(pattern, cursor);
+        final groupEnd = _findGroupEnd(pattern, cursor);
         final optional =
             groupEnd + 1 < pattern.length &&
             pattern.codeUnitAt(groupEnd + 1) == questionCode;
@@ -464,7 +444,6 @@ class _PatternCompiler<T> {
     return lastWasParam;
   }
 
-  /// Compiles a named capture and returns the next unread offset.
   int writeNamedCapture(
     int cursor,
     int end,
@@ -485,7 +464,7 @@ class _PatternCompiler<T> {
       throw FormatException('Invalid parameter name in route: $pattern');
     }
     if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {
-      final regexEnd = findRegexEnd(pattern, nameEnd, end);
+      final regexEnd = _findRegexEnd(pattern, nameEnd, end);
       final body = pattern.substring(nameEnd + 1, regexEnd);
       if (constraintScore < 2) constraintScore = 2;
       writeCapture(
@@ -493,7 +472,7 @@ class _PatternCompiler<T> {
         outShape,
         '($body)',
         name,
-        extraGroups: countCapturingGroups(body),
+        extraGroups: _countCapturingGroups(body),
       );
       return regexEnd + 1;
     }
@@ -502,8 +481,7 @@ class _PatternCompiler<T> {
   }
 }
 
-/// Finds the matching closing brace for a grouped route section.
-int findGroupEnd(String pattern, int start) {
+int _findGroupEnd(String pattern, int start) {
   var depth = 0;
   for (var i = start; i < pattern.length; i++) {
     final code = pattern.codeUnitAt(i);
@@ -513,8 +491,7 @@ int findGroupEnd(String pattern, int start) {
   throw FormatException('Unclosed group in route: $pattern');
 }
 
-/// Finds the matching closing parenthesis for an inline regex.
-int findRegexEnd(String pattern, int start, int segmentEnd) {
+int _findRegexEnd(String pattern, int start, int segmentEnd) {
   var depth = 0;
   var escaped = false;
   var inCharClass = false;
@@ -537,8 +514,7 @@ int findRegexEnd(String pattern, int start, int segmentEnd) {
   throw FormatException('Unclosed regex in route: $pattern');
 }
 
-/// Counts capturing groups inside a user-supplied regex body.
-int countCapturingGroups(String body) {
+int _countCapturingGroups(String body) {
   var count = 0;
   var escaped = false;
   var inCharClass = false;

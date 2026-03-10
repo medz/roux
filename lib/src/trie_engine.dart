@@ -389,7 +389,7 @@ class TrieEngine<T> {
       }
       final staticKey = segments[depth];
       if (staticKey != null) {
-        if (!equalsPathSlice(staticKey, path, cursor, segmentEnd)) return null;
+        if (!_equalsPathSlice(staticKey, path, cursor, segmentEnd)) return null;
       } else if (p0End == 0) {
         p0Start = cursor;
         p0End = segmentEnd;
@@ -449,7 +449,7 @@ class TrieEngine<T> {
       if (segmentEnd == cursor) return null;
       final staticKey = segments[depth];
       if (staticKey != null) {
-        if (!equalsPathSlice(staticKey, path, cursor, segmentEnd)) return null;
+        if (!_equalsPathSlice(staticKey, path, cursor, segmentEnd)) return null;
       } else if (p0End == 0) {
         p0Start = cursor;
         p0End = segmentEnd;
@@ -505,7 +505,7 @@ class TrieEngine<T> {
       final end = spans[pair + 1];
       final staticKey = segments[depth];
       if (staticKey != null) {
-        if (!equalsPathSlice(staticKey, path, start, end)) return null;
+        if (!_equalsPathSlice(staticKey, path, start, end)) return null;
       } else if (p0End == 0) {
         p0Start = start;
         p0End = end;
@@ -562,7 +562,7 @@ class TrieEngine<T> {
       if (depth >= segments.length) return null;
       final staticKey = segments[depth];
       if (staticKey != null) {
-        if (!equalsPathSlice(staticKey, path, cursor, segmentEnd)) return null;
+        if (!_equalsPathSlice(staticKey, path, cursor, segmentEnd)) return null;
       } else if (p0End == 0) {
         p0Start = cursor;
         p0End = segmentEnd;
@@ -751,7 +751,6 @@ class TrieEngine<T> {
     return params;
   }
 
-  /// Walks the trie recursively for general matching and collection.
   RouteMatch<T>? _walkNode(
     _SimpleNode<T> node,
     String path,
@@ -859,30 +858,14 @@ class TrieEngine<T> {
   }
 }
 
-/// Trie node for simple segment-based routing.
 class _SimpleNode<T> {
-  /// The canonical static segment held by this node, if any.
   final String? staticKey;
-
-  /// Linked-list and map-based child references.
   _SimpleNode<T>? staticChild, staticNext, paramChild;
-
-  /// Static and leaf route tables stored on this node.
   Map<String, _SimpleNode<T>>? staticMap;
-
-  /// Leaf routes keyed by the final segment.
   Map<String, RouteEntry<T>>? leafRoutes;
-
-  /// Static child count and terminal routes for this node.
   int staticCount = 0;
-
-  /// Exact and wildcard terminal routes for this node.
   RouteEntry<T>? exactRoute, wildcardRoute;
-
-  /// Creates a trie node for an optional static segment.
   _SimpleNode([this.staticKey]);
-
-  /// Returns an existing static child or creates one for [key].
   _SimpleNode<T> getOrCreateStaticChildSlice(String key) {
     final map = staticMap;
     if (map != null) return map[key] ??= _SimpleNode<T>(key);
@@ -901,7 +884,6 @@ class _SimpleNode<T> {
     return created;
   }
 
-  /// Finds a static child matching a path slice.
   _SimpleNode<T>? findStaticChildSlice(
     String path,
     int start,
@@ -909,14 +891,14 @@ class _SimpleNode<T> {
     bool caseSensitive,
   ) {
     if (!caseSensitive) {
-      return findStaticChild(sliceKey(path, start, end));
+      return findStaticChild(_sliceKey(path, start, end));
     }
     final map = staticMap;
     if (map != null) return map[path.substring(start, end)];
     _SimpleNode<T>? prev;
     var child = staticChild;
     while (child != null) {
-      if (equalsPathSlice(child.staticKey!, path, start, end)) {
+      if (_equalsPathSlice(child.staticKey!, path, start, end)) {
         promoteStaticChild(prev, child);
         return child;
       }
@@ -926,7 +908,6 @@ class _SimpleNode<T> {
     return null;
   }
 
-  /// Finds a static child matching an already canonicalized key.
   _SimpleNode<T>? findStaticChild(String key) {
     final map = staticMap;
     if (map != null) return map[key];
@@ -943,7 +924,6 @@ class _SimpleNode<T> {
     return null;
   }
 
-  /// Finds a leaf route matching a path slice.
   RouteEntry<T>? findLeafRouteSlice(
     String path,
     int start,
@@ -954,10 +934,9 @@ class _SimpleNode<T> {
     if (routes == null) return null;
     return routes[caseSensitive
         ? path.substring(start, end)
-        : sliceKey(path, start, end)];
+        : _sliceKey(path, start, end)];
   }
 
-  /// Promotes a recently matched static child to the front of the list.
   void promoteStaticChild(_SimpleNode<T>? prev, _SimpleNode<T> child) {
     if (prev == null) return;
     prev.staticNext = child.staticNext;
@@ -966,8 +945,7 @@ class _SimpleNode<T> {
   }
 }
 
-/// Compares a canonical key against a raw path slice.
-bool equalsPathSlice(String key, String path, int start, int end) {
+bool _equalsPathSlice(String key, String path, int start, int end) {
   if (key.length != end - start) return false;
   for (var i = 0; i < key.length; i++) {
     if (key.codeUnitAt(i) != path.codeUnitAt(start + i)) return false;
@@ -975,19 +953,7 @@ bool equalsPathSlice(String key, String path, int start, int end) {
   return true;
 }
 
-/// Compares a lowercased key against a path slice without allocating.
-bool equalsFoldedPathSlice(String key, String path, int start, int end) {
-  if (key.length != end - start) return false;
-  for (var i = 0; i < key.length; i++) {
-    final code = path.codeUnitAt(start + i);
-    final lowered = code >= 65 && code <= 90 ? code + 32 : code;
-    if (key.codeUnitAt(i) != lowered) return false;
-  }
-  return true;
-}
-
-/// Builds a folded key for case-insensitive static lookups.
-String sliceKey(String path, int start, int end) =>
+String _sliceKey(String path, int start, int end) =>
     path.substring(start, end).toLowerCase();
 
 /// Stores parameter capture spans for generic trie matching.
@@ -1023,15 +989,12 @@ class ParamStack {
   int endAt(int index) => values[index * 2 + 1];
 }
 
-/// Small-map implementation optimized for one or two parameters.
 class _CompactParamsMap extends MapBase<String, String> {
-  /// Creates a compact map containing one entry.
   _CompactParamsMap.one(this._k0, this._v0)
     : _k1 = null,
       _v1 = null,
       _count = 1;
 
-  /// Creates a compact map containing two entries.
   _CompactParamsMap.two(this._k0, this._v0, this._k1, this._v1) : _count = 2;
 
   final String _k0, _v0;
@@ -1039,7 +1002,6 @@ class _CompactParamsMap extends MapBase<String, String> {
   final int _count;
   Map<String, String>? _backing;
 
-  /// Promotes the compact map to a regular mutable backing map.
   Map<String, String> _promote() => switch (_count) {
     1 => _backing ??= {_k0: _v0},
     _ => _backing ??= {_k0: _v0, _k1!: _v1!},

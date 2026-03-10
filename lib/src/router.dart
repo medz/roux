@@ -16,12 +16,12 @@ class Router<T> {
        _caseSensitive = caseSensitive,
        _decodePath = decodePath,
        _normalizePath = normalizePath,
-       _sharedRoutes = RouteSet(caseSensitive) {
+       _sharedRoutes = _RouteSet(caseSensitive) {
     if (routes != null && routes.isNotEmpty) addAll(routes);
   }
 
-  final RouteSet<T> _sharedRoutes;
-  final _methodRoutes = MethodTable<T>();
+  final _RouteSet<T> _sharedRoutes;
+  final _methodRoutes = _MethodTable<T>();
   final DuplicatePolicy _duplicatePolicy;
   final bool _caseSensitive, _decodePath, _normalizePath;
   bool _hasSharedRoutes = false;
@@ -67,9 +67,9 @@ class Router<T> {
   /// Returns the best match for [path].
   RouteMatch<T>? match(String path, {String? method}) {
     if (!_hasSharedRoutes && !_decodePath) {
-      RouteSet<T>? routeSet;
+      _RouteSet<T>? routeSet;
       if (method != null) {
-        final commonIndex = commonMethodIndex(method);
+        final commonIndex = _commonMethodIndex(method);
         if (commonIndex >= 0) {
           routeSet = _methodRoutes.commonRoutes[commonIndex];
         }
@@ -121,7 +121,7 @@ class Router<T> {
     return collected.matches;
   }
 
-  RouteSet<T> _routeSetFor(String? method) => method == null
+  _RouteSet<T> _routeSetFor(String? method) => method == null
       ? _sharedRoutes
       : _methodRoutes.forWriteMethod(method, _caseSensitive);
 
@@ -150,45 +150,36 @@ class Router<T> {
   }
 }
 
-/// Stores the simple trie and compiled pattern engines for one method bucket.
-class RouteSet<T> {
-  /// Creates an empty route set.
-  RouteSet(bool caseSensitive)
+class _RouteSet<T> {
+  _RouteSet(bool caseSensitive)
     : simple = TrieEngine(caseSensitive),
       patterns = PatternEngine(caseSensitive);
 
   static const int _hybridMode = 0, _simpleMode = 1, _straightMode = 2;
 
-  /// The trie engine for exact and segment-level routes.
   final TrieEngine<T> simple;
 
-  /// The compiled matcher for richer pathname syntax.
   final PatternEngine<T> patterns;
   int _matchMode = _straightMode;
 
-  /// Whether collected matches must be sorted by specificity.
   bool get needsSpecificitySort =>
       simple.hasBranchingChoices ||
       simple.root.paramChild != null ||
       patterns.hasRoutes;
 
-  /// Whether the route set requires strict path validation.
   bool get needsStrictPathValidation =>
       simple.needsStrictPathValidation || patterns.hasRoutes;
 
-  /// Whether normalized matching can stay on the straight fast path.
   bool get canMatchBestNormalized =>
       !patterns.hasRoutes &&
       simple.globalFallback == null &&
       simple.canMatchStraightNormalized;
 
-  /// Whether normalized matching can use exact lookup only.
   bool get canMatchExactNormalized =>
       !patterns.hasRoutes &&
       simple.exactRoutes.isNotEmpty &&
       !simple.hasNonExactRoutes;
 
-  /// Adds a route to the route set.
   void addRoute(
     String patternPath,
     T data,
@@ -206,7 +197,6 @@ class RouteSet<T> {
     _refreshMatchMode();
   }
 
-  /// Returns the highest-priority match for a normalized path.
   RouteMatch<T>? matchBest(String normalized) {
     switch (_matchMode) {
       case _straightMode:
@@ -229,7 +219,6 @@ class RouteSet<T> {
             : simple.materialize(simple.globalFallback!, normalized, null, 1));
   }
 
-  /// Returns the highest-priority match for a path that may need normalization.
   RouteMatch<T>? matchBestNormalized(String path) {
     if (canMatchBestNormalized) {
       final straight = simple.matchStraightNormalized(path);
@@ -243,7 +232,6 @@ class RouteSet<T> {
         : simple.exactRoutes[normalized]?.noParamsMatch;
   }
 
-  /// Refreshes the internal matching strategy after route changes.
   void _refreshMatchMode() {
     _matchMode = patterns.hasRoutes || simple.globalFallback != null
         ? _hybridMode
@@ -252,7 +240,6 @@ class RouteSet<T> {
         : _simpleMode;
   }
 
-  /// Collects every match for a normalized path.
   void collectMatches(
     String normalized,
     int methodRank,
@@ -287,36 +274,30 @@ class RouteSet<T> {
   }
 }
 
-/// Stores shared and per-method route sets.
-class MethodTable<T> {
-  /// Slots for common HTTP methods.
-  final commonRoutes = List<RouteSet<T>?>.filled(7, null);
+class _MethodTable<T> {
+  final commonRoutes = List<_RouteSet<T>?>.filled(7, null);
 
-  /// Lazily allocated route sets for uncommon HTTP methods.
-  final extraRoutes = <String, RouteSet<T>>{};
+  final extraRoutes = <String, _RouteSet<T>>{};
 
-  /// Returns the route set used when registering [method].
-  RouteSet<T> forWriteMethod(String method, bool caseSensitive) {
-    final normalized = canonicalizeMethod(method);
-    final commonIndex = commonMethodIndex(normalized);
+  _RouteSet<T> forWriteMethod(String method, bool caseSensitive) {
+    final normalized = _canonicalizeMethod(method);
+    final commonIndex = _commonMethodIndex(normalized);
     if (commonIndex >= 0) {
-      return commonRoutes[commonIndex] ??= RouteSet(caseSensitive);
+      return commonRoutes[commonIndex] ??= _RouteSet(caseSensitive);
     }
-    return extraRoutes.putIfAbsent(normalized, () => RouteSet(caseSensitive));
+    return extraRoutes.putIfAbsent(normalized, () => _RouteSet(caseSensitive));
   }
 
-  /// Returns the route set used when matching [method].
-  RouteSet<T>? lookupMethod(String method) {
-    final normalized = canonicalizeMethod(method);
-    final commonIndex = commonMethodIndex(normalized);
+  _RouteSet<T>? lookupMethod(String method) {
+    final normalized = _canonicalizeMethod(method);
+    final commonIndex = _commonMethodIndex(normalized);
     return commonIndex >= 0
         ? commonRoutes[commonIndex]
         : extraRoutes[normalized];
   }
 }
 
-/// Maps common HTTP methods to their fixed route-set slots.
-int commonMethodIndex(String method) {
+int _commonMethodIndex(String method) {
   return switch (method) {
     'GET' => 0,
     'POST' => 1,
@@ -329,8 +310,7 @@ int commonMethodIndex(String method) {
   };
 }
 
-/// Normalizes an HTTP method name for lookup and registration.
-String canonicalizeMethod(String method) {
+String _canonicalizeMethod(String method) {
   final normalized = method.trim();
   if (normalized.isEmpty) {
     throw ArgumentError.value(method, 'method', 'Method must not be empty.');

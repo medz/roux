@@ -2,9 +2,8 @@ import 'dart:typed_data';
 
 import 'route_model.dart';
 
-/// Classifies a path segment as empty, dot, dot-dot, or ordinary text.
 @pragma('vm:prefer-inline')
-int classifyPathSegment(String path, int segmentStart, int segmentEnd) {
+int _classifyPathSegment(String path, int segmentStart, int segmentEnd) {
   final segmentLength = segmentEnd - segmentStart;
   if (segmentLength == 0) return 0;
   if (segmentLength == 1 && path.codeUnitAt(segmentStart) == 46) return 1;
@@ -31,7 +30,7 @@ String? normalizeExactRoutePath(String path) {
       read -= 1;
     }
     final segmentStart = read + 1;
-    switch (classifyPathSegment(path, segmentStart, segmentEnd)) {
+    switch (_classifyPathSegment(path, segmentStart, segmentEnd)) {
       case 0:
       case 1:
         read -= 1;
@@ -70,7 +69,7 @@ int normalizePathSpans(String path, Uint32List spans) {
       read -= 1;
     }
     final segmentStart = read + 1;
-    switch (classifyPathSegment(path, segmentStart, segmentEnd)) {
+    switch (_classifyPathSegment(path, segmentStart, segmentEnd)) {
       case 0:
       case 1:
         read -= 1;
@@ -100,12 +99,12 @@ String? normalizeRoutePath(String path) {
   var segmentStart = 1;
   for (var i = 1; i < path.length; i++) {
     if (path.codeUnitAt(i) != slashCode) continue;
-    if (classifyPathSegment(path, segmentStart, i) >= 0) {
+    if (_classifyPathSegment(path, segmentStart, i) >= 0) {
       return normalizeExactRoutePath(path);
     }
     segmentStart = i + 1;
   }
-  switch (classifyPathSegment(path, segmentStart, path.length)) {
+  switch (_classifyPathSegment(path, segmentStart, path.length)) {
     case 0:
       return path.substring(0, path.length - 1);
     case 1:
