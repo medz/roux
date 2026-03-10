@@ -3,8 +3,8 @@ import 'dart:collection';
 import 'route_model.dart';
 import 'route_path.dart';
 
-class SimpleEngine<T> {
-  SimpleEngine(this.caseSensitive);
+class TrieEngine<T> {
+  TrieEngine(this.caseSensitive);
 
   final bool caseSensitive;
   final Map<String, RouteEntry<T>> exactRoutes = <String, RouteEntry<T>>{};

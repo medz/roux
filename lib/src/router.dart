@@ -3,7 +3,7 @@ export 'route_model.dart' show DuplicatePolicy, RouteMatch;
 import 'route_path.dart';
 import 'pattern_engine.dart';
 import 'route_model.dart';
-import 'simple_engine.dart';
+import 'trie_engine.dart';
 
 class Router<T> {
   Router({
@@ -151,12 +151,12 @@ class Router<T> {
 
 class RouteSet<T> {
   RouteSet(bool caseSensitive)
-    : simple = SimpleEngine<T>(caseSensitive),
+    : simple = TrieEngine<T>(caseSensitive),
       patterns = PatternEngine<T>(caseSensitive);
 
   static const int _hybridMode = 0, _simpleMode = 1, _straightMode = 2;
 
-  final SimpleEngine<T> simple;
+  final TrieEngine<T> simple;
   final PatternEngine<T> patterns;
   int _matchMode = _straightMode;
 
