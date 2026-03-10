@@ -90,9 +90,7 @@ class Router<T> {
         _sharedRoutes.needsStrictPathValidation ||
         (routeSet?.needsStrictPathValidation ?? false);
     final normalized = _preparePath(path, strict);
-    if (normalized == null) {
-      return null;
-    }
+    if (normalized == null) return null;
     return routeSet?.matchBest(normalized) ??
         _sharedRoutes.matchBest(normalized);
   }
@@ -107,9 +105,7 @@ class Router<T> {
       return [];
     }
     final collected = MatchAccumulator<T>(
-      routeSet != null ||
-          _sharedRoutes.needsSpecificitySort ||
-          routeSet?.needsSpecificitySort == true,
+      routeSet != null || _sharedRoutes.needsSpecificitySort,
     );
     _sharedRoutes.collectMatches(normalized, 0, collected);
     if (routeSet != null) routeSet.collectMatches(normalized, 1, collected);
@@ -182,9 +178,8 @@ class RouteSet<T> {
     DuplicatePolicy duplicatePolicy,
     int registrationOrder,
   ) {
-    if (!patternPath.startsWith('/')) {
+    if (!patternPath.startsWith('/'))
       throw FormatException('Route pattern must start with "/": $patternPath');
-    }
 
     final normalized = trimTrailingSlash(patternPath);
     if (simple.add(normalized, data, duplicatePolicy, registrationOrder)) {
@@ -307,8 +302,7 @@ int commonMethodIndex(String method) {
 
 String canonicalizeMethod(String method) {
   final normalized = method.trim();
-  if (normalized.isEmpty) {
+  if (normalized.isEmpty)
     throw ArgumentError.value(method, 'method', 'Method must not be empty.');
-  }
   return normalized.toUpperCase();
 }

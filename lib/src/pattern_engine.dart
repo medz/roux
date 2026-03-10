@@ -24,18 +24,16 @@ class PatternEngine<T> {
       caseSensitive,
       registrationOrder,
     ).compile();
-    if (compiled == null) {
+    if (compiled == null)
       throw FormatException('Unsupported segment syntax in route: $pattern');
-    }
     addCompiled(compiled, pattern, duplicatePolicy);
   }
 
   RouteMatch<T>? matchBucket(int bucket, String path) {
     for (final current in buckets[bucket]) {
       final match = current.regex.firstMatch(path);
-      if (match != null) {
+      if (match != null)
         return materializeCompiled(current.route, current.groupIndexes, match);
-      }
     }
     return null;
   }
