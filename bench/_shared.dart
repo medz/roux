@@ -50,45 +50,6 @@ void consumeSymbolParams(Map<Symbol, String> params, void Function(int) sink) {
   }
 }
 
-String? prepareComparablePath(
-  String path, {
-  required bool decode,
-  required bool normalize,
-  required bool ignoreCase,
-}) {
-  if (decode && path.contains('%')) {
-    try {
-      path = Uri.decodeFull(path);
-    } on ArgumentError {
-      return null;
-    }
-  }
-  if (!path.startsWith('/')) return null;
-  if (normalize) {
-    final normalized = normalizeForBench(path);
-    if (normalized == null) return null;
-    path = normalized;
-  } else if (path.length > 1 && path.endsWith('/')) {
-    path = path.substring(0, path.length - 1);
-  }
-  return ignoreCase ? path.toLowerCase() : path;
-}
-
-String? normalizeForBench(String path) {
-  if (path.isEmpty || !path.startsWith('/')) return null;
-  final segments = <String>[];
-  for (final segment in path.split('/')) {
-    if (segment.isEmpty || segment == '.') continue;
-    if (segment == '..') {
-      if (segments.isEmpty) return null;
-      segments.removeLast();
-      continue;
-    }
-    segments.add(segment);
-  }
-  return segments.isEmpty ? '/' : '/${segments.join('/')}';
-}
-
 class Request {
   final String path;
   final bool needsParams;

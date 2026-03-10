@@ -6,7 +6,7 @@ import '_shared.dart';
 const _defaultRouteCount = 500;
 const _defaultQueryCount = 50000;
 const _benchmarkNote =
-    'normalize + decode + case folding contract; relic side uses caller-side preprocessing';
+    'largest native shared contract: normalized dirty input, static, params, * and **';
 
 class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
   MaximalFeatureBenchmark(
@@ -27,28 +27,35 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
     requests.clear();
     for (var i = 0; i < queryCount; i++) {
       final routeIndex = i % routeCount;
-      if ((i & 1) == 0) {
-        requests.add(Request('/STATIC//$routeIndex%2FHOME/..//home', false));
-      } else {
-        requests.add(
-          Request(
-            '/Users//tmp/../User_$i/Orders/%6Frder_$i/ITEM$routeIndex',
-            true,
-          ),
-        );
+      switch (i & 3) {
+        case 0:
+          requests.add(Request('/./static/../static/$routeIndex/home/', false));
+        case 1:
+          requests.add(
+            Request(
+              '/users//tmp/../user_$i/orders/./order_$i/item$routeIndex/',
+              true,
+            ),
+          );
+        case 2:
+          requests.add(
+            Request('/assets//segment_$i/./item$routeIndex/', false),
+          );
+        case 3:
+          requests.add(
+            Request('/archive//$routeIndex/./month_${i % 12}/entry_$i/', false),
+          );
       }
     }
 
     switch (target) {
       case Target.roux:
-        final router = roux.Router<int>(
-          caseSensitive: false,
-          decodePath: true,
-          normalizePath: true,
-        );
+        final router = roux.Router<int>(normalizePath: true);
         for (var i = 0; i < routeCount; i++) {
           router.add('/static/$i/home', i, method: 'GET');
           router.add('/users/:id/orders/:orderId/item$i', i, method: 'GET');
+          router.add('/assets/*/item$i', i, method: 'GET');
+          router.add('/archive/$i/**', i, method: 'GET');
         }
         _rouxRouter = router;
       case Target.relic:
@@ -56,6 +63,8 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
         for (var i = 0; i < routeCount; i++) {
           router.get('/static/$i/home', i);
           router.get('/users/:id/orders/:orderId/item$i', i);
+          router.get('/assets/*/item$i', i);
+          router.get('/archive/$i/**', i);
         }
         _relicRouter = router;
     }
@@ -77,14 +86,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
         final router = _relicRouter!;
         const method = relic.Method.get;
         for (final request in requests) {
-          final prepared = prepareComparablePath(
-            request.path,
-            decode: true,
-            normalize: true,
-            ignoreCase: true,
-          );
-          if (prepared == null) continue;
-          final match = router.lookup(method, prepared).asMatch;
+          final match = router.lookup(method, request.path).asMatch;
           sink ^= match.value;
           if (request.needsParams) {
             consumeSymbolParams(match.parameters, _mix);
