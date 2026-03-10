@@ -10,7 +10,7 @@ String? sanitizeRoutePath(String path) {
 String? normalizeExactRoutePath(String path) {
   if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
   if (path.length == 1) return path;
-  final out = List<int>.filled(path.length, 0, growable: false);
+  final out = Uint16List(path.length);
   var outStart = path.length;
   var skip = 0;
   var read = path.length - 1;
