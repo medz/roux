@@ -60,14 +60,15 @@ String? _normalizeRoutePathSlow(String path) {
     cursor = segmentEnd + 1;
   }
   if (spans.isEmpty) return '/';
-  final out = StringBuffer();
+  final out = List<int>.filled(path.length, 0, growable: false);
+  var outLength = 0;
   for (var i = 0; i < spans.length; i += 2) {
-    out.writeCharCode(slashCode);
+    out[outLength++] = slashCode;
     for (var j = spans[i]; j < spans[i + 1]; j++) {
-      out.writeCharCode(path.codeUnitAt(j));
+      out[outLength++] = path.codeUnitAt(j);
     }
   }
-  return out.toString();
+  return String.fromCharCodes(out, 0, outLength);
 }
 
 String trimTrailingSlash(String path) {
