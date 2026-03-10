@@ -186,10 +186,7 @@ class RouteSet<T> {
   bool get canMatchExactNormalized =>
       !patterns.hasRoutes &&
       simple.exactRoutes.isNotEmpty &&
-      !simple.hasBranchingChoices &&
-      simple.root.paramChild == null &&
-      simple.root.wildcardRoute == null &&
-      simple.globalFallback == null;
+      !simple.hasNonExactRoutes;
 
   /// Adds a route to the route set.
   void addRoute(
@@ -236,7 +233,12 @@ class RouteSet<T> {
 
   /// Returns the highest-priority match for a path that may need normalization.
   RouteMatch<T>? matchBestNormalized(String path) {
-    if (!canMatchExactNormalized) return simple.matchStraightNormalized(path);
+    if (canMatchBestNormalized) {
+      final straight = simple.matchStraightNormalized(path);
+      if (straight != null || simple.exactRoutes.isEmpty) return straight;
+    } else if (!canMatchExactNormalized) {
+      return simple.matchStraightNormalized(path);
+    }
     final normalized = normalizeRoutePath(path);
     return normalized == null
         ? null

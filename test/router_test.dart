@@ -978,6 +978,18 @@ void main() {
       ]);
     });
 
+    test('matches mandatory grouped routes before broad plain params', () {
+      final router = Router<String>(
+        routes: {'/:id': 'param', '/foo{bar}': 'group'},
+      );
+
+      expect(router.match('/foobar')?.data, 'group');
+      expect(router.matchAll('/foobar').map((match) => match.data), [
+        'param',
+        'group',
+      ]);
+    });
+
     test(
       'matches regex parameter routes before plain params in single match',
       () {
@@ -1001,6 +1013,30 @@ void main() {
       expect(router.match('/users/42/file-demo.png')?.params, {
         'id': '42',
         '0': 'demo',
+      });
+    });
+
+    test('matches regex params with character classes correctly', () {
+      final router = Router<String>();
+      router.add('/symbols/:value([()])/:slug([a-z]+)', 'regex');
+
+      expect(router.match('/symbols/(/demo')?.params, {
+        'value': '(',
+        'slug': 'demo',
+      });
+      expect(router.match('/symbols/)/demo')?.params, {
+        'value': ')',
+        'slug': 'demo',
+      });
+    });
+
+    test('counts named regex capture groups without shifting later params', () {
+      final router = Router<String>();
+      router.add('/users/:id((?<inner>\\d+))/:slug([a-z]+)', 'regex');
+
+      expect(router.match('/users/42/demo')?.params, {
+        'id': '42',
+        'slug': 'demo',
       });
     });
 
@@ -1109,6 +1145,18 @@ void main() {
         );
       },
     );
+
+    test('keeps per-leaf parameter names on straight tail-leaf matches', () {
+      final router = Router<String>(
+        routes: {
+          '/users/:id/details': 'details',
+          '/users/:slug/preview': 'preview',
+        },
+      );
+
+      expect(router.match('/users/alice/details')?.params, {'id': 'alice'});
+      expect(router.match('/users/demo/preview')?.params, {'slug': 'demo'});
+    });
 
     test(
       'sorts branching trie matches from less specific to more specific',
@@ -1236,6 +1284,20 @@ void main() {
             ?.params,
         {'id': 'alice', 'itemId': 'book'},
       );
+    });
+
+    test(
+      'does not skip normalized trie params when exact routes coexist in a method bucket',
+      () {
+      final local = Router<String>(
+        normalizePath: true,
+        routes: {'/health': 'health'},
+      );
+      local.add('/users/:id', 'user', method: 'GET');
+      local.add('/health', 'health', method: 'GET');
+
+      expect(local.match('/users//42/', method: 'GET')?.data, 'user');
+      expect(local.match('/users//42/', method: 'GET')?.params, {'id': '42'});
     });
 
     test('supports combining decodePath with path normalization', () {
@@ -1407,6 +1469,10 @@ void main() {
     test('rejects duplicate capture names in compiled routes', () {
       expect(
         () => Router<String>(routes: {'/files/:name.:name': 'dup'}),
+        throwsFormatException,
+      );
+      expect(
+        () => Router<String>(routes: {'/files/:id((?<inner>\\d+))/:id': 'dup'}),
         throwsFormatException,
       );
     });

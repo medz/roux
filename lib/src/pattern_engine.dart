@@ -197,14 +197,13 @@ class _PatternCompiler<T> {
   /// Compiles the current pattern or returns `null` for simple trie routes.
   CompiledSlot<T>? compile() {
     if (pattern.contains('{')) {
+      needsCompiled = true;
+      specificity = structuredDynamicSpecificity;
+      if (constraintScore < 1) constraintScore = 1;
       writeGrouped(0, pattern.length, false, regex, shape);
       regex.write(r'$');
       shape.write(r'$');
-      return buildCompiledSlot(
-        compiledBucketDeferred,
-        structuredDynamicSpecificity,
-        1,
-      );
+      return buildCompiledSlot(bucket, specificity, constraintScore);
     }
     for (
       var cursor = pattern.length == 1 ? pattern.length : 1;
@@ -399,6 +398,8 @@ class _PatternCompiler<T> {
           bodyShape,
         );
         if (optional) {
+          bucket = compiledBucketDeferred;
+          if (constraintScore < 1) constraintScore = 1;
           outRegex
             ..write('(?:')
             ..write(bodyRegex)
@@ -427,6 +428,8 @@ class _PatternCompiler<T> {
           );
         }
         writeCapture(outRegex, outShape, '([^/]*)', '${unnamedCount++}');
+        if (bucket < compiledBucketLate) bucket = compiledBucketLate;
+        if (constraintScore < 1) constraintScore = 1;
         cursor += 1;
         lastWasParam = false;
         continue;
@@ -514,12 +517,17 @@ int findGroupEnd(String pattern, int start) {
 int findRegexEnd(String pattern, int start, int segmentEnd) {
   var depth = 0;
   var escaped = false;
+  var inCharClass = false;
   for (var i = start; i < segmentEnd; i++) {
     final code = pattern.codeUnitAt(i);
     if (escaped) {
       escaped = false;
     } else if (code == 92) {
       escaped = true;
+    } else if (inCharClass) {
+      if (code == 93) inCharClass = false;
+    } else if (code == 91) {
+      inCharClass = true;
     } else if (code == 40) {
       depth += 1;
     } else if (code == 41 && --depth == 0) {
@@ -533,14 +541,31 @@ int findRegexEnd(String pattern, int start, int segmentEnd) {
 int countCapturingGroups(String body) {
   var count = 0;
   var escaped = false;
+  var inCharClass = false;
   for (var i = 0; i < body.length; i++) {
     final code = body.codeUnitAt(i);
     if (escaped) {
       escaped = false;
     } else if (code == 92) {
       escaped = true;
-    } else if (code == 40 &&
-        (i + 1 >= body.length || body.codeUnitAt(i + 1) != questionCode)) {
+    } else if (inCharClass) {
+      if (code == 93) inCharClass = false;
+    } else if (code == 91) {
+      inCharClass = true;
+    } else if (code == 40) {
+      if (i + 1 < body.length && body.codeUnitAt(i + 1) == questionCode) {
+        if (i + 2 >= body.length) continue;
+        final marker = body.codeUnitAt(i + 2);
+        if (marker == colonCode || marker == 61 || marker == 33) continue;
+        if (marker == 60) {
+          if (i + 3 < body.length) {
+            final next = body.codeUnitAt(i + 3);
+            if (next == 61 || next == 33) continue;
+          }
+          count += 1;
+        }
+        continue;
+      }
       count += 1;
     }
   }

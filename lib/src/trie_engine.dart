@@ -18,7 +18,8 @@ class TrieEngine<T> {
   /// Flags describing trie shape and validation requirements.
   bool hasBranchingChoices = false,
       hasWildcardRoutes = false,
-      needsStrictPathValidation = false;
+      needsStrictPathValidation = false,
+      hasNonExactRoutes = false;
 
   /// Shared fallback route for `/**`-style matches.
   RouteEntry<T>? globalFallback;
@@ -121,6 +122,7 @@ class TrieEngine<T> {
         mergeRouteEntries(existing, route, path, duplicatePolicy, rejectPrefix);
 
     void finishSimple() {
+      hasNonExactRoutes = true;
       if (paramCount > maxParamDepth) maxParamDepth = paramCount;
       straightDirty = true;
     }
@@ -310,14 +312,24 @@ class TrieEngine<T> {
       }
     }
     final tailLeaves = tailOnly ? straightLeaves[last] : null;
-    straightTailLeaves = tailLeaves;
     if (tailLeaves == null || tailLeaves.isEmpty) {
+      straightTailLeaves = null;
       straightParamCount = 0;
       straightParam0 = null;
       straightParam1 = null;
       return;
     }
     final sample = tailLeaves.values.first;
+    for (final leaf in tailLeaves.values.skip(1)) {
+      if (!_sameParamNames(sample.paramNames, leaf.paramNames)) {
+        straightTailLeaves = null;
+        straightParamCount = 0;
+        straightParam0 = null;
+        straightParam1 = null;
+        return;
+      }
+    }
+    straightTailLeaves = tailLeaves;
     straightParamCount = sample.paramNames.length;
     straightParam0 = straightParamCount > 0 ? sample.paramNames[0] : null;
     straightParam1 = straightParamCount > 1 ? sample.paramNames[1] : null;
@@ -558,6 +570,15 @@ class TrieEngine<T> {
       depth += 1;
       cursor = nextCursor;
     }
+  }
+
+  /// Returns whether two param-name lists have identical capture order.
+  bool _sameParamNames(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   /// Builds a small parameter match without the generic materializer.
