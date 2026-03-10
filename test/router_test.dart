@@ -1289,16 +1289,18 @@ void main() {
     test(
       'does not skip normalized trie params when exact routes coexist in a method bucket',
       () {
-      final local = Router<String>(
-        normalizePath: true,
-        routes: {'/health': 'health'},
-      );
-      local.add('/users/:id', 'user', method: 'GET');
-      local.add('/health', 'health', method: 'GET');
+        final local = Router<String>(
+          normalizePath: true,
+          routes: {'/health': 'health'},
+        );
+        local.add('/users/:id', 'user', method: 'GET');
+        local.add('/health', 'health', method: 'GET');
 
-      expect(local.match('/users//42/', method: 'GET')?.data, 'user');
-      expect(local.match('/users//42/', method: 'GET')?.params, {'id': '42'});
-    });
+        expect(local.match('/users//42/', method: 'GET')?.data, 'user');
+        expect(local.match('/users//42/', method: 'GET')?.params, {'id': '42'});
+        expect(local.match('/./health/', method: 'GET')?.data, 'health');
+      },
+    );
 
     test('supports combining decodePath with path normalization', () {
       final local = Router<String>(

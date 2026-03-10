@@ -178,8 +178,8 @@ class RouteSet<T> {
 
   /// Whether normalized matching can stay on the straight fast path.
   bool get canMatchBestNormalized =>
-      _matchMode == _straightMode &&
       !patterns.hasRoutes &&
+      simple.globalFallback == null &&
       simple.canMatchStraightNormalized;
 
   /// Whether normalized matching can use exact lookup only.
