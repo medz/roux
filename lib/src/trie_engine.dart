@@ -869,7 +869,7 @@ class ParamStack {
   int length = 0;
 
   ParamStack(int capacity)
-    : values = List<int>.filled(
+    : values = List.filled(
         (capacity == 0 ? 1 : capacity) * 2,
         0,
         growable: false,

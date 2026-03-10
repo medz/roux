@@ -18,7 +18,7 @@ class PatternEngine<T> {
     DuplicatePolicy duplicatePolicy,
     int registrationOrder,
   ) {
-    final compiled = _PatternCompiler<T>(
+    final compiled = _PatternCompiler(
       pattern,
       data,
       caseSensitive,
