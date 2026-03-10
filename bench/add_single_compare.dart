@@ -1,7 +1,6 @@
 import 'package:benchmark_harness/perf_benchmark_harness.dart';
 import 'package:relic/relic.dart' as relic;
 import 'package:roux/roux.dart' as roux;
-import 'package:routingkit/routingkit.dart' as routingkit;
 
 const _sampleCount = 1024;
 const _defaultStaticValue = 1;
@@ -86,35 +85,6 @@ class _DynamicSingleAddRouxBenchmark extends _SingleAddBenchmark {
   }
 }
 
-class _StaticSingleAddRoutingkitBenchmark extends _SingleAddBenchmark {
-  _StaticSingleAddRoutingkitBenchmark(_CollectingEmitter emitter)
-    : super(['AddSingle', 'Static', 'Routingkit'], emitter);
-
-  @override
-  void run() {
-    final index = _nextIndex();
-    final route = _staticPatterns[index];
-    final router = routingkit.createRouter<int>();
-    router.add('GET', route, _defaultStaticValue);
-    _sink ^= router.find('GET', route)?.data ?? 0;
-  }
-}
-
-class _DynamicSingleAddRoutingkitBenchmark extends _SingleAddBenchmark {
-  _DynamicSingleAddRoutingkitBenchmark(_CollectingEmitter emitter)
-    : super(['AddSingle', 'Dynamic', 'Routingkit'], emitter);
-
-  @override
-  void run() {
-    final index = _nextIndex();
-    final route = _dynamicPatterns[index];
-    final lookup = _dynamicLookups[index];
-    final router = routingkit.createRouter<int>();
-    router.add('GET', route, _defaultDynamicValue);
-    _sink ^= router.find('GET', lookup)?.data ?? 0;
-  }
-}
-
 class _StaticSingleAddRelicBenchmark extends _SingleAddBenchmark {
   _StaticSingleAddRelicBenchmark(_CollectingEmitter emitter)
     : super(['AddSingle', 'Static', 'Relic'], emitter);
@@ -155,21 +125,13 @@ void main() {
 
   final emitter = _CollectingEmitter();
   for (final benchmark in <_SingleAddBenchmark>[
-    _StaticSingleAddRoutingkitBenchmark(emitter),
     _StaticSingleAddRelicBenchmark(emitter),
     _StaticSingleAddRouxBenchmark(emitter),
-    _DynamicSingleAddRoutingkitBenchmark(emitter),
     _DynamicSingleAddRelicBenchmark(emitter),
     _DynamicSingleAddRouxBenchmark(emitter),
   ]) {
     benchmark.report();
   }
-
-  _printRelative(
-    emitter.runtimeByName,
-    baseline: 'Routingkit',
-    title: 'routingkit / roux',
-  );
   _printRelative(
     emitter.runtimeByName,
     baseline: 'Relic',

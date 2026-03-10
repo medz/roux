@@ -1,7 +1,6 @@
 import 'package:benchmark_harness/benchmark_harness.dart';
 import 'package:relic/relic.dart' as relic;
 import 'package:roux/roux.dart' as roux;
-import 'package:routingkit/routingkit.dart' as routingkit;
 
 const _defaultRouteCount = 500;
 const _queryScales = <int>[100, 1000, 10000, 50000, 100000];
@@ -120,40 +119,6 @@ class _RouxLookupBenchmark extends _LookupBenchmark {
   }
 }
 
-class _RoutingkitLookupBenchmark extends _LookupBenchmark {
-  _RoutingkitLookupBenchmark(_LookupScenario scenario, int queryScale)
-    : super(scenario, queryScale, 'Routingkit');
-
-  late final routingkit.Router<int> _router;
-
-  @override
-  void setup() {
-    _router = routingkit.createRouter<int>();
-    for (var i = 0; i < _staticPatterns.length; i++) {
-      _router.add('GET', _staticPatterns[i], i);
-      _router.add('GET', _dynamicPatterns[i], i);
-    }
-  }
-
-  @override
-  void run() {
-    for (final path in queries) {
-      final match = _router.find('GET', path);
-      _sink ^= match?.data ?? 0;
-      switch (scenario) {
-        case _LookupScenario.dynamicRoundRobinParams:
-        case _LookupScenario.dynamicHotParams:
-          _consumeStringParams(match?.params);
-        case _LookupScenario.staticRoundRobin:
-        case _LookupScenario.staticHot:
-        case _LookupScenario.dynamicRoundRobin:
-        case _LookupScenario.dynamicHot:
-          break;
-      }
-    }
-  }
-}
-
 class _RelicLookupBenchmark extends _LookupBenchmark {
   _RelicLookupBenchmark(_LookupScenario scenario, int queryScale)
     : super(scenario, queryScale, 'Relic');
@@ -250,7 +215,6 @@ void main(List<String> args) {
     for (final scale in _queryScales) {
       for (final bench in <_LookupBenchmark>[
         _RouxLookupBenchmark(scenario, scale),
-        _RoutingkitLookupBenchmark(scenario, scale),
         _RelicLookupBenchmark(scenario, scale),
       ]) {
         final score = bench.measure();
@@ -260,7 +224,6 @@ void main(List<String> args) {
     }
   }
 
-  _printRatios(results, 'Routingkit', 'routingkit / roux');
   _printRatios(results, 'Relic', 'relic / roux');
   print('sink=$_sink');
 }

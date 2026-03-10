@@ -3,7 +3,6 @@ import 'dart:math';
 import 'package:benchmark_harness/perf_benchmark_harness.dart';
 import 'package:relic/relic.dart' as relic;
 import 'package:roux/roux.dart' as roux;
-import 'package:routingkit/routingkit.dart' as routingkit;
 
 const _defaultRouteCount = 1000;
 
@@ -165,105 +164,6 @@ class _DynamicLookupParamsRouxBenchmark extends _RouterBenchmark {
   }
 }
 
-class _StaticAddRoutingkitBenchmark extends _RouterBenchmark {
-  _StaticAddRoutingkitBenchmark(_CollectingEmitter emitter)
-    : super(['Add', 'Static', 'x$_routeCount', 'Routingkit'], emitter);
-
-  @override
-  void run() {
-    final router = routingkit.createRouter<int>();
-    for (final i in _indexes) {
-      router.add('GET', '/path$i', i);
-    }
-  }
-}
-
-class _StaticLookupRoutingkitBenchmark extends _RouterBenchmark {
-  _StaticLookupRoutingkitBenchmark(_CollectingEmitter emitter)
-    : super(['Lookup', 'Static', 'x$_routeCount', 'Routingkit'], emitter);
-
-  late final routingkit.Router<int> _router;
-
-  @override
-  void setup() {
-    _router = routingkit.createRouter<int>();
-    for (final i in _indexes) {
-      _router.add('GET', '/path$i', i);
-    }
-  }
-
-  @override
-  void run() {
-    for (final route in _staticRoutesToLookup) {
-      _sink ^= _router.find('GET', route)?.data ?? 0;
-    }
-  }
-}
-
-class _DynamicAddRoutingkitBenchmark extends _RouterBenchmark {
-  _DynamicAddRoutingkitBenchmark(_CollectingEmitter emitter)
-    : super(['Add', 'Dynamic', 'x$_routeCount', 'Routingkit'], emitter);
-
-  @override
-  void run() {
-    final router = routingkit.createRouter<int>();
-    for (final i in _indexes) {
-      router.add('GET', '/users/:id/items/:itemId/profile$i', i);
-    }
-  }
-}
-
-class _DynamicLookupRoutingkitBenchmark extends _RouterBenchmark {
-  _DynamicLookupRoutingkitBenchmark(_CollectingEmitter emitter)
-    : super(['Lookup', 'Dynamic', 'x$_routeCount', 'Routingkit'], emitter);
-
-  late final routingkit.Router<int> _router;
-
-  @override
-  void setup() {
-    _router = routingkit.createRouter<int>();
-    for (final i in _indexes) {
-      _router.add('GET', '/users/:id/items/:itemId/profile$i', i);
-    }
-  }
-
-  @override
-  void run() {
-    for (final route in _dynamicRoutesToLookup) {
-      _sink ^= _router.find('GET', route)?.data ?? 0;
-    }
-  }
-}
-
-class _DynamicLookupParamsRoutingkitBenchmark extends _RouterBenchmark {
-  _DynamicLookupParamsRoutingkitBenchmark(_CollectingEmitter emitter)
-    : super([
-        'Lookup+Params',
-        'Dynamic',
-        'x$_routeCount',
-        'Routingkit',
-      ], emitter);
-
-  late final routingkit.Router<int> _router;
-
-  @override
-  void setup() {
-    _router = routingkit.createRouter<int>();
-    for (final i in _indexes) {
-      _router.add('GET', '/users/:id/items/:itemId/profile$i', i);
-    }
-  }
-
-  @override
-  void run() {
-    for (final route in _dynamicRoutesToLookup) {
-      final match = _router.find('GET', route);
-      _sink ^= match?.data ?? 0;
-      _consumeStringParams(match?.params);
-    }
-  }
-}
-
 class _StaticAddRelicBenchmark extends _RouterBenchmark {
   _StaticAddRelicBenchmark(_CollectingEmitter emitter)
     : super(['Add', 'Static', 'x$_routeCount', 'Relic'], emitter);
@@ -369,30 +269,19 @@ void main(List<String> args) {
 
   final emitter = _CollectingEmitter();
   for (final benchmark in <_RouterBenchmark>[
-    _StaticAddRoutingkitBenchmark(emitter),
     _StaticAddRelicBenchmark(emitter),
     _StaticAddRouxBenchmark(emitter),
-    _StaticLookupRoutingkitBenchmark(emitter),
     _StaticLookupRelicBenchmark(emitter),
     _StaticLookupRouxBenchmark(emitter),
-    _DynamicAddRoutingkitBenchmark(emitter),
     _DynamicAddRelicBenchmark(emitter),
     _DynamicAddRouxBenchmark(emitter),
-    _DynamicLookupRoutingkitBenchmark(emitter),
     _DynamicLookupRelicBenchmark(emitter),
     _DynamicLookupRouxBenchmark(emitter),
-    _DynamicLookupParamsRoutingkitBenchmark(emitter),
     _DynamicLookupParamsRelicBenchmark(emitter),
     _DynamicLookupParamsRouxBenchmark(emitter),
   ]) {
     benchmark.report();
   }
-
-  _printRelative(
-    emitter.runtimeByName,
-    baseline: 'Routingkit',
-    title: 'routingkit / roux',
-  );
   _printRelative(
     emitter.runtimeByName,
     baseline: 'Relic',
