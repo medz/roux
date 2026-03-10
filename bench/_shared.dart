@@ -1,6 +1,4 @@
 import 'package:benchmark_harness/benchmark_harness.dart';
-import 'package:relic/relic.dart' as relic;
-import 'package:roux/roux.dart' as roux;
 
 enum Target { roux, relic }
 
@@ -107,15 +105,3 @@ abstract class SingleScenarioBenchmark extends BenchmarkBase {
   @override
   void exercise() => run();
 }
-
-relic.Method constGetMethod() => relic.Method.get;
-
-roux.Router<int> newRouxRouter({
-  bool caseSensitive = true,
-  bool decodePath = false,
-  bool normalizePath = false,
-}) => roux.Router<int>(
-  caseSensitive: caseSensitive,
-  decodePath: decodePath,
-  normalizePath: normalizePath,
-);

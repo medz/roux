@@ -42,7 +42,7 @@ class AlignedFeatureBenchmark extends SingleScenarioBenchmark {
 
     switch (target) {
       case Target.roux:
-        final router = newRouxRouter(normalizePath: true);
+        final router = roux.Router<int>(normalizePath: true);
         for (var i = 0; i < routeCount; i++) {
           router.add('/static/$i/home', i, method: 'GET');
           router.add('/users/:id/orders/:orderId/item$i', i, method: 'GET');
@@ -72,7 +72,7 @@ class AlignedFeatureBenchmark extends SingleScenarioBenchmark {
         }
       case Target.relic:
         final router = _relicRouter!;
-        final method = constGetMethod();
+        const method = relic.Method.get;
         for (final request in requests) {
           final match = router.lookup(method, request.path).asMatch;
           sink ^= match.value;

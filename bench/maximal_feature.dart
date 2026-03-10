@@ -41,7 +41,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
 
     switch (target) {
       case Target.roux:
-        final router = newRouxRouter(
+        final router = roux.Router<int>(
           caseSensitive: false,
           decodePath: true,
           normalizePath: true,
@@ -75,7 +75,7 @@ class MaximalFeatureBenchmark extends SingleScenarioBenchmark {
         }
       case Target.relic:
         final router = _relicRouter!;
-        final method = constGetMethod();
+        const method = relic.Method.get;
         for (final request in requests) {
           final prepared = prepareComparablePath(
             request.path,
