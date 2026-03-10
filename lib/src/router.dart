@@ -1,5 +1,3 @@
-export 'route_model.dart' show DuplicatePolicy, RouteMatch;
-
 import 'route_path.dart';
 import 'pattern_engine.dart';
 import 'route_model.dart';
