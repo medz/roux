@@ -174,7 +174,7 @@ class _PatternCompiler<T> {
   );
 
   _CompiledSlot<T>? compile() {
-    if (pattern.contains('{')) {
+    if (_containsStructuredBrace(pattern)) {
       needsCompiled = true;
       specificity = specStruct;
       if (constraintScore < 1) constraintScore = 1;
@@ -469,6 +469,21 @@ class _PatternCompiler<T> {
     writeCapture(outRegex, outShape, '([^/]+)', name);
     return nameEnd;
   }
+}
+
+bool _containsStructuredBrace(String pattern) {
+  const backslash = 92;
+  const zero = 48;
+  const nine = 57;
+  for (var i = 0; i < pattern.length; i++) {
+    if (pattern.codeUnitAt(i) != openBraceCode) continue;
+    if (i > 0 && pattern.codeUnitAt(i - 1) == backslash) continue;
+    if (i + 1 >= pattern.length) return true;
+    final next = pattern.codeUnitAt(i + 1);
+    if (next >= zero && next <= nine) continue;
+    return true;
+  }
+  return false;
 }
 
 int _findGroupEnd(String pattern, int start) {

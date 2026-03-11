@@ -17,7 +17,16 @@ Target parseTarget(List<String> args) {
 
 int parseIntArg(List<String> args, int index, int fallback) {
   if (index >= args.length) return fallback;
-  return int.tryParse(args[index]) ?? fallback;
+  final parsed = int.tryParse(args[index]);
+  if (parsed == null) {
+    throw ArgumentError('Expected an integer at arg $index: ${args[index]}');
+  }
+  if (parsed <= 0) {
+    throw ArgumentError(
+      'Expected a positive integer at arg $index: ${args[index]}',
+    );
+  }
+  return parsed;
 }
 
 void printHeader(
@@ -78,7 +87,15 @@ abstract class SingleScenarioBenchmark extends BenchmarkBase {
     : super('$name;${target.name}');
 
   final Target target;
+  var _ran = false;
 
   @override
-  void exercise() => run();
+  void exercise() {
+    _ran = true;
+    run();
+  }
+
+  void verifyRan() {
+    if (!_ran) throw StateError('benchmark did not run');
+  }
 }

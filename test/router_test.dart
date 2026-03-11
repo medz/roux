@@ -58,6 +58,25 @@ void main() {
       expect(router.match('/users/nope'), isNull);
     });
 
+    test('keeps regex quantifiers from triggering grouped parsing', () {
+      final optionalRouter = Router<String>();
+      optionalRouter.add('/users/:id(\\d{2})/:tab?', 'numeric-user');
+      final repeatedRouter = Router<String>();
+      repeatedRouter.add('/files/:id(\\d{2})/:path+', 'file-path');
+
+      expect(optionalRouter.match('/users/42')?.params, {'id': '42'});
+      expect(optionalRouter.match('/users/42/profile')?.params, {
+        'id': '42',
+        'tab': 'profile',
+      });
+      expect(optionalRouter.match('/users/420'), isNull);
+      expect(repeatedRouter.match('/files/42/a/b')?.params, {
+        'id': '42',
+        'path': 'a/b',
+      });
+      expect(repeatedRouter.match('/files/7/a/b'), isNull);
+    });
+
     test('returns writable params maps for small dynamic matches', () {
       final router = Router<String>();
       router.add('/users/:id/items/:itemId', 'item');

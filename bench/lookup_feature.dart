@@ -141,7 +141,7 @@ class LookupFeatureBenchmark extends SingleScenarioBenchmark {
 
   @override
   void teardown() {
-    if (sink == -1) throw StateError('unreachable');
+    verifyRan();
   }
 }
 
