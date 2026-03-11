@@ -1,7 +1,7 @@
 name: roux
 description: >-
   A Lightweight, fast router for Dart with expressive pathname syntax.
-version: 0.4.0
+version: 0.5.0
 repository: https://github.com/medz/roux
 
 funding:

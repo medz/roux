@@ -1,3 +1,46 @@
+## 0.5.0
+
+### Breaking Changes
+
+- Pathname syntax is expanded and aligned around the new route model.
+- `*` now means a single-segment wildcard. Multi-segment remainder matching is
+  represented with `**` / `**:name`.
+- The router core is reorganized around `RouteSet`, `MethodTable`,
+  `TrieEngine`, and `PatternEngine`.
+- Legacy benchmark scripts were replaced by the current feature-based benchmark
+  suite.
+
+### Features
+
+- Add embedded pathname params such as `/files/:name.:ext`.
+- Add embedded wildcard segments such as `/files/file-*.png`.
+- Add regex params such as `/users/:id(\d+)`.
+- Add optional params and grouped pathname syntax such as `:id?`, `/book{s}?`,
+  and `/users{/:id}?`.
+- Add repeated params such as `:path+` and `:path*`.
+- Add configurable input processing with `caseSensitive`, `decodePath`, and
+  `normalizePath`.
+- Add explicit `matchAll(...)` specificity ordering and feature-focused
+  benchmark suites.
+
+### Fixes
+
+- Correct grouped and compiled route precedence in `match(...)` /
+  `matchAll(...)`.
+- Reject duplicate capture names consistently across trie and compiled routes.
+- Keep regex quantifiers such as `\d{2}` from being misclassified as grouped
+  pathname syntax.
+- Harden benchmark argument validation and execution checks.
+
+### Performance
+
+- Replace lazy params with eager materialization and keep dynamic lookup
+  performance competitive under fairer benchmark contracts.
+- Improve normalized lookup throughput with specialized normalization and dirty
+  path handling.
+- Restore strong lookup performance in the official relic-style benchmark
+  scenarios.
+
 ## 0.4.0
 
 ### Features
