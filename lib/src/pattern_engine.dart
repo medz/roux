@@ -15,17 +15,12 @@ class PatternEngine<T> {
   final _buckets = List.generate(4, (_) => <_CompiledSlot<T>>[]);
 
   /// Compiles and registers a pattern route.
-  void add(
-    String pattern,
-    T data,
-    DuplicatePolicy duplicatePolicy,
-    int registrationOrder,
-  ) {
+  void add(String pattern, T data, DuplicatePolicy duplicatePolicy, int order) {
     final compiled = _PatternCompiler(
       pattern,
       data,
       caseSensitive,
-      registrationOrder,
+      order,
     ).compile();
     if (compiled == null) {
       throw FormatException('Unsupported segment syntax in route: $pattern');
@@ -40,6 +35,7 @@ class PatternEngine<T> {
       });
 
   /// Collects every matching compiled route from a bucket.
+  @pragma('vm:prefer-inline')
   void collectBucket(
     int bucket,
     String path,
@@ -78,10 +74,9 @@ class PatternEngine<T> {
         );
         return;
       }
-      if (compiled.route.sortKey > current.route.sortKey ||
-          (compiled.route.sortKey == current.route.sortKey &&
-              compiled.route.registrationOrder <
-                  current.route.registrationOrder)) {
+      if (compiled.route.rank > current.route.rank ||
+          (compiled.route.rank == current.route.rank &&
+              compiled.route.order < current.route.order)) {
         routes.insert(i, compiled);
         return;
       }
@@ -89,12 +84,15 @@ class PatternEngine<T> {
     routes.add(compiled);
   }
 
+  @pragma('vm:prefer-inline')
   R? _visitBucket<R>(
     int bucket,
     String path,
     R? Function(_CompiledSlot<T> current, RegExpMatch match) visit,
   ) {
-    for (final current in _buckets[bucket]) {
+    final routes = _buckets[bucket];
+    for (var i = 0; i < routes.length; i++) {
+      final current = routes[i];
       final match = current.regex.firstMatch(path);
       if (match == null) continue;
       final result = visit(current, match);
@@ -120,41 +118,37 @@ class _CompiledSlot<T> {
   );
 }
 
+@pragma('vm:prefer-inline')
 RouteMatch<T> _materializeCompiled<T>(
   RouteEntry<T> route,
   List<int> groupIndexes,
   RegExpMatch match,
 ) {
-  if (route.paramNames.isEmpty) return route.noParamsMatch;
+  if (route.names.isEmpty) return route.plainMatch;
   final params = <String, String>{};
-  for (var i = 0; i < route.paramNames.length; i++) {
+  for (var i = 0; i < route.names.length; i++) {
     final groupIndex = groupIndexes[i];
     if (groupIndex < 0) continue;
     final value = match.group(groupIndex);
-    if (value != null) params[route.paramNames[i]] = value;
+    if (value != null) params[route.names[i]] = value;
   }
   return RouteMatch(route.data, params);
 }
 
 /// Compiles richer pathname syntax into regexp-backed route slots.
 class _PatternCompiler<T> {
-  _PatternCompiler(
-    this.pattern,
-    this.data,
-    this.caseSensitive,
-    this.registrationOrder,
-  );
+  _PatternCompiler(this.pattern, this.data, this.caseSensitive, this.order);
 
   final String pattern;
   final T data;
   final bool caseSensitive;
-  final int registrationOrder;
+  final int order;
   final regex = StringBuffer('^'), shape = StringBuffer('^');
-  final paramNames = <String>[], groupIndexes = <int>[];
+  final names = <String>[], groupIndexes = <int>[];
   var groupCount = 0, unnamedCount = 0, staticChars = 0;
   var needsCompiled = false;
-  var bucket = compiledBucketHigh;
-  var specificity = singleDynamicSpecificity;
+  var bucket = bucketHigh;
+  var specificity = specDyn;
   var constraintScore = 0;
 
   _CompiledSlot<T> buildCompiledSlot(
@@ -166,23 +160,23 @@ class _PatternCompiler<T> {
     shape.toString(),
     bucket,
     groupIndexes,
-    newRoute(
+    RouteEntry(
       data,
-      paramNames,
+      names,
       null,
       pattern,
-      segmentCount(pattern),
+      countSegments(pattern),
       specificity,
       staticChars,
       constraintScore,
-      registrationOrder,
+      order,
     ),
   );
 
   _CompiledSlot<T>? compile() {
     if (pattern.contains('{')) {
       needsCompiled = true;
-      specificity = structuredDynamicSpecificity;
+      specificity = specStruct;
       if (constraintScore < 1) constraintScore = 1;
       writeGrouped(0, pattern.length, false, regex, shape);
       regex.write(r'$');
@@ -197,7 +191,7 @@ class _PatternCompiler<T> {
       final firstCode = pattern.codeUnitAt(cursor);
       if (segmentEnd == cursor) throw FormatException('$emptySegment$pattern');
       if (firstCode == colonCode &&
-          hasValidParamNameSlice(pattern, cursor + 1, segmentEnd)) {
+          validParamSlice(pattern, cursor + 1, segmentEnd)) {
         writeCapture(
           regex,
           shape,
@@ -217,7 +211,7 @@ class _PatternCompiler<T> {
           slashPrefixed: true,
         );
         needsCompiled = true;
-        bucket = compiledBucketLate;
+        bucket = bucketLate;
         constraintScore = 1;
         cursor = segmentEnd + 1;
         continue;
@@ -228,7 +222,7 @@ class _PatternCompiler<T> {
             quantifier == plusCode ||
             quantifier == asteriskCode) {
           final name = pattern.substring(cursor + 1, segmentEnd - 1);
-          if (!isValidParamName(name)) {
+          if (!validParamSlice(name, 0, name.length)) {
             throw FormatException('Invalid parameter name in route: $pattern');
           }
           writeCapture(
@@ -244,12 +238,8 @@ class _PatternCompiler<T> {
             optional: quantifier != plusCode,
           );
           needsCompiled = true;
-          bucket = quantifier == questionCode
-              ? compiledBucketDeferred
-              : compiledBucketRepeated;
-          specificity = quantifier == questionCode
-              ? structuredDynamicSpecificity
-              : remainderSpecificity;
+          bucket = quantifier == questionCode ? bucketDeferred : bucketRepeat;
+          specificity = quantifier == questionCode ? specStruct : specRem;
           constraintScore = 1;
           cursor = segmentEnd + 1;
           continue;
@@ -294,7 +284,7 @@ class _PatternCompiler<T> {
       outRegex.write(capture);
       outShape.write(capture);
     }
-    paramNames.add(name);
+    names.add(name);
     groupCount += 1;
     groupIndexes.add(groupCount);
     groupCount += extraGroups;
@@ -305,7 +295,7 @@ class _PatternCompiler<T> {
     StringBuffer outRegex,
     StringBuffer outShape,
   ) {
-    staticChars += staticCharCount(literal);
+    staticChars += countStaticChars(literal);
     outRegex.write(RegExp.escape(literal));
     outShape.write(
       RegExp.escape(caseSensitive ? literal : literal.toLowerCase()),
@@ -324,7 +314,7 @@ class _PatternCompiler<T> {
         needsCompiled = true;
         if (constraintScore < 1) constraintScore = 1;
         if (segmentHasLiteral || ++captureCount > 1) {
-          specificity = structuredDynamicSpecificity;
+          specificity = specStruct;
         }
         cursor += 1;
         lastWasParam = false;
@@ -334,7 +324,7 @@ class _PatternCompiler<T> {
         cursor = writeNamedCapture(cursor, end, lastWasParam, regex, shape);
         needsCompiled = true;
         if (segmentHasLiteral || ++captureCount > 1) {
-          specificity = structuredDynamicSpecificity;
+          specificity = specStruct;
         }
         lastWasParam = true;
         continue;
@@ -348,7 +338,7 @@ class _PatternCompiler<T> {
       }
       writeLiteral(pattern.substring(literalStart, cursor), regex, shape);
       segmentHasLiteral = true;
-      if (captureCount > 0) specificity = structuredDynamicSpecificity;
+      if (captureCount > 0) specificity = specStruct;
       lastWasParam = false;
     }
   }
@@ -378,7 +368,7 @@ class _PatternCompiler<T> {
           bodyShape,
         );
         if (optional) {
-          bucket = compiledBucketDeferred;
+          bucket = bucketDeferred;
           if (constraintScore < 1) constraintScore = 1;
           outRegex
             ..write('(?:')
@@ -408,7 +398,7 @@ class _PatternCompiler<T> {
           );
         }
         writeCapture(outRegex, outShape, '([^/]*)', '${unnamedCount++}');
-        if (bucket < compiledBucketLate) bucket = compiledBucketLate;
+        if (bucket < bucketLate) bucket = bucketLate;
         if (constraintScore < 1) constraintScore = 1;
         cursor += 1;
         lastWasParam = false;
@@ -456,11 +446,11 @@ class _PatternCompiler<T> {
     }
     var nameEnd = cursor + 1;
     while (nameEnd < end &&
-        isParamNameCode(pattern.codeUnitAt(nameEnd), nameEnd == cursor + 1)) {
+        isParamCode(pattern.codeUnitAt(nameEnd), nameEnd == cursor + 1)) {
       nameEnd += 1;
     }
     final name = pattern.substring(cursor + 1, nameEnd);
-    if (!isValidParamName(name)) {
+    if (!validParamSlice(name, 0, name.length)) {
       throw FormatException('Invalid parameter name in route: $pattern');
     }
     if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {

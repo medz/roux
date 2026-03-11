@@ -16,46 +16,44 @@ class TrieEngine<T> {
   final exactRoutes = <String, RouteEntry<T>>{}, root = _SimpleNode<T>();
 
   /// Flags describing trie shape and validation requirements.
-  bool hasBranchingChoices = false,
-      hasWildcardRoutes = false,
-      needsStrictPathValidation = false,
-      hasNonExactRoutes = false;
+  bool hasBranches = false,
+      hasWildcards = false,
+      needsStrict = false,
+      hasNonExact = false;
 
   /// Shared fallback route for `/**`-style matches.
   RouteEntry<T>? globalFallback;
 
   /// The deepest number of params seen in simple routes.
-  int maxParamDepth = 0;
+  int paramDepth = 0;
 
   /// Straight-plan state used by the hot matching path.
-  bool straightDirty = false;
+  bool planDirty = false;
 
   /// Straight-plan segments and leaf route tables.
-  List<String?> straightSegments = [];
+  List<String?> planSegments = [];
 
-  /// Straight-plan leaf routes aligned with [straightSegments].
-  List<Map<String, RouteEntry<T>>?> straightLeaves = [];
+  /// Straight-plan leaf routes aligned with [planSegments].
+  List<Map<String, RouteEntry<T>>?> planLeaves = [];
 
   /// Straight-plan exact and wildcard slots.
-  List<RouteEntry<T>?> straightExacts = [], straightWildcards = [];
+  List<RouteEntry<T>?> planExacts = [], planWildcards = [];
 
   /// Tail-leaf routes for the specialized straight matcher.
-  Map<String, RouteEntry<T>>? straightTailLeaves;
+  Map<String, RouteEntry<T>>? tailLeaves;
 
   /// Captured metadata for the straight tail-leaf matcher.
-  int straightParamCount = 0;
+  int tailParamCount = 0;
 
   /// Cached parameter names for the straight tail-leaf matcher.
-  String? straightParam0, straightParam1;
-  var _normalizedSpans = Uint32List(0);
+  String? tailParam0, tailParam1;
+  var _spans = Uint32List(0);
+
+  /// Whether the root contains a parameter branch.
+  bool get hasRootParamChild => root.paramChild != null;
 
   /// Adds a route to the trie engine, returning `false` for compiled syntax.
-  bool add(
-    String path,
-    T data,
-    DuplicatePolicy duplicatePolicy,
-    int registrationOrder,
-  ) {
+  bool add(String path, T data, DuplicatePolicy duplicatePolicy, int order) {
     var hasReservedToken = false;
     var prevSlash = true;
     var exactDepth = 0;
@@ -85,34 +83,34 @@ class TrieEngine<T> {
         path,
         data,
         duplicatePolicy,
-        registrationOrder,
+        order,
         exactDepth,
         exactStaticChars,
       );
       return true;
     }
 
-    List<String>? paramNames;
+    List<String>? names;
     var paramCount = 0;
     var staticChars = 0;
     var depth = 0;
     var node = root;
     RouteEntry<T> buildRoute(
-      String? wildcardName,
+      String? wildcard,
       int routeDepth,
       int routeSpecificity,
       int routeStaticChars,
       int constraintScore,
-    ) => newRoute(
+    ) => RouteEntry(
       data,
-      paramNames ?? const [],
-      wildcardName,
+      names ?? const [],
+      wildcard,
       path,
       routeDepth,
       routeSpecificity,
       routeStaticChars,
       constraintScore,
-      registrationOrder,
+      order,
     );
     RouteEntry<T> mergeSlot(
       RouteEntry<T>? existing,
@@ -122,9 +120,9 @@ class TrieEngine<T> {
         mergeRouteEntries(existing, route, path, duplicatePolicy, rejectPrefix);
 
     void finishSimple() {
-      hasNonExactRoutes = true;
-      if (paramCount > maxParamDepth) maxParamDepth = paramCount;
-      straightDirty = true;
+      hasNonExact = true;
+      if (paramCount > paramDepth) paramDepth = paramCount;
+      planDirty = true;
     }
 
     for (
@@ -149,7 +147,7 @@ class TrieEngine<T> {
 
       final firstCode = path.codeUnitAt(cursor);
       final doubleWildcardName = firstCode == asteriskCode
-          ? readDoubleWildcardName(path, cursor, segmentEnd)
+          ? readRestName(path, cursor, segmentEnd)
           : null;
       if (doubleWildcardName != null) {
         if (segmentEnd != path.length) {
@@ -160,16 +158,16 @@ class TrieEngine<T> {
         final route = buildRoute(
           doubleWildcardName,
           depth,
-          remainderSpecificity,
+          specRem,
           staticChars,
           0,
         );
         if (cursor == 1 && paramCount == 0) {
-          hasWildcardRoutes = true;
-          needsStrictPathValidation = true;
+          hasWildcards = true;
+          needsStrict = true;
           globalFallback = mergeSlot(globalFallback, route, dupFallback);
         } else {
-          hasWildcardRoutes = true;
+          hasWildcards = true;
           node.wildcardRoute = mergeSlot(
             node.wildcardRoute,
             route,
@@ -181,33 +179,31 @@ class TrieEngine<T> {
       }
 
       if (firstCode == colonCode) {
-        if (!hasValidParamNameSlice(path, cursor + 1, segmentEnd)) return false;
+        if (!validParamSlice(path, cursor + 1, segmentEnd)) return false;
         if (node.staticChild != null ||
             node.staticMap != null ||
             node.leafRoutes != null) {
-          hasBranchingChoices = true;
+          hasBranches = true;
         }
         final paramName = path.substring(cursor + 1, segmentEnd);
         node = node.paramChild ??= _SimpleNode<T>();
-        (paramNames ??= <String>[]).add(paramName);
+        (names ??= <String>[]).add(paramName);
         paramCount += 1;
       } else {
         if (hasReservedInSegment) return false;
-        final key = canonicalizeRoutePath(
-          path.substring(cursor, segmentEnd),
-          caseSensitive,
-        );
+        final key = path.substring(cursor, segmentEnd);
+        final canonicalKey = caseSensitive ? key : key.toLowerCase();
         if (segmentEnd == path.length) {
           if (node.paramChild != null || node.wildcardRoute != null) {
-            hasBranchingChoices = true;
+            hasBranches = true;
           }
           final routes = node.leafRoutes ??= {};
-          routes[key] = mergeSlot(
-            routes[key],
+          routes[canonicalKey] = mergeSlot(
+            routes[canonicalKey],
             buildRoute(
               null,
               depth + 1,
-              paramCount == 0 ? exactSpecificity : singleDynamicSpecificity,
+              paramCount == 0 ? specExact : specDyn,
               staticChars + segmentEnd - cursor,
               0,
             ),
@@ -217,9 +213,9 @@ class TrieEngine<T> {
           return true;
         }
         if (node.paramChild != null) {
-          hasBranchingChoices = true;
+          hasBranches = true;
         }
-        node = node.getOrCreateStaticChildSlice(key);
+        node = node.getOrCreateStatic(canonicalKey);
         staticChars += segmentEnd - cursor;
       }
 
@@ -232,7 +228,7 @@ class TrieEngine<T> {
       buildRoute(
         null,
         depth,
-        paramCount == 0 ? exactSpecificity : singleDynamicSpecificity,
+        paramCount == 0 ? specExact : specDyn,
         staticChars,
         0,
       ),
@@ -247,23 +243,23 @@ class TrieEngine<T> {
     String path,
     T data,
     DuplicatePolicy duplicatePolicy,
-    int registrationOrder,
+    int order,
     int depth,
     int staticChars,
   ) {
-    final canonical = canonicalizeRoutePath(path, caseSensitive);
+    final canonical = caseSensitive ? path : path.toLowerCase();
     exactRoutes[canonical] = mergeRouteEntries(
       exactRoutes[canonical],
-      newRoute(
+      RouteEntry(
         data,
         const [],
         null,
         path,
         depth,
-        exactSpecificity,
+        specExact,
         staticChars,
         0,
-        registrationOrder,
+        order,
       ),
       path,
       duplicatePolicy,
@@ -272,84 +268,85 @@ class TrieEngine<T> {
   }
 
   /// Returns an exact-route match if present.
+  @pragma('vm:prefer-inline')
   RouteMatch<T>? matchExact(String path) => exactRoutes.isEmpty
       ? null
-      : exactRoutes[canonicalizeRoutePath(path, caseSensitive)]?.noParamsMatch;
+      : exactRoutes[caseSensitive ? path : path.toLowerCase()]?.plainMatch;
 
   /// Rebuilds the cached straight matching plan.
   void rebuildStraightPlan() {
-    straightSegments = [];
-    straightLeaves = [root.leafRoutes];
-    straightExacts = [root.exactRoute];
-    straightWildcards = [root.wildcardRoute];
+    planSegments = [];
+    planLeaves = [root.leafRoutes];
+    planExacts = [root.exactRoute];
+    planWildcards = [root.wildcardRoute];
     var node = root;
     while (true) {
       final paramChild = node.paramChild;
       if (paramChild != null) {
-        straightSegments.add(null);
+        planSegments.add(null);
         node = paramChild;
       } else {
         final staticChild = node.staticChild;
         if (staticChild == null) break;
-        straightSegments.add(staticChild.staticKey!);
+        planSegments.add(staticChild.staticKey!);
         node = staticChild;
       }
-      straightLeaves.add(node.leafRoutes);
-      straightExacts.add(node.exactRoute);
-      straightWildcards.add(node.wildcardRoute);
+      planLeaves.add(node.leafRoutes);
+      planExacts.add(node.exactRoute);
+      planWildcards.add(node.wildcardRoute);
     }
-    final last = straightLeaves.length - 1;
+    final last = planLeaves.length - 1;
     var tailOnly =
         last >= 0 &&
-        straightLeaves[last] != null &&
-        straightExacts[last] == null &&
-        straightWildcards[last] == null;
+        planLeaves[last] != null &&
+        planExacts[last] == null &&
+        planWildcards[last] == null;
     for (var i = 0; tailOnly && i < last; i++) {
-      if (straightLeaves[i] != null ||
-          straightExacts[i] != null ||
-          straightWildcards[i] != null) {
+      if (planLeaves[i] != null ||
+          planExacts[i] != null ||
+          planWildcards[i] != null) {
         tailOnly = false;
       }
     }
-    final tailLeaves = tailOnly ? straightLeaves[last] : null;
-    if (tailLeaves == null || tailLeaves.isEmpty) {
-      straightTailLeaves = null;
-      straightParamCount = 0;
-      straightParam0 = null;
-      straightParam1 = null;
+    final tailLeafRoutes = tailOnly ? planLeaves[last] : null;
+    if (tailLeafRoutes == null || tailLeafRoutes.isEmpty) {
+      tailLeaves = null;
+      tailParamCount = 0;
+      tailParam0 = null;
+      tailParam1 = null;
       return;
     }
-    final sample = tailLeaves.values.first;
-    for (final leaf in tailLeaves.values.skip(1)) {
-      if (!_sameParamNames(sample.paramNames, leaf.paramNames)) {
-        straightTailLeaves = null;
-        straightParamCount = 0;
-        straightParam0 = null;
-        straightParam1 = null;
+    final sample = tailLeafRoutes.values.first;
+    for (final leaf in tailLeafRoutes.values.skip(1)) {
+      if (!_sameParamNames(sample.names, leaf.names)) {
+        tailLeaves = null;
+        tailParamCount = 0;
+        tailParam0 = null;
+        tailParam1 = null;
         return;
       }
     }
-    straightTailLeaves = tailLeaves;
-    straightParamCount = sample.paramNames.length;
-    straightParam0 = straightParamCount > 0 ? sample.paramNames[0] : null;
-    straightParam1 = straightParamCount > 1 ? sample.paramNames[1] : null;
+    tailLeaves = tailLeafRoutes;
+    tailParamCount = sample.names.length;
+    tailParam0 = tailParamCount > 0 ? sample.names[0] : null;
+    tailParam1 = tailParamCount > 1 ? sample.names[1] : null;
   }
 
   /// Ensures the straight matching plan is ready.
   void ensureStraightPlan() {
-    if (straightDirty || straightExacts.isEmpty) {
+    if (planDirty || planExacts.isEmpty) {
       rebuildStraightPlan();
-      straightDirty = false;
+      planDirty = false;
     }
   }
 
   /// Matches a path using the most efficient simple-route strategy.
   RouteMatch<T>? matchStraight(String path) {
     ensureStraightPlan();
-    if (caseSensitive && !hasWildcardRoutes && maxParamDepth <= 2) {
-      final tailLeaves = straightTailLeaves;
-      if (tailLeaves != null) {
-        return matchStraightTailLeaf(path, tailLeaves);
+    if (caseSensitive && !hasWildcards && paramDepth <= 2) {
+      final tailLeafRoutes = tailLeaves;
+      if (tailLeafRoutes != null) {
+        return matchStraightTailLeaf(path, tailLeafRoutes);
       }
       return matchStraightFast(path);
     }
@@ -360,16 +357,21 @@ class TrieEngine<T> {
   bool get canMatchStraightNormalized {
     ensureStraightPlan();
     return caseSensitive &&
-        !hasWildcardRoutes &&
-        maxParamDepth <= 2 &&
-        straightTailLeaves != null;
+        !hasWildcards &&
+        paramDepth <= 2 &&
+        tailLeaves != null;
   }
 
   /// Matches a normalized path on the straight fast path when possible.
   RouteMatch<T>? matchStraightNormalized(String path) {
     if (!canMatchStraightNormalized) return null;
-    final tailLeaves = straightTailLeaves!;
-    final segments = straightSegments;
+    if (exactRoutes.isNotEmpty &&
+        root.paramChild == null &&
+        _dirtyFirstSegment(path)) {
+      return null;
+    }
+    final tailLeafRoutes = tailLeaves!;
+    final segments = planSegments;
     var cursor = 1;
     var depth = 0;
     var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
@@ -378,14 +380,14 @@ class TrieEngine<T> {
       if (cursor >= path.length) return null;
       final segmentEnd = findSegmentEnd(path, cursor);
       if (segmentEnd == cursor) {
-        return matchStraightTailLeafDirtyNormalized(path);
+        return matchDirtyTail(path);
       }
       final segmentLength = segmentEnd - cursor;
       if ((segmentLength == 1 && path.codeUnitAt(cursor) == 46) ||
           (segmentLength == 2 &&
               path.codeUnitAt(cursor) == 46 &&
               path.codeUnitAt(cursor + 1) == 46)) {
-        return matchStraightTailLeafDirtyNormalized(path);
+        return matchDirtyTail(path);
       }
       final staticKey = segments[depth];
       if (staticKey != null) {
@@ -403,54 +405,40 @@ class TrieEngine<T> {
 
     if (cursor >= path.length) return null;
     final segmentEnd = findSegmentEnd(path, cursor);
-    if (segmentEnd == cursor) return matchStraightTailLeafDirtyNormalized(path);
+    if (segmentEnd == cursor) return matchDirtyTail(path);
     final segmentLength = segmentEnd - cursor;
     if ((segmentLength == 1 && path.codeUnitAt(cursor) == 46) ||
         (segmentLength == 2 &&
             path.codeUnitAt(cursor) == 46 &&
             path.codeUnitAt(cursor + 1) == 46) ||
         segmentEnd != path.length) {
-      return matchStraightTailLeafDirtyNormalized(path);
+      return matchDirtyTail(path);
     }
-    final leaf = tailLeaves[path.substring(cursor, segmentEnd)];
+    final leaf = tailLeafRoutes[path.substring(cursor, segmentEnd)];
     return leaf == null
         ? null
-        : buildStraightTailLeafMatch(
-            leaf,
-            path,
-            p0Start,
-            p0End,
-            p1Start,
-            p1End,
-          );
+        : buildTailMatch(leaf, path, p0Start, p0End, p1Start, p1End);
   }
 
   /// Normalizes a dirty path into spans and retries straight matching.
-  RouteMatch<T>? matchStraightTailLeafDirtyNormalized(String path) {
-    _normalizedSpans = ensureSpanBuffer(_normalizedSpans, path.length);
-    final spanLength = normalizePathSpans(path, _normalizedSpans);
+  RouteMatch<T>? matchDirtyTail(String path) {
+    _spans = ensureSpanBuffer(_spans, path.length);
+    final spanLength = normalizeSpans(path, _spans);
     if (spanLength < 0) return null;
-    final match = matchStraightTailLeafNormalized(
-      path,
-      _normalizedSpans,
-      spanLength,
-    );
+    final match = matchTailSpans(path, _spans, spanLength);
     if (match != null || exactRoutes.isEmpty) return match;
-    final normalized = normalizedPathFromSpans(
-      path,
-      _normalizedSpans,
-      spanLength,
-    );
-    return exactRoutes[canonicalizeRoutePath(normalized, caseSensitive)]
-        ?.noParamsMatch;
+    final normalized = pathFromSpans(path, _spans, spanLength);
+    return exactRoutes[caseSensitive ? normalized : normalized.toLowerCase()]
+        ?.plainMatch;
   }
 
   /// Matches a tail-leaf straight path without normalization.
+  @pragma('vm:prefer-inline')
   RouteMatch<T>? matchStraightTailLeaf(
     String path,
     Map<String, RouteEntry<T>> tailLeaves,
   ) {
-    final segments = straightSegments;
+    final segments = planSegments;
     var cursor = 1;
     var depth = 0;
     var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
@@ -477,38 +465,32 @@ class TrieEngine<T> {
     if (segmentEnd == cursor || segmentEnd != path.length) return null;
     final leaf = tailLeaves[path.substring(cursor, segmentEnd)];
     if (leaf == null) return null;
-    switch (straightParamCount) {
+    switch (tailParamCount) {
       case 0:
-        return leaf.noParamsMatch;
+        return leaf.plainMatch;
       case 1:
         return RouteMatch(
           leaf.data,
-          _CompactParamsMap.one(
-            straightParam0!,
-            path.substring(p0Start, p0End),
-          ),
+          _CompactParamsMap.one(tailParam0!, path.substring(p0Start, p0End)),
         );
       case 2:
         return RouteMatch(
           leaf.data,
           _CompactParamsMap.two(
-            straightParam0!,
+            tailParam0!,
             path.substring(p0Start, p0End),
-            straightParam1!,
+            tailParam1!,
             path.substring(p1Start, p1End),
           ),
         );
     }
-    return buildSmallMatch(leaf, path, p0Start, p0End, p1Start, p1End);
+    return buildMatch(leaf, path, p0Start, p0End, p1Start, p1End);
   }
 
   /// Matches a tail-leaf straight path using prepared normalized spans.
-  RouteMatch<T>? matchStraightTailLeafNormalized(
-    String path,
-    List<int> spans,
-    int spanLength,
-  ) {
-    final segments = straightSegments;
+  @pragma('vm:prefer-inline')
+  RouteMatch<T>? matchTailSpans(String path, List<int> spans, int spanLength) {
+    final segments = planSegments;
     if (spanLength != (segments.length + 1) * 2) return null;
     var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
     for (var depth = 0; depth < segments.length; depth++) {
@@ -528,24 +510,17 @@ class TrieEngine<T> {
     }
     final leafStart = spans[0];
     final leafEnd = spans[1];
-    final leaf = straightTailLeaves?[path.substring(leafStart, leafEnd)];
+    final leaf = tailLeaves?[path.substring(leafStart, leafEnd)];
     return leaf == null
         ? null
-        : buildStraightTailLeafMatch(
-            leaf,
-            path,
-            p0Start,
-            p0End,
-            p1Start,
-            p1End,
-          );
+        : buildTailMatch(leaf, path, p0Start, p0End, p1Start, p1End);
   }
 
   /// Matches a straight path without wildcard handling.
   RouteMatch<T>? matchStraightFast(String path) {
-    final segments = straightSegments;
-    final leaves = straightLeaves;
-    final exacts = straightExacts;
+    final segments = planSegments;
+    final leaves = planLeaves;
+    final exacts = planExacts;
     var cursor = 1;
     var depth = 0;
     var p0Start = 0, p0End = 0, p1Start = 0, p1End = 0;
@@ -555,7 +530,7 @@ class TrieEngine<T> {
         final exact = exacts[depth];
         return exact == null
             ? null
-            : buildSmallMatch(exact, path, p0Start, p0End, p1Start, p1End);
+            : buildMatch(exact, path, p0Start, p0End, p1Start, p1End);
       }
       final segmentEnd = findSegmentEnd(path, cursor);
       if (segmentEnd == cursor) return null;
@@ -568,7 +543,7 @@ class TrieEngine<T> {
             ? null
             : leafRoutes[path.substring(cursor, segmentEnd)];
         if (leaf != null) {
-          return buildSmallMatch(leaf, path, p0Start, p0End, p1Start, p1End);
+          return buildMatch(leaf, path, p0Start, p0End, p1Start, p1End);
         }
       }
       if (depth >= segments.length) return null;
@@ -597,7 +572,8 @@ class TrieEngine<T> {
   }
 
   /// Builds a small parameter match without the generic materializer.
-  RouteMatch<T> buildSmallMatch(
+  @pragma('vm:prefer-inline')
+  RouteMatch<T> buildMatch(
     RouteEntry<T> route,
     String path,
     int p0Start,
@@ -607,11 +583,11 @@ class TrieEngine<T> {
     ParamStack? captures,
     int wildcardStart = 0,
   }) {
-    if (route.wildcardName != null) {
+    if (route.wildcard != null) {
       return materialize(route, path, captures, wildcardStart);
     }
-    final names = route.paramNames;
-    if (names.isEmpty) return route.noParamsMatch;
+    final names = route.names;
+    if (names.isEmpty) return route.plainMatch;
     if (names.length == 1) {
       return RouteMatch(
         route.data,
@@ -634,7 +610,7 @@ class TrieEngine<T> {
 
   /// Builds the specialized tail-leaf straight-path match.
   @pragma('vm:prefer-inline')
-  RouteMatch<T> buildStraightTailLeafMatch(
+  RouteMatch<T> buildTailMatch(
     RouteEntry<T> leaf,
     String path,
     int p0Start,
@@ -642,29 +618,26 @@ class TrieEngine<T> {
     int p1Start,
     int p1End,
   ) {
-    switch (straightParamCount) {
+    switch (tailParamCount) {
       case 0:
-        return leaf.noParamsMatch;
+        return leaf.plainMatch;
       case 1:
         return RouteMatch(
           leaf.data,
-          _CompactParamsMap.one(
-            straightParam0!,
-            path.substring(p0Start, p0End),
-          ),
+          _CompactParamsMap.one(tailParam0!, path.substring(p0Start, p0End)),
         );
       case 2:
         return RouteMatch(
           leaf.data,
           _CompactParamsMap.two(
-            straightParam0!,
+            tailParam0!,
             path.substring(p0Start, p0End),
-            straightParam1!,
+            tailParam1!,
             path.substring(p1Start, p1End),
           ),
         );
     }
-    return buildSmallMatch(leaf, path, p0Start, p0End, p1Start, p1End);
+    return buildMatch(leaf, path, p0Start, p0End, p1Start, p1End);
   }
 
   /// Matches a path against the general trie walker.
@@ -672,23 +645,26 @@ class TrieEngine<T> {
       _walkNode(root, path, allowWildcards, 1, 0, null);
 
   /// Collects every trie match for [path].
+  @pragma('vm:prefer-inline')
   void collect(String path, int methodRank, MatchAccumulator<T> output) =>
       _walkNode(root, path, true, 1, 0, null, methodRank, output);
 
   /// Materializes a route match from captured trie state.
+  @pragma('vm:prefer-inline')
   RouteMatch<T> materialize(
     RouteEntry<T> route,
     String path,
     ParamStack? paramValues,
     int wildcardStart,
-  ) => route.wildcardName != null || route.paramNames.isNotEmpty
+  ) => route.wildcard != null || route.names.isNotEmpty
       ? RouteMatch(
           route.data,
-          materializeParams(route, path, paramValues, wildcardStart),
+          buildParams(route, path, paramValues, wildcardStart),
         )
-      : route.noParamsMatch;
+      : route.plainMatch;
 
   /// Collects every route chained from a trie slot.
+  @pragma('vm:prefer-inline')
   void collectSlot(
     RouteEntry<T> slot,
     String path,
@@ -711,40 +687,46 @@ class TrieEngine<T> {
   }
 
   /// Materializes route parameters from captured trie state.
-  Map<String, String> materializeParams(
+  @pragma('vm:prefer-inline')
+  Map<String, String> buildParams(
     RouteEntry<T> route,
     String path,
     ParamStack? captures,
     int wildcardStart,
   ) {
-    final names = route.paramNames;
-    final wildcardName = route.wildcardName;
-    if (wildcardName == null) {
-      if (names.length == 1) {
+    final names = route.names;
+    final wildcard = route.wildcard;
+    final tail = wildcardStart < path.length
+        ? path.substring(wildcardStart)
+        : '';
+    switch (names.length) {
+      case 0:
+        if (wildcard != null) return _CompactParamsMap.one(wildcard, tail);
+      case 1:
         final requiredCaptures = captures!;
-        return _CompactParamsMap.one(
-          names[0],
-          path.substring(
-            requiredCaptures.startAt(0),
-            requiredCaptures.endAt(0),
-          ),
+        final p0 = path.substring(
+          requiredCaptures.startAt(0),
+          requiredCaptures.endAt(0),
         );
-      }
-      if (names.length == 2) {
-        final requiredCaptures = captures!;
-        return _CompactParamsMap.two(
-          names[0],
-          path.substring(
-            requiredCaptures.startAt(0),
-            requiredCaptures.endAt(0),
-          ),
-          names[1],
-          path.substring(
-            requiredCaptures.startAt(1),
-            requiredCaptures.endAt(1),
-          ),
-        );
-      }
+        return wildcard == null
+            ? _CompactParamsMap.one(names[0], p0)
+            : _CompactParamsMap.two(names[0], p0, wildcard, tail);
+      case 2:
+        if (wildcard == null) {
+          final requiredCaptures = captures!;
+          return _CompactParamsMap.two(
+            names[0],
+            path.substring(
+              requiredCaptures.startAt(0),
+              requiredCaptures.endAt(0),
+            ),
+            names[1],
+            path.substring(
+              requiredCaptures.startAt(1),
+              requiredCaptures.endAt(1),
+            ),
+          );
+        }
     }
     final params = <String, String>{};
     if (names.isNotEmpty) {
@@ -756,11 +738,7 @@ class TrieEngine<T> {
         );
       }
     }
-    if (wildcardName != null) {
-      params[wildcardName] = wildcardStart < path.length
-          ? path.substring(wildcardStart)
-          : '';
-    }
+    if (wildcard != null) params[wildcard] = tail;
     return params;
   }
 
@@ -810,12 +788,7 @@ class TrieEngine<T> {
       collectSlot(wildcard, path, captures, cursor, methodRank!, output);
     }
     if (nextCursor == path.length) {
-      final leaf = node.findLeafRouteSlice(
-        path,
-        cursor,
-        segmentEnd,
-        caseSensitive,
-      );
+      final leaf = node.findLeafAt(path, cursor, segmentEnd, caseSensitive);
       if (leaf != null) {
         if (collecting) {
           collectSlot(leaf, path, captures, 0, methodRank!, output);
@@ -825,7 +798,7 @@ class TrieEngine<T> {
       }
     }
 
-    final staticChild = node.findStaticChildSlice(
+    final staticChild = node.findStaticAt(
       path,
       cursor,
       segmentEnd,
@@ -848,7 +821,7 @@ class TrieEngine<T> {
 
     final paramChild = node.paramChild;
     if (paramChild != null) {
-      final params = captures ?? ParamStack(maxParamDepth);
+      final params = captures ?? ParamStack(paramDepth);
       params.truncate(paramLength);
       params.push(cursor, segmentEnd);
       final match = _walkNode(
@@ -878,8 +851,10 @@ class _SimpleNode<T> {
   Map<String, RouteEntry<T>>? leafRoutes;
   int staticCount = 0;
   RouteEntry<T>? exactRoute, wildcardRoute;
+
   _SimpleNode([this.staticKey]);
-  _SimpleNode<T> getOrCreateStaticChildSlice(String key) {
+
+  _SimpleNode<T> getOrCreateStatic(String key) {
     final map = staticMap;
     if (map != null) return map[key] ??= _SimpleNode<T>(key);
     final child = findStaticChild(key);
@@ -897,7 +872,7 @@ class _SimpleNode<T> {
     return created;
   }
 
-  _SimpleNode<T>? findStaticChildSlice(
+  _SimpleNode<T>? findStaticAt(
     String path,
     int start,
     int end,
@@ -938,7 +913,7 @@ class _SimpleNode<T> {
   }
 
   @pragma('vm:prefer-inline')
-  RouteEntry<T>? findLeafRouteSlice(
+  RouteEntry<T>? findLeafAt(
     String path,
     int start,
     int end,
@@ -957,6 +932,15 @@ class _SimpleNode<T> {
     child.staticNext = staticChild;
     staticChild = child;
   }
+}
+
+bool _dirtyFirstSegment(String path) {
+  if (path.length < 2 || path.codeUnitAt(0) != slashCode) return false;
+  final firstEnd = findSegmentEnd(path, 1);
+  final length = firstEnd - 1;
+  if (length == 0) return true;
+  if (length == 1 && path.codeUnitAt(1) == 46) return true;
+  return length == 2 && path.codeUnitAt(1) == 46 && path.codeUnitAt(2) == 46;
 }
 
 @pragma('vm:prefer-inline')
