@@ -24,7 +24,7 @@ void main() {
 
     test('supports add after initial routes', () {
       final router = Router<String>(routes: {'/': 'root'});
-      router.add('/users/*', 'users');
+      router.add('/users/**:wildcard', 'users');
 
       expect(router.match('/')?.data, 'root');
       expect(router.match('/users/a/b')?.data, 'users');
@@ -36,6 +36,141 @@ void main() {
       router.add('/users/:id', 'a');
 
       expect(() => router.add('/users/:name', 'b'), throwsFormatException);
+    });
+
+    test('supports embedded parameter segments', () {
+      final router = Router<String>();
+      router.add('/files/:name.:ext', 'asset');
+
+      expect(router.match('/files/readme.md')?.data, 'asset');
+      expect(router.match('/files/readme.md')?.params, {
+        'name': 'readme',
+        'ext': 'md',
+      });
+    });
+
+    test('supports named regex parameter segments', () {
+      final router = Router<String>();
+      router.add('/users/:id(\\d+)', 'numeric-user');
+
+      expect(router.match('/users/42')?.data, 'numeric-user');
+      expect(router.match('/users/42')?.params, {'id': '42'});
+      expect(router.match('/users/nope'), isNull);
+    });
+
+    test('keeps regex quantifiers from triggering grouped parsing', () {
+      final optionalRouter = Router<String>();
+      optionalRouter.add('/users/:id(\\d{2})/:tab?', 'numeric-user');
+      final repeatedRouter = Router<String>();
+      repeatedRouter.add('/files/:id(\\d{2})/:path+', 'file-path');
+
+      expect(optionalRouter.match('/users/42')?.params, {'id': '42'});
+      expect(optionalRouter.match('/users/42/profile')?.params, {
+        'id': '42',
+        'tab': 'profile',
+      });
+      expect(optionalRouter.match('/users/420'), isNull);
+      expect(repeatedRouter.match('/files/42/a/b')?.params, {
+        'id': '42',
+        'path': 'a/b',
+      });
+      expect(repeatedRouter.match('/files/7/a/b'), isNull);
+    });
+
+    test('returns writable params maps for small dynamic matches', () {
+      final router = Router<String>();
+      router.add('/users/:id/items/:itemId', 'item');
+
+      final params = router.match('/users/42/items/7')!.params!;
+      params['extra'] = 'ok';
+
+      expect(params, {'id': '42', 'itemId': '7', 'extra': 'ok'});
+    });
+
+    test('supports optional parameter segments', () {
+      final router = Router<String>();
+      router.add('/users/:id?', 'maybe-user');
+
+      expect(router.match('/users/42')?.data, 'maybe-user');
+      expect(router.match('/users/42')?.params, {'id': '42'});
+      expect(router.match('/users')?.data, 'maybe-user');
+      expect(router.match('/users')?.params, isEmpty);
+    });
+
+    test('supports repeated parameter segments', () {
+      final router = Router<String>();
+      router.add('/files/:path+', 'plus');
+      router.add('/assets/:rest*', 'star');
+
+      expect(router.match('/files'), isNull);
+      expect(router.match('/files/a/b')?.params, {'path': 'a/b'});
+      expect(router.match('/assets')?.params, isEmpty);
+      expect(router.match('/assets/a/b')?.params, {'rest': 'a/b'});
+    });
+
+    test('supports single-segment wildcard routes', () {
+      final router = Router<String>();
+      router.add('/users/*', 'star');
+      router.add('/teams/*/members', 'middle');
+
+      expect(router.match('/users/a')?.params, {'0': 'a'});
+      expect(router.match('/users/a/b'), isNull);
+      expect(router.match('/teams/core/members')?.params, {'0': 'core'});
+    });
+
+    test('supports embedded wildcard segments', () {
+      final assetRouter = Router<String>();
+      assetRouter.add('/files/file-*-*.png', 'asset');
+      final genericRouter = Router<String>();
+      genericRouter.add('/files/*.:ext', 'generic');
+
+      expect(assetRouter.match('/files/file-a-b.png')?.params, {
+        '0': 'a',
+        '1': 'b',
+      });
+      expect(assetRouter.match('/files/file-a-b-c.png')?.params, {
+        '0': 'a-b',
+        '1': 'c',
+      });
+      expect(assetRouter.match('/files/file--.png')?.params, {
+        '0': '',
+        '1': '',
+      });
+      expect(genericRouter.match('/files/.png')?.params, {
+        '0': '',
+        'ext': 'png',
+      });
+    });
+
+    test('supports grouped pathname syntax', () {
+      final pluralRouter = Router<String>();
+      pluralRouter.add('/book{s}?', 'plural');
+      final userRouter = Router<String>();
+      userRouter.add('/users{/:id}?', 'user');
+      final blogRouter = Router<String>();
+      blogRouter.add('/blog/:id(\\d+){-:title}?', 'blog');
+      final nestedRouter = Router<String>();
+      nestedRouter.add('/docs{/:section}{/:page}?', 'docs');
+      final mandatoryRouter = Router<String>();
+      mandatoryRouter.add('/foo{bar}', 'foobar');
+
+      expect(pluralRouter.match('/book')?.data, 'plural');
+      expect(pluralRouter.match('/books')?.data, 'plural');
+      expect(userRouter.match('/users')?.params, isEmpty);
+      expect(userRouter.match('/users/42')?.params, {'id': '42'});
+      expect(blogRouter.match('/blog/123')?.params, {'id': '123'});
+      expect(blogRouter.match('/blog/123-post')?.params, {
+        'id': '123',
+        'title': 'post',
+      });
+      expect(nestedRouter.match('/docs'), isNull);
+      expect(nestedRouter.match('/docs/api')?.params, {'section': 'api'});
+      expect(nestedRouter.match('/docs/api/intro')?.params, {
+        'section': 'api',
+        'page': 'intro',
+      });
+      expect(mandatoryRouter.match('/foo'), isNull);
+      expect(mandatoryRouter.match('/foobar')?.data, 'foobar');
     });
   });
 
@@ -98,9 +233,9 @@ void main() {
     test('supports replace for wildcard routes', () {
       final router = Router<String>();
 
-      router.add('/files/*', 'first');
+      router.add('/files/**:wildcard', 'first');
       router.add(
-        '/files/*',
+        '/files/**:wildcard',
         'second',
         duplicatePolicy: DuplicatePolicy.replace,
       );
@@ -112,9 +247,9 @@ void main() {
     test('supports keepFirst for wildcard routes', () {
       final router = Router<String>();
 
-      router.add('/files/*', 'first');
+      router.add('/files/**:wildcard', 'first');
       router.add(
-        '/files/*',
+        '/files/**:wildcard',
         'second',
         duplicatePolicy: DuplicatePolicy.keepFirst,
       );
@@ -126,8 +261,12 @@ void main() {
     test('supports append for wildcard routes', () {
       final router = Router<String>();
 
-      router.add('/files/*', 'first');
-      router.add('/files/*', 'second', duplicatePolicy: DuplicatePolicy.append);
+      router.add('/files/**:wildcard', 'first');
+      router.add(
+        '/files/**:wildcard',
+        'second',
+        duplicatePolicy: DuplicatePolicy.append,
+      );
 
       expect(router.match('/files/a/b')?.data, 'first');
       expect(router.matchAll('/files/a/b').map((match) => match.data), [
@@ -139,8 +278,12 @@ void main() {
     test('supports replace for global fallback routes', () {
       final router = Router<String>();
 
-      router.add('/*', 'first');
-      router.add('/*', 'second', duplicatePolicy: DuplicatePolicy.replace);
+      router.add('/**:wildcard', 'first');
+      router.add(
+        '/**:wildcard',
+        'second',
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
 
       expect(router.match('/unknown')?.data, 'second');
       expect(router.match('/unknown')?.params, {'wildcard': 'unknown'});
@@ -149,8 +292,12 @@ void main() {
     test('supports keepFirst for global fallback routes', () {
       final router = Router<String>();
 
-      router.add('/*', 'first');
-      router.add('/*', 'second', duplicatePolicy: DuplicatePolicy.keepFirst);
+      router.add('/**:wildcard', 'first');
+      router.add(
+        '/**:wildcard',
+        'second',
+        duplicatePolicy: DuplicatePolicy.keepFirst,
+      );
 
       expect(router.match('/unknown')?.data, 'first');
       expect(router.match('/unknown')?.params, {'wildcard': 'unknown'});
@@ -159,8 +306,12 @@ void main() {
     test('supports append for global fallback routes', () {
       final router = Router<String>();
 
-      router.add('/*', 'first');
-      router.add('/*', 'second', duplicatePolicy: DuplicatePolicy.append);
+      router.add('/**:wildcard', 'first');
+      router.add(
+        '/**:wildcard',
+        'second',
+        duplicatePolicy: DuplicatePolicy.append,
+      );
 
       expect(router.match('/unknown')?.data, 'first');
       expect(router.matchAll('/unknown').map((match) => match.data), [
@@ -325,9 +476,9 @@ void main() {
 
     test('matchAll sees only the retained route entry', () {
       final router = Router<String>(duplicatePolicy: DuplicatePolicy.replace);
-      router.add('/*', 'global');
-      router.add('/api/*', 'first');
-      router.add('/api/*', 'second');
+      router.add('/**:wildcard', 'global');
+      router.add('/api/**:wildcard', 'first');
+      router.add('/api/**:wildcard', 'second');
 
       final matches = router.matchAll('/api/demo');
 
@@ -336,10 +487,10 @@ void main() {
 
     test('matchAll expands appended entries in registration order', () {
       final router = Router<String>(duplicatePolicy: DuplicatePolicy.append);
-      router.add('/*', 'global-1');
-      router.add('/*', 'global-2');
-      router.add('/api/*', 'api-1');
-      router.add('/api/*', 'api-2');
+      router.add('/**:wildcard', 'global-1');
+      router.add('/**:wildcard', 'global-2');
+      router.add('/api/**:wildcard', 'api-1');
+      router.add('/api/**:wildcard', 'api-2');
 
       final matches = router.matchAll('/api/demo');
 
@@ -357,9 +508,9 @@ void main() {
         final router = Router<String>(
           duplicatePolicy: DuplicatePolicy.keepFirst,
         );
-        router.add('/*', 'global');
-        router.add('/api/*', 'first');
-        router.add('/api/*', 'second');
+        router.add('/**:wildcard', 'global');
+        router.add('/api/**:wildcard', 'first');
+        router.add('/api/**:wildcard', 'second');
 
         final matches = router.matchAll('/api/demo');
 
@@ -369,10 +520,13 @@ void main() {
 
     test('matchAll keeps the original retained entry after reject failure', () {
       final router = Router<String>();
-      router.add('/*', 'global');
-      router.add('/api/*', 'first');
+      router.add('/**:wildcard', 'global');
+      router.add('/api/**:wildcard', 'first');
 
-      expect(() => router.add('/api/*', 'second'), throwsFormatException);
+      expect(
+        () => router.add('/api/**:wildcard', 'second'),
+        throwsFormatException,
+      );
 
       final matches = router.matchAll('/api/demo');
 
@@ -383,16 +537,16 @@ void main() {
       'matchAll reflects retained entries independently per method bucket',
       () {
         final router = Router<String>();
-        router.add('/*', 'global-any');
-        router.add('/api/*', 'api-any-first');
+        router.add('/**:wildcard', 'global-any');
+        router.add('/api/**:wildcard', 'api-any-first');
         router.add(
-          '/api/*',
+          '/api/**:wildcard',
           'api-any-second',
           duplicatePolicy: DuplicatePolicy.replace,
         );
-        router.add('/api/*', 'api-get-first', method: 'GET');
+        router.add('/api/**:wildcard', 'api-get-first', method: 'GET');
         router.add(
-          '/api/*',
+          '/api/**:wildcard',
           'api-get-second',
           method: 'GET',
           duplicatePolicy: DuplicatePolicy.keepFirst,
@@ -410,9 +564,13 @@ void main() {
 
     test('replace collapses an appended slot back to the latest entry', () {
       final router = Router<String>(duplicatePolicy: DuplicatePolicy.append);
-      router.add('/api/*', 'first');
-      router.add('/api/*', 'second');
-      router.add('/api/*', 'third', duplicatePolicy: DuplicatePolicy.replace);
+      router.add('/api/**:wildcard', 'first');
+      router.add('/api/**:wildcard', 'second');
+      router.add(
+        '/api/**:wildcard',
+        'third',
+        duplicatePolicy: DuplicatePolicy.replace,
+      );
 
       expect(router.matchAll('/api/demo').map((match) => match.data), [
         'third',
@@ -455,6 +613,14 @@ void main() {
       expect(router.match('/users/9', method: 'GeT')?.data, 'get');
     });
 
+    test('trims surrounding whitespace in method names', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'get', method: ' get ');
+
+      expect(router.match('/users/9', method: 'GET')?.data, 'get');
+      expect(router.match('/users/9', method: '  get ')?.data, 'get');
+    });
+
     test('enforces duplicate conflicts per method bucket', () {
       final router = Router<String>();
       router.add('/users/:id', 'get', method: 'GET');
@@ -487,8 +653,8 @@ void main() {
         '/': 'root',
         '/users/all': 'users-all',
         '/users/:id': 'users-id',
-        '/users/*': 'users-wildcard',
-        '/*': 'global',
+        '/users/**:wildcard': 'users-wildcard',
+        '/**:wildcard': 'global',
       },
     );
 
@@ -528,8 +694,8 @@ void main() {
       routes: {
         '/:id': 'single-param',
         '/:name/details': 'named-param',
-        '/files/*': 'files',
-        '/*': 'global',
+        '/files/**:wildcard': 'files',
+        '/**:wildcard': 'global',
       },
     );
 
@@ -544,19 +710,36 @@ void main() {
     });
 
     test('wildcard captures remainder and allows empty', () {
-      final deep = router.match('/files/a/b/c');
+      final local = Router<String>(routes: {'/files/**:wildcard': 'files'});
+
+      final deep = local.match('/files/a/b/c');
       expect(deep?.data, 'files');
       expect(deep?.params, {'wildcard': 'a/b/c'});
 
-      final empty = router.match('/files');
+      final empty = local.match('/files');
       expect(empty?.data, 'files');
       expect(empty?.params, {'wildcard': ''});
     });
 
     test('global wildcard captures remainder', () {
-      final match = router.match('/foo/bar');
+      final local = Router<String>(routes: {'/**:wildcard': 'global'});
+
+      final match = local.match('/foo/bar');
       expect(match?.data, 'global');
       expect(match?.params, {'wildcard': 'foo/bar'});
+    });
+
+    test('single-segment wildcard captures one segment only', () {
+      final router = Router<String>(
+        routes: {'/users/*': 'single', '/users/**:wildcard': 'double'},
+      );
+
+      expect(router.match('/users/demo')?.data, 'single');
+      expect(router.match('/users/demo')?.params, {'0': 'demo'});
+      expect(router.match('/users/demo/profile')?.data, 'double');
+      expect(router.match('/users/demo/profile')?.params, {
+        'wildcard': 'demo/profile',
+      });
     });
   });
 
@@ -587,8 +770,8 @@ void main() {
     test('returns matches from less specific to more specific', () {
       final router = Router<String>(
         routes: {
-          '/*': 'global',
-          '/api/*': 'api-wildcard',
+          '/**:wildcard': 'global',
+          '/api/**:wildcard': 'api-wildcard',
           '/api/:id': 'api-param',
           '/api/demo': 'api-demo',
         },
@@ -607,8 +790,8 @@ void main() {
     test('returns route-local params for each matched route', () {
       final router = Router<String>(
         routes: {
-          '/*': 'global',
-          '/api/*': 'api-wildcard',
+          '/**:wildcard': 'global',
+          '/api/**:wildcard': 'api-wildcard',
           '/api/:id': 'api-param',
           '/api/demo': 'api-demo',
         },
@@ -625,7 +808,7 @@ void main() {
     test('snapshots params for each lazy match before backtracking', () {
       final router = Router<String>(
         routes: {
-          '/:section/*': 'section-wildcard',
+          '/:section/**:wildcard': 'section-wildcard',
           '/users/:id': 'user-detail',
         },
       );
@@ -642,10 +825,10 @@ void main() {
 
     test('includes ANY and exact method matches when method is provided', () {
       final router = Router<String>();
-      router.add('/*', 'global-any');
-      router.add('/*', 'global-get', method: 'GET');
-      router.add('/api/*', 'api-any');
-      router.add('/api/*', 'api-get', method: 'GET');
+      router.add('/**:wildcard', 'global-any');
+      router.add('/**:wildcard', 'global-get', method: 'GET');
+      router.add('/api/**:wildcard', 'api-any');
+      router.add('/api/**:wildcard', 'api-get', method: 'GET');
 
       final matches = matchAll(router, '/api/demo', method: 'GET');
 
@@ -659,26 +842,34 @@ void main() {
 
     test('preserves registration order for appended entries within a slot', () {
       final router = Router<String>();
-      router.add('/*', 'global-any-1', duplicatePolicy: DuplicatePolicy.append);
-      router.add('/*', 'global-any-2', duplicatePolicy: DuplicatePolicy.append);
       router.add(
-        '/api/*',
+        '/**:wildcard',
+        'global-any-1',
+        duplicatePolicy: DuplicatePolicy.append,
+      );
+      router.add(
+        '/**:wildcard',
+        'global-any-2',
+        duplicatePolicy: DuplicatePolicy.append,
+      );
+      router.add(
+        '/api/**:wildcard',
         'api-any-1',
         duplicatePolicy: DuplicatePolicy.append,
       );
       router.add(
-        '/api/*',
+        '/api/**:wildcard',
         'api-any-2',
         duplicatePolicy: DuplicatePolicy.append,
       );
       router.add(
-        '/api/*',
+        '/api/**:wildcard',
         'api-get-1',
         method: 'GET',
         duplicatePolicy: DuplicatePolicy.append,
       );
       router.add(
-        '/api/*',
+        '/api/**:wildcard',
         'api-get-2',
         method: 'GET',
         duplicatePolicy: DuplicatePolicy.append,
@@ -698,10 +889,10 @@ void main() {
 
     test('uses only ANY routes when method is omitted', () {
       final router = Router<String>();
-      router.add('/*', 'global-any');
-      router.add('/*', 'global-get', method: 'GET');
-      router.add('/api/*', 'api-any');
-      router.add('/api/*', 'api-get', method: 'GET');
+      router.add('/**:wildcard', 'global-any');
+      router.add('/**:wildcard', 'global-get', method: 'GET');
+      router.add('/api/**:wildcard', 'api-any');
+      router.add('/api/**:wildcard', 'api-get', method: 'GET');
 
       final matches = matchAll(router, '/api/demo');
 
@@ -719,13 +910,301 @@ void main() {
 
     test('keeps single-match behavior unchanged', () {
       final router = Router<String>();
-      router.add('/*', 'global');
-      router.add('/api/*', 'api-wildcard');
+      router.add('/**:wildcard', 'global');
+      router.add('/api/**:wildcard', 'api-wildcard');
       router.add('/api/:id', 'api-param');
       router.add('/api/demo', 'api-demo');
 
       expect(router.match('/api/demo')?.data, 'api-demo');
       expect(router.match('/api/demo')?.params, isNull);
+    });
+
+    test('orders embedded parameter routes between param and exact routes', () {
+      final router = Router<String>(
+        routes: {
+          '/files/:id': 'param',
+          '/files/:name.:ext': 'pattern',
+          '/files/readme.md': 'exact',
+        },
+      );
+
+      expect(router.match('/files/readme.md')?.data, 'exact');
+      expect(router.match('/files/guide.md')?.data, 'pattern');
+      expect(router.matchAll('/files/guide.md').map((match) => match.data), [
+        'param',
+        'pattern',
+      ]);
+    });
+
+    test('matches embedded wildcard routes before plain params', () {
+      final router = Router<String>(
+        routes: {'/files/:id': 'param', '/files/file-*.png': 'wild'},
+      );
+
+      expect(router.match('/files/file-z.png')?.data, 'wild');
+      expect(router.match('/files/file-z.png')?.params, {'0': 'z'});
+    });
+
+    test(
+      'matches more specific compiled patterns before broader ones regardless of registration order',
+      () {
+        final router = Router<String>();
+        router.add('/files/:name.:ext', 'pattern');
+        router.add('/files/file-*.png', 'wild');
+
+        expect(router.match('/files/file-z.png')?.data, 'wild');
+        expect(
+          router.matchAll('/files/file-z.png').map((match) => match.data),
+          ['pattern', 'wild'],
+        );
+      },
+    );
+
+    test(
+      'orders grouped routes before exact routes but after plain params',
+      () {
+        final router = Router<String>(
+          routes: {
+            '/book': 'exact-book',
+            '/book{s}?': 'group-book',
+            '/users/:id': 'param-user',
+            '/users{/:id}?': 'group-user',
+          },
+        );
+
+        expect(router.match('/book')?.data, 'exact-book');
+        expect(router.matchAll('/book').map((match) => match.data), [
+          'group-book',
+          'exact-book',
+        ]);
+        expect(router.match('/users/42')?.data, 'param-user');
+        expect(router.matchAll('/users/42').map((match) => match.data), [
+          'param-user',
+          'group-user',
+        ]);
+      },
+    );
+
+    test('orders mandatory group routes before exact routes', () {
+      final router = Router<String>(
+        routes: {'/foobar': 'exact', '/foo{bar}': 'group'},
+      );
+
+      expect(router.match('/foobar')?.data, 'exact');
+      expect(router.matchAll('/foobar').map((match) => match.data), [
+        'group',
+        'exact',
+      ]);
+    });
+
+    test('matches mandatory grouped routes before broad plain params', () {
+      final router = Router<String>(
+        routes: {'/:id': 'param', '/foo{bar}': 'group'},
+      );
+
+      expect(router.match('/foobar')?.data, 'group');
+      expect(router.matchAll('/foobar').map((match) => match.data), [
+        'param',
+        'group',
+      ]);
+    });
+
+    test(
+      'matches regex parameter routes before plain params in single match',
+      () {
+        final router = Router<String>(
+          routes: {'/users/:id': 'param', '/users/:id(\\d+)': 'regex'},
+        );
+
+        expect(router.match('/users/42')?.data, 'regex');
+        expect(router.matchAll('/users/42').map((match) => match.data), [
+          'param',
+          'regex',
+        ]);
+      },
+    );
+
+    test('matches plain param segments inside compiled mixed routes', () {
+      final router = Router<String>();
+      router.add('/users/:id/file-*.png', 'asset');
+
+      expect(router.match('/users/42/file-demo.png')?.data, 'asset');
+      expect(router.match('/users/42/file-demo.png')?.params, {
+        'id': '42',
+        '0': 'demo',
+      });
+    });
+
+    test('matches regex params with character classes correctly', () {
+      final router = Router<String>();
+      router.add('/symbols/:value([()])/:slug([a-z]+)', 'regex');
+
+      expect(router.match('/symbols/(/demo')?.params, {
+        'value': '(',
+        'slug': 'demo',
+      });
+      expect(router.match('/symbols/)/demo')?.params, {
+        'value': ')',
+        'slug': 'demo',
+      });
+    });
+
+    test('counts named regex capture groups without shifting later params', () {
+      final router = Router<String>();
+      router.add('/users/:id((?<inner>\\d+))/:slug([a-z]+)', 'regex');
+
+      expect(router.match('/users/42/demo')?.params, {
+        'id': '42',
+        'slug': 'demo',
+      });
+    });
+
+    test(
+      'orders optional params before exact routes when param is missing',
+      () {
+        final router = Router<String>(
+          routes: {'/users': 'exact', '/users/:id?': 'optional'},
+        );
+
+        expect(router.match('/users')?.data, 'exact');
+        expect(router.matchAll('/users').map((match) => match.data), [
+          'optional',
+          'exact',
+        ]);
+      },
+    );
+
+    test(
+      'matches plain params before optional params when param is present',
+      () {
+        final router = Router<String>(
+          routes: {'/users/:id': 'param', '/users/:id?': 'optional'},
+        );
+
+        expect(router.match('/users/42')?.data, 'param');
+        expect(router.matchAll('/users/42').map((match) => match.data), [
+          'param',
+          'optional',
+        ]);
+        expect(router.match('/users')?.data, 'optional');
+      },
+    );
+
+    test(
+      'matches repeated params before single params in multi-segment lookups',
+      () {
+        final router = Router<String>(
+          routes: {'/files/:id': 'param', '/files/:path+': 'plus'},
+        );
+
+        expect(router.match('/files/a')?.data, 'param');
+        expect(router.matchAll('/files/a').map((match) => match.data), [
+          'plus',
+          'param',
+        ]);
+        expect(router.match('/files/a/b')?.data, 'plus');
+      },
+    );
+
+    test('collects star params before exact routes when param is empty', () {
+      final router = Router<String>(
+        routes: {'/files': 'exact', '/files/:path*': 'star'},
+      );
+
+      expect(router.match('/files')?.data, 'exact');
+      expect(router.matchAll('/files').map((match) => match.data), [
+        'star',
+        'exact',
+      ]);
+    });
+
+    test(
+      'orders double wildcard before param before single wildcard before exact',
+      () {
+        final router = Router<String>(
+          routes: {
+            '/users/all': 'exact',
+            '/users/:id': 'param',
+            '/users/*': 'star',
+            '/users/**:rest': 'double',
+          },
+        );
+
+        expect(router.match('/users/all')?.data, 'exact');
+        expect(router.matchAll('/users/all').map((match) => match.data), [
+          'double',
+          'param',
+          'star',
+          'exact',
+        ]);
+        expect(router.match('/users/demo')?.data, 'param');
+        expect(router.matchAll('/users/demo').map((match) => match.data), [
+          'double',
+          'param',
+          'star',
+        ]);
+      },
+    );
+
+    test(
+      'orders single params before structured patterns before shell wildcards before exact',
+      () {
+        final router = Router<String>(
+          routes: {
+            '/files/:id': 'param',
+            '/files/:name.:ext': 'pattern',
+            '/files/file-*.png': 'wild',
+            '/files/file-a.png': 'exact',
+          },
+        );
+
+        expect(
+          router.matchAll('/files/file-a.png').map((match) => match.data),
+          ['param', 'pattern', 'wild', 'exact'],
+        );
+      },
+    );
+
+    test('keeps per-leaf parameter names on straight tail-leaf matches', () {
+      final router = Router<String>(
+        routes: {
+          '/users/:id/details': 'details',
+          '/users/:slug/preview': 'preview',
+        },
+      );
+
+      expect(router.match('/users/alice/details')?.params, {'id': 'alice'});
+      expect(router.match('/users/demo/preview')?.params, {'slug': 'demo'});
+    });
+
+    test(
+      'sorts branching trie matches from less specific to more specific',
+      () {
+        final router = Router<String>(
+          routes: {
+            '/users/:id/:tab': 'generic-tab',
+            '/users/:id/details': 'details',
+          },
+        );
+
+        expect(router.match('/users/42/details')?.data, 'details');
+        expect(
+          router.matchAll('/users/42/details').map((match) => match.data),
+          ['generic-tab', 'details'],
+        );
+      },
+    );
+
+    test('sorts repeated-only compiled matches by specificity', () {
+      final router = Router<String>();
+      router.add('/:all+', 'global-plus');
+      router.add('/files/:path+', 'files-plus');
+
+      expect(router.match('/files/a/b')?.data, 'files-plus');
+      expect(router.matchAll('/files/a/b').map((match) => match.data), [
+        'global-plus',
+        'files-plus',
+      ]);
     });
   });
 
@@ -744,9 +1223,112 @@ void main() {
       expect(router.match('/users'), isNull);
     });
 
+    test('supports case-insensitive matching when configured', () {
+      final local = Router<String>(
+        caseSensitive: false,
+        routes: {
+          '/Users': 'users',
+          '/files/:name.:ext': 'asset',
+          '/book{s}?': 'books',
+        },
+      );
+
+      expect(local.match('/users')?.data, 'users');
+      expect(local.match('/FILES/ReadMe.MD')?.data, 'asset');
+      expect(local.match('/FILES/ReadMe.MD')?.params, {
+        'name': 'ReadMe',
+        'ext': 'MD',
+      });
+      expect(local.match('/BOOKS')?.data, 'books');
+    });
+
     test('does not URL decode', () {
       expect(router.match('/a%2Fb')?.data, 'encoded');
       expect(router.match('/a/b'), isNull);
+    });
+
+    test('supports URL decoding when configured', () {
+      final local = Router<String>(
+        decodePath: true,
+        routes: {
+          '/a/b': 'decoded',
+          '/a%2Fb': 'encoded-literal',
+          '/files/:name.:ext': 'asset',
+        },
+      );
+
+      expect(local.match('/a%2Fb')?.data, 'decoded');
+      expect(local.match('/files/Read%20Me.MD')?.params, {
+        'name': 'Read Me',
+        'ext': 'MD',
+      });
+      expect(local.match('/a%20b'), isNull);
+    });
+
+    test('supports combining decodePath with case-insensitive matching', () {
+      final local = Router<String>(
+        decodePath: true,
+        caseSensitive: false,
+        routes: {'/files/:name.:ext': 'asset'},
+      );
+
+      expect(local.match('/FILES/Read%20Me.MD')?.params, {
+        'name': 'Read Me',
+        'ext': 'MD',
+      });
+    });
+
+    test('supports path normalization when configured', () {
+      final local = Router<String>(
+        normalizePath: true,
+        routes: {'/a/b': 'ab', '/users/:id': 'user'},
+      );
+
+      expect(local.match('/a/b/')?.data, 'ab');
+      expect(local.match('/a//b')?.data, 'ab');
+      expect(local.match('/a/./b')?.data, 'ab');
+      expect(local.match('/a/c/../b')?.data, 'ab');
+      expect(local.match('/users//42')?.params, {'id': '42'});
+    });
+
+    test('supports normalized matching for straight dynamic routes', () {
+      final local = Router<String>(
+        normalizePath: true,
+        routes: {'/users/:id/items/:itemId/profile9': 'profile'},
+      );
+
+      expect(
+        local
+            .match('/users//tmp/../alice/items//./tmp/../book/profile9/')
+            ?.params,
+        {'id': 'alice', 'itemId': 'book'},
+      );
+    });
+
+    test(
+      'does not skip normalized trie params when exact routes coexist in a method bucket',
+      () {
+        final local = Router<String>(
+          normalizePath: true,
+          routes: {'/health': 'health'},
+        );
+        local.add('/users/:id', 'user', method: 'GET');
+        local.add('/health', 'health', method: 'GET');
+
+        expect(local.match('/users//42/', method: 'GET')?.data, 'user');
+        expect(local.match('/users//42/', method: 'GET')?.params, {'id': '42'});
+        expect(local.match('/./health/', method: 'GET')?.data, 'health');
+      },
+    );
+
+    test('supports combining decodePath with path normalization', () {
+      final local = Router<String>(
+        decodePath: true,
+        normalizePath: true,
+        routes: {'/files/:name': 'file'},
+      );
+
+      expect(local.match('/files/%2E/Read%20Me')?.params, {'name': 'Read Me'});
     });
 
     test('returns null for invalid lookup path', () {
@@ -756,8 +1338,43 @@ void main() {
       expect(router.match('/a//b'), isNull);
     });
 
+    test('returns null for invalid lookup path with repeated patterns', () {
+      final local = Router<String>(routes: {'/files/:path*': 'file'});
+
+      expect(local.match('/files//readme'), isNull);
+      expect(local.matchAll('/files//readme'), isEmpty);
+    });
+
+    test(
+      'returns null for invalid URL encoding when decodePath is enabled',
+      () {
+        final local = Router<String>(
+          decodePath: true,
+          routes: {'/files/:name': 'file', '/**:wildcard': 'fallback'},
+        );
+
+        expect(local.match('/files/%ZZ'), isNull);
+        expect(local.matchAll('/files/%ZZ'), isEmpty);
+      },
+    );
+
+    test(
+      'returns null for root-escaping paths when normalization is enabled',
+      () {
+        final local = Router<String>(
+          normalizePath: true,
+          routes: {'/files/:name': 'file', '/**:wildcard': 'fallback'},
+        );
+
+        expect(local.match('/files/../../readme'), isNull);
+        expect(local.matchAll('/files/../../readme'), isEmpty);
+      },
+    );
+
     test('does not let invalid paths hit wildcard fallback routes', () {
-      final wildcardRouter = Router<String>(routes: {'/*': 'fallback'});
+      final wildcardRouter = Router<String>(
+        routes: {'/**:wildcard': 'fallback'},
+      );
 
       expect(wildcardRouter.match('/users//42'), isNull);
       expect(wildcardRouter.matchAll('/users//42'), isEmpty);
@@ -769,9 +1386,9 @@ void main() {
       expect(() => Router<String>(routes: {'a': 'bad'}), throwsFormatException);
     });
 
-    test('rejects wildcard in the middle', () {
+    test('rejects double wildcard in the middle', () {
       expect(
-        () => Router<String>(routes: {'/a/*/b': 'bad'}),
+        () => Router<String>(routes: {'/a/**:rest/b': 'bad'}),
         throwsFormatException,
       );
     });
@@ -783,9 +1400,9 @@ void main() {
       );
     });
 
-    test('rejects embedded segment syntax', () {
+    test('rejects unsupported embedded segment syntax', () {
       expect(
-        () => Router<String>(routes: {'/a/:id.:ext': 'bad'}),
+        () => Router<String>(routes: {'/a/:id:ext': 'bad'}),
         throwsFormatException,
       );
     });
@@ -797,16 +1414,103 @@ void main() {
       );
     });
 
+    test('rejects case-insensitive duplicate static paths', () {
+      expect(
+        () => Router<String>(
+          caseSensitive: false,
+          routes: {'/Users': 'a', '/users': 'b'},
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects case-insensitive duplicate compiled shapes', () {
+      expect(
+        () => Router<String>(
+          caseSensitive: false,
+          routes: {'/Files/:name.:ext': 'a', '/files/:name.:ext': 'b'},
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate embedded param shape', () {
+      expect(
+        () => Router<String>(
+          routes: {'/files/:name.:ext': 'a', '/files/:base.:suffix': 'b'},
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate embedded wildcard shape', () {
+      expect(
+        () => Router<String>(
+          routes: {'/files/*.:ext': 'a', '/files/*.:type': 'b'},
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects unclosed optional groups', () {
+      expect(
+        () => Router<String>(routes: {'/users{/:id?': 'bad'}),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate optional param shape', () {
+      expect(
+        () =>
+            Router<String>(routes: {'/users/:id?': 'a', '/users/:name?': 'b'}),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate repeated param shape', () {
+      expect(
+        () => Router<String>(
+          routes: {'/files/:path+': 'a', '/files/:rest+': 'b'},
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate capture names in trie routes', () {
+      expect(
+        () => Router<String>(routes: {'/users/:id/:id': 'dup'}),
+        throwsFormatException,
+      );
+      expect(
+        () => Router<String>(routes: {'/:id/**:id': 'dup'}),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects duplicate capture names in compiled routes', () {
+      expect(
+        () => Router<String>(routes: {'/files/:name.:name': 'dup'}),
+        throwsFormatException,
+      );
+      expect(
+        () => Router<String>(routes: {'/files/:id((?<inner>\\d+))/:id': 'dup'}),
+        throwsFormatException,
+      );
+    });
+
     test('rejects duplicate wildcard shape after normalization', () {
       expect(
-        () => Router<String>(routes: {'/docs/*': 'a', '/docs/*/': 'b'}),
+        () => Router<String>(
+          routes: {'/docs/**:wildcard': 'a', '/docs/**:wildcard/': 'b'},
+        ),
         throwsFormatException,
       );
     });
 
     test('rejects duplicate global fallback after normalization', () {
       expect(
-        () => Router<String>(routes: {'/*': 'a', '/*/': 'b'}),
+        () =>
+            Router<String>(routes: {'/**:wildcard': 'a', '/**:wildcard/': 'b'}),
         throwsFormatException,
       );
     });
