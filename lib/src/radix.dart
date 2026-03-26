@@ -1,841 +1,763 @@
-// Single radix trie — nodes carry typed fields; no edge-list scanning.
+// rou3-style route operations translated to Dart.
 // ignore_for_file: public_member_api_docs
 
 import 'model.dart';
-import 'path.dart';
 
-// ── node ──────────────────────────────────────────────────────────────────────
+void addRoute<T>(
+  RouterNode<T> root,
+  Map<String, RouterNode<T>> staticRoutes,
+  bool caseSensitive,
+  String method,
+  String path,
+  T data,
+  DuplicatePolicy policy,
+  int order, {
+  bool structured = false,
+  bool? restOptional,
+}) {
+  if (!path.startsWith('/')) path = '/$path';
 
-class _Node<T> {
-  final Map<String, _Node<T>> statics = {};
-  _ParamEdge<T>? param;
-  _CatchAllEdge<T>? catchAll;
-  List<_PatternEdge<T>>? highPats; // bucketHigh  — before :param
-  List<_PatternEdge<T>>? loPats; // bucketLate/Repeat — after :param
-  List<_PatternEdge<T>>? deferPats; // bucketDeferred — last
-  MethodSlot<T>? slot;
-}
-
-// ── edges ─────────────────────────────────────────────────────────────────────
-
-class _ParamEdge<T> {
-  final _Node<T> child = _Node<T>();
-}
-
-class _CatchAllEdge<T> {
-  final MethodSlot<T> slot;
-  _CatchAllEdge(this.slot);
-}
-
-class _PatternEdge<T> {
-  final RegExp regex;
-  final String shape;
-  final int bucket;
-  final List<int> groupIndexes;
-  MethodSlot<T> slot;
-  _PatternEdge(
-    this.regex,
-    this.shape,
-    this.bucket,
-    this.groupIndexes,
-    this.slot,
-  );
-}
-
-// ── radix engine ──────────────────────────────────────────────────────────────
-
-class Radix<T> {
-  Radix(this.caseSensitive);
-
-  final bool caseSensitive;
-  final _exact = <String, MethodSlot<T>>{};
-  final _root = _Node<T>();
-
-  bool _hasNonExact = false;
-  bool _hasPatterns = false;
-  bool _hasWildcards = false;
-
-  bool get hasNonExact => _hasNonExact;
-  bool get needsStrict => _hasWildcards || _hasPatterns;
-
-  // ── registration ──────────────────────────────────────────────────────────
-
-  void add(
-    String path,
-    T data,
-    String? method,
-    DuplicatePolicy policy,
-    int order,
-  ) {
-    if (!path.startsWith('/')) {
-      throw FormatException('Route pattern must start with "/": $path');
+  final expandedGroups = expandGroupDelimiters(path);
+  if (expandedGroups != null) {
+    for (final expanded in expandedGroups) {
+      addRoute(
+        root,
+        staticRoutes,
+        caseSensitive,
+        method,
+        expanded,
+        data,
+        policy,
+        order,
+        structured: true,
+        restOptional: restOptional,
+      );
     }
-    final norm = trimTrailingSlash(path);
+    return;
+  }
 
-    var hasToken = false;
-    for (var i = 1; i < norm.length; i++) {
-      final c = norm.codeUnitAt(i);
-      if (c == colonCode ||
-          c == asteriskCode ||
-          c == openBraceCode ||
-          c == closeBraceCode ||
-          c == questionCode) {
-        hasToken = true;
-        break;
+  path = encodeEscapes(path);
+  final segments = splitPath(path);
+  final expanded = expandModifiers(segments);
+  if (expanded != null) {
+    for (final expansion in expanded) {
+      addRoute(
+        root,
+        staticRoutes,
+        caseSensitive,
+        method,
+        expansion.path,
+        data,
+        policy,
+        order,
+        structured: structured || expansion.structured,
+        restOptional: expansion.restOptional,
+      );
+    }
+    return;
+  }
+
+  var node = root;
+  var unnamedIndex = 0;
+  final paramsMap = <ParamSpec>[];
+  final paramsRegexp = <SegmentPattern?>[];
+  final captureNames = <String>[];
+  final shape = StringBuffer(structured ? 'struct:' : '');
+  var staticChars = 0;
+  var sawParam = false;
+  var sawHigh = false;
+  var sawLow = false;
+  var sawRest = false;
+  final routeCaptureNames = <String>{};
+
+  for (var i = 0; i < segments.length; i++) {
+    var segment = segments[i];
+
+    if (segment.startsWith('**')) {
+      if (i != segments.length - 1) {
+        throw FormatException('Double wildcard must be the final segment: /$path');
       }
+      node.wildcard ??= RouterNode<T>('**');
+      node = node.wildcard!;
+      final name = _readRestName(segment);
+      paramsMap.add(ParamSpec(-(i + 1), name ?? '_', restOptional ?? true));
+      _recordCaptureName(routeCaptureNames, captureNames, name ?? '_', path);
+      shape.write('/**');
+      sawRest = true;
+      break;
     }
-    if (!hasToken) {
-      _addExact(norm, data, method, policy, order);
-      return;
-    }
 
-    var node = _root;
-    final names = <String>[];
-    var staticChars = 0, depth = 0;
-    var cursor = norm.length == 1 ? norm.length : 1;
+    final isDynamic =
+        segment == '*' ||
+        segment.contains(':') ||
+        segment.contains('(') ||
+        hasSegmentWildcard(segment);
+    if (isDynamic) {
+      node.param ??= RouterNode<T>('*');
+      node = node.param!;
 
-    while (cursor < norm.length) {
-      final segEnd = findSegmentEnd(norm, cursor);
-      if (segEnd == cursor) throw FormatException('$emptySegment$norm');
-      final firstCode = norm.codeUnitAt(cursor);
-      final segComplex = _segmentHasComplex(norm, cursor, segEnd);
-
-      // ** catch-all
-      if (firstCode == asteriskCode) {
-        final restName = readRestName(norm, cursor, segEnd);
-        if (restName != null) {
-          if (segEnd != norm.length) {
-            throw FormatException(
-              'Double wildcard must be the last segment: $norm',
-            );
-          }
-          _validateCaptureNames(names, restName, norm);
-          final entry = RouteEntry<T>(
-            data,
-            names,
-            restName,
-            specRem,
-            depth,
-            staticChars,
-            0,
-            order,
-          );
-          _hasWildcards = true;
-          _hasNonExact = true;
-          final dupPrefix = cursor == 1 && names.isEmpty
-              ? dupFallback
-              : dupWildcard;
-          (node.catchAll ??= _CatchAllEdge(
-            MethodSlot<T>(),
-          )).slot.add(method, entry, policy, norm, dupPrefix);
-          return;
-        }
-      }
-
-      // Simple :name param
-      if (firstCode == colonCode && !segComplex) {
-        if (!validParamSlice(norm, cursor + 1, segEnd)) break;
-        node = (node.param ??= _ParamEdge<T>()).child;
-        names.add(norm.substring(cursor + 1, segEnd));
-        depth++;
-        cursor = segEnd < norm.length ? segEnd + 1 : norm.length;
+      if (segment == '*') {
+        final name = toUnnamedGroupKey(unnamedIndex++);
+        paramsMap.add(ParamSpec(i, name, true));
+        _recordCaptureName(routeCaptureNames, captureNames, name, path);
+        shape.write('/*');
+        sawLow = true;
         continue;
       }
 
-      // Complex segment
-      if (segComplex || firstCode == colonCode || firstCode == asteriskCode) {
-        break;
+      final isSimpleParam =
+          !segment.contains(':', 1) &&
+          !segment.contains('(') &&
+          !hasSegmentWildcard(segment) &&
+          RegExp(r'^:[\w-]+$').hasMatch(segment);
+      if (isSimpleParam) {
+        final name = segment.substring(1);
+        if (!validParamSlice(name, 0, name.length)) {
+          throw FormatException('Invalid parameter name in route: /$path');
+        }
+        paramsMap.add(ParamSpec(i, name, false));
+        _recordCaptureName(routeCaptureNames, captureNames, name, path);
+        shape.write('/:');
+        sawParam = true;
+        continue;
       }
 
-      // Static segment
-      final key = caseSensitive
-          ? norm.substring(cursor, segEnd)
-          : norm.substring(cursor, segEnd).toLowerCase();
-      staticChars += segEnd - cursor;
-      node = node.statics.putIfAbsent(key, _Node.new);
-      depth++;
-      cursor = segEnd < norm.length ? segEnd + 1 : norm.length;
+      final compiled = compileSegmentPattern(segment, caseSensitive, unnamedIndex);
+      unnamedIndex = compiled.nextUnnamed;
+      paramsRegexp.length = i + 1;
+      paramsRegexp[i] = compiled.pattern;
+      paramsMap.add(ParamSpec(i, compiled.pattern, false));
+      for (final name in compiled.captureNames) {
+        _recordCaptureName(routeCaptureNames, captureNames, name, path);
+      }
+      node.hasRegexParam = true;
+      shape
+        ..write('/')
+        ..write(compiled.shape);
+      staticChars += compiled.staticChars;
+      if (compiled.lowPriority) {
+        sawLow = true;
+      } else {
+        sawHigh = true;
+      }
+      continue;
     }
 
-    if (cursor >= norm.length) {
-      _validateCaptureNames(names, null, norm);
-      final entry = RouteEntry<T>(
-        data,
-        names,
-        null,
-        names.isEmpty ? specExact : specDyn,
-        depth,
-        staticChars,
-        0,
-        order,
-      );
-      node.slot ??= MethodSlot<T>();
-      node.slot!.add(method, entry, policy, norm, dupShape);
-      _hasNonExact = _hasNonExact || names.isNotEmpty;
+    if (segment == r'\*') {
+      segment = '*';
+    } else if (segment == r'\*\*') {
+      segment = '**';
     } else {
-      _hasPatterns = true;
-      _hasNonExact = true;
-      final compiled = _PatternCompiler<T>(
-        norm,
-        data,
-        caseSensitive,
-        order,
-      ).compile();
-      if (compiled == null) {
-        throw FormatException('Unsupported segment syntax in route: $norm');
-      }
-      final list = _patList(node, compiled.bucket);
-      for (final p in list) {
-        if (p.shape == compiled.shape) {
-          p.slot.add(method, compiled.entry, policy, norm, dupShape);
-          return;
-        }
-      }
-      _addPattern(
-        node,
-        _PatternEdge(
-          compiled.regex,
-          compiled.shape,
-          compiled.bucket,
-          compiled.groupIndexes,
-          MethodSlot<T>()..add(method, compiled.entry, policy, norm, dupShape),
-        ),
-      );
+      segment = decodeEscaped(segment);
     }
+
+    final key = caseSensitive ? segment : segment.toLowerCase();
+    node.statics ??= {};
+    node = node.statics!.putIfAbsent(key, () => RouterNode<T>(key));
+    shape
+      ..write('/')
+      ..write(key);
+    staticChars += segment.length;
   }
 
-  void _addExact(
-    String path,
-    T data,
-    String? method,
-    DuplicatePolicy policy,
-    int order,
-  ) {
-    final entry = RouteEntry<T>(
-      data,
-      const [],
-      null,
-      specExact,
-      countSegments(path),
-      countStaticChars(path) - 1,
-      0,
-      order,
-    );
-    final key = caseSensitive ? path : path.toLowerCase();
-    (_exact[key] ??= MethodSlot<T>()).add(
-      method,
-      entry,
-      policy,
-      path,
-      dupShape,
-    );
+  final hasParams = paramsMap.isNotEmpty;
+  final specificity = _routeSpecificity(hasParams, structured, sawHigh, sawLow);
+  final routeSpecificity = sawRest && !structured && !sawHigh && !sawLow
+      ? specRem
+      : specificity;
+  final matchSpecificity = _matchSpecificity(hasParams, structured, sawParam, sawHigh, sawLow);
+  final route = RouteData<T>(
+    data: data,
+    shapeKey: shape.toString().isEmpty ? '/' : shape.toString(),
+    captureNames: captureNames,
+    paramsMap: hasParams ? paramsMap : null,
+    paramsRegexp: paramsRegexp,
+    order: order,
+    rank: computeRank(routeSpecificity, segments.length, staticChars, _constraintScore(sawHigh, sawLow)),
+    matchRank: computeRank(
+      matchSpecificity,
+      segments.length,
+      staticChars,
+      _constraintScore(sawHigh, sawLow),
+    ),
+    emptyParams: structured && !hasParams,
+  );
+
+  _addMethodRoute(node, method, route, policy, path);
+  if (!hasParams) {
+    staticRoutes['/${segments.join('/')}'] = node;
+  }
+}
+
+RouteMatch<T>? findRoute<T>(
+  RouterNode<T> root,
+  Map<String, RouterNode<T>> staticRoutes,
+  bool caseSensitive,
+  String method,
+  String path,
+) {
+  final staticNode = staticRoutes[caseSensitive ? path : path.toLowerCase()];
+  if (staticNode != null) {
+    final match = _lookupMethods(staticNode.methods, method);
+    if (match != null) return match.first.materialize(const []);
   }
 
-  List<_PatternEdge<T>> _patList(_Node<T> node, int bucket) =>
-      bucket == bucketHigh
-      ? (node.highPats ??= [])
-      : bucket == bucketDeferred
-      ? (node.deferPats ??= [])
-      : (node.loPats ??= []);
+  final segments = splitPath(path);
+  final match = _lookupTree(root, method, segments, 0, caseSensitive)?.firstOrNull;
+  return match?.materialize(segments);
+}
 
-  void _addPattern(_Node<T> node, _PatternEdge<T> edge) {
-    final list = _patList(node, edge.bucket);
-    final ne = edge.slot.any;
-    if (ne != null) {
-      for (var i = 0; i < list.length; i++) {
-        final ce = list[i].slot.any;
-        if (ce != null &&
-            (ne.rank > ce.rank ||
-                (ne.rank == ce.rank && ne.order < ce.order))) {
-          list.insert(i, edge);
-          return;
-        }
+List<RouteMatch<T>> findAllRoutes<T>(
+  RouterNode<T> root,
+  bool caseSensitive,
+  String method,
+  String path,
+) {
+  final segments = splitPath(path);
+  final acc = MatchAccumulator<T>();
+  _collectAll(root, method, segments, 0, caseSensitive, acc);
+  return acc.results;
+}
+
+List<RouteData<T>>? _lookupTree<T>(
+  RouterNode<T> node,
+  String method,
+  List<String> segments,
+  int index,
+  bool caseSensitive,
+) {
+  if (index == segments.length) {
+    final end = _lookupMethods(node.methods, method);
+    if (end != null && end.isNotEmpty) return end;
+
+    final param = node.param;
+    if (param != null) {
+      final tail = _lookupMethods(param.methods, method);
+      if (tail != null &&
+          tail.isNotEmpty &&
+          tail.first.paramsMap?.last.optional == true) {
+        return tail;
       }
     }
-    list.add(edge);
-  }
 
-  // ── single best match ─────────────────────────────────────────────────────
-
-  RouteMatch<T>? match(String path, String? method) {
-    final exactSlot = _exact[caseSensitive ? path : path.toLowerCase()];
-    if (exactSlot != null) {
-      final e = exactSlot.lookup(method);
-      if (e != null) return e.plainMatch;
-    }
-    if (!_hasNonExact) return null;
-    return _walk(_root, path, method, 1, []);
-  }
-
-  RouteMatch<T>? _tryPats(
-    List<_PatternEdge<T>>? pats,
-    String path,
-    String? method,
-  ) {
-    for (final p in pats ?? []) {
-      final m = p.regex.firstMatch(path);
-      if (m == null) continue;
-      final e = p.slot.lookup(method);
-      if (e != null) return _materializePattern(e, p.groupIndexes, m);
+    final wildcard = node.wildcard;
+    if (wildcard != null) {
+      final tail = _lookupMethods(wildcard.methods, method);
+      if (tail != null &&
+          tail.isNotEmpty &&
+          tail.first.paramsMap?.last.optional == true) {
+        return tail;
+      }
     }
     return null;
   }
 
-  RouteMatch<T>? _walk(
-    _Node<T> node,
-    String path,
-    String? method,
-    int cursor,
-    List<String> captures,
-  ) {
-    if (cursor >= path.length) {
-      final e = node.slot?.lookup(method);
-      if (e != null) return e.materialize(captures);
-      return _tryPats(node.highPats, path, method) ??
-          _tryPats(node.loPats, path, method) ??
-          (node.catchAll?.slot
-              .lookup(method)
-              ?.materialize(captures, remainder: '')) ??
-          _tryPats(node.deferPats, path, method);
-    }
+  final rawSegment = segments[index];
+  final segment = caseSensitive ? rawSegment : rawSegment.toLowerCase();
 
-    final segEnd = findSegmentEnd(path, cursor);
-    if (segEnd == cursor) return null;
-    final next = segEnd < path.length ? segEnd + 1 : path.length;
-    final seg = caseSensitive
-        ? path.substring(cursor, segEnd)
-        : path.substring(cursor, segEnd).toLowerCase();
-
-    final staticChild = node.statics[seg];
-    if (staticChild != null) {
-      final m = _walk(staticChild, path, method, next, captures);
-      if (m != null) return m;
-    }
-
-    return _tryPats(node.highPats, path, method) ??
-        (node.param == null
-            ? null
-            : _walk(node.param!.child, path, method, next, [
-                ...captures,
-                path.substring(cursor, segEnd),
-              ])) ??
-        _tryPats(node.loPats, path, method) ??
-        (node.catchAll?.slot
-            .lookup(method)
-            ?.materialize(captures, remainder: path.substring(cursor))) ??
-        _tryPats(node.deferPats, path, method);
+  final staticChild = node.statics?[segment];
+  if (staticChild != null) {
+    final match = _lookupTree(staticChild, method, segments, index + 1, caseSensitive);
+    if (match != null) return match;
   }
 
-  // ── collect all matches ───────────────────────────────────────────────────
-
-  List<RouteMatch<T>> matchAll(String path, String? method) {
-    final acc = MatchAccumulator<T>();
-    final exactSlot = _exact[caseSensitive ? path : path.toLowerCase()];
-    if (exactSlot != null) {
-      exactSlot.collect(method, (entry, mr) {
-        RouteEntry<T>? e = entry;
-        while (e != null) {
-          acc.add(e.plainMatch, e.rank, mr, e.order);
-          e = e.next;
-        }
-      });
-    }
-    if (_hasNonExact) _walkCollect(_root, path, method, 1, [], acc);
-    return acc.results;
-  }
-
-  void _collectPats(
-    List<_PatternEdge<T>>? pats,
-    String path,
-    String? method,
-    MatchAccumulator<T> acc,
-  ) {
-    for (final p in pats ?? []) {
-      final m = p.regex.firstMatch(path);
-      if (m == null) continue;
-      p.slot.collect(method, (entry, mr) {
-        RouteEntry<T>? e = entry;
-        while (e != null) {
-          acc.add(
-            _materializePattern(e, p.groupIndexes, m),
-            e.rank,
-            mr,
-            e.order,
-          );
-          e = e.next;
-        }
-      });
-    }
-  }
-
-  void _walkCollect(
-    _Node<T> node,
-    String path,
-    String? method,
-    int cursor,
-    List<String> captures,
-    MatchAccumulator<T> acc,
-  ) {
-    // Catch-all matches at any depth
-    if (node.catchAll != null) {
-      final remainder = cursor >= path.length ? '' : path.substring(cursor);
-      node.catchAll!.slot.collect(method, (entry, mr) {
-        RouteEntry<T>? e = entry;
-        while (e != null) {
-          acc.add(
-            e.materialize(captures, remainder: remainder),
-            e.rank,
-            mr,
-            e.order,
-          );
-          e = e.next;
-        }
-      });
-    }
-
-    // Pattern edges at this node
-    _collectPats(node.highPats, path, method, acc);
-    _collectPats(node.loPats, path, method, acc);
-    _collectPats(node.deferPats, path, method, acc);
-
-    if (cursor >= path.length) {
-      node.slot?.collect(method, (entry, mr) {
-        RouteEntry<T>? e = entry;
-        while (e != null) {
-          acc.add(e.materialize(captures), e.rank, mr, e.order);
-          e = e.next;
-        }
-      });
-      return;
-    }
-
-    final segEnd = findSegmentEnd(path, cursor);
-    if (segEnd == cursor) return;
-    final next = segEnd < path.length ? segEnd + 1 : path.length;
-    final seg = caseSensitive
-        ? path.substring(cursor, segEnd)
-        : path.substring(cursor, segEnd).toLowerCase();
-
-    final staticChild = node.statics[seg];
-    if (staticChild != null) {
-      _walkCollect(staticChild, path, method, next, captures, acc);
-    }
-    if (node.param != null) {
-      _walkCollect(node.param!.child, path, method, next, [
-        ...captures,
-        path.substring(cursor, segEnd),
-      ], acc);
-    }
-  }
-
-  // ── helpers ───────────────────────────────────────────────────────────────
-
-  static RouteMatch<T> _materializePattern<T>(
-    RouteEntry<T> entry,
-    List<int> groupIndexes,
-    RegExpMatch m,
-  ) {
-    if (entry.names.isEmpty) return entry.plainMatch;
-    final params = <String, String>{};
-    for (var i = 0; i < entry.names.length; i++) {
-      final gi = groupIndexes[i];
-      if (gi < 0) continue;
-      final val = m.group(gi);
-      if (val != null) params[entry.names[i]] = val;
-    }
-    return RouteMatch(entry.data, params);
-  }
-
-  bool _segmentHasComplex(String path, int start, int end) {
-    for (var i = start; i < end; i++) {
-      final c = path.codeUnitAt(i);
-      if (c == asteriskCode ||
-          c == openBraceCode ||
-          c == closeBraceCode ||
-          c == questionCode) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  void _validateCaptureNames(
-    List<String> names,
-    String? catchAll,
-    String path,
-  ) {
-    final seen = <String>{};
-    for (final n in names) {
-      if (!seen.add(n)) {
-        throw FormatException('Duplicate capture name in route: $path');
-      }
-    }
-    if (catchAll != null && catchAll != '_') {
-      if (!seen.add(catchAll)) {
-        throw FormatException('Duplicate capture name in route: $path');
-      }
-    }
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Pattern compiler
-// ══════════════════════════════════════════════════════════════════════════════
-
-class _Compiled<T> {
-  final RegExp regex;
-  final String shape;
-  final int bucket;
-  final List<int> groupIndexes;
-  final RouteEntry<T> entry;
-  _Compiled(this.regex, this.shape, this.bucket, this.groupIndexes, this.entry);
-}
-
-class _PatternCompiler<T> {
-  _PatternCompiler(this.pattern, this.data, this.caseSensitive, this.order) {
-    _cur = (regex, shape);
-  }
-
-  final String pattern;
-  final T data;
-  final bool caseSensitive;
-  final int order;
-
-  final regex = StringBuffer('^'), shape = StringBuffer('^');
-  late (StringBuffer, StringBuffer) _cur;
-  final names = <String>[], groupIndexes = <int>[];
-  var groupCount = 0, unnamedCount = 0, staticChars = 0;
-  var needsCompiled = false, bucket = bucketHigh;
-  var specificity = specDyn, constraintScore = 0;
-
-  void _write(String v) {
-    _cur.$1.write(v);
-    _cur.$2.write(v);
-  }
-
-  _Compiled<T>? compile() {
-    if (_containsStructuredBrace(pattern)) {
-      needsCompiled = true;
-      specificity = specStruct;
-      if (constraintScore < 1) constraintScore = 1;
-      writeGrouped(0, pattern.length, false);
-      _write(r'$');
-      return _build();
-    }
-    for (
-      var cursor = pattern.length == 1 ? pattern.length : 1;
-      cursor < pattern.length;
-    ) {
-      final segEnd = findSegmentEnd(pattern, cursor);
-      final first = pattern.codeUnitAt(cursor);
-      if (segEnd == cursor) throw FormatException('$emptySegment$pattern');
-
-      if (first == colonCode && validParamSlice(pattern, cursor + 1, segEnd)) {
-        _writeCapture(
-          '([^/]+)',
-          pattern.substring(cursor + 1, segEnd),
-          slashPrefixed: true,
-        );
-        cursor = segEnd + 1;
-        continue;
-      }
-      if (segEnd - cursor == 1 && first == asteriskCode) {
-        _writeCapture('([^/]+)', '${unnamedCount++}', slashPrefixed: true);
-        needsCompiled = true;
-        bucket = bucketLate;
-        constraintScore = 1;
-        cursor = segEnd + 1;
-        continue;
-      }
-      if (first == colonCode) {
-        final q = pattern.codeUnitAt(segEnd - 1);
-        if (q == questionCode || q == plusCode || q == asteriskCode) {
-          final name = pattern.substring(cursor + 1, segEnd - 1);
-          if (!validParamSlice(name, 0, name.length)) {
-            throw FormatException('Invalid parameter name in route: $pattern');
+  final param = node.param;
+  if (param != null) {
+    final match = _lookupTree(param, method, segments, index + 1, caseSensitive);
+    if (match != null) {
+      if (param.hasRegexParam) {
+        for (final route in match) {
+          final pattern = index < route.paramsRegexp.length ? route.paramsRegexp[index] : null;
+          if (pattern == null || pattern.regex.hasMatch(rawSegment)) {
+            return [route];
           }
-          final capture = q == questionCode
-              ? '([^/]+)'
-              : q == plusCode
-              ? '(.+(?:/.+)*)'
-              : '(.*)';
-          _writeCapture(
-            capture,
-            name,
-            slashPrefixed: true,
-            optional: q != plusCode,
-          );
-          needsCompiled = true;
-          bucket = q == questionCode ? bucketDeferred : bucketRepeat;
-          specificity = q == questionCode ? specStruct : specRem;
-          constraintScore = 1;
-          cursor = segEnd + 1;
-          continue;
         }
+        return null;
       }
-      _write('/');
-      _writeSegment(cursor, segEnd);
-      cursor = segEnd + 1;
+      return match;
     }
-    _write(r'$');
-    if (!needsCompiled) return null;
-    return _build();
   }
 
-  _Compiled<T> _build() => _Compiled(
-    RegExp(regex.toString(), caseSensitive: caseSensitive),
-    shape.toString(),
-    bucket,
-    groupIndexes,
-    RouteEntry<T>(
-      data,
-      names,
-      null,
-      specificity,
-      countSegments(pattern),
-      staticChars,
-      constraintScore,
-      order,
-    ),
+  final wildcard = node.wildcard;
+  if (wildcard != null) {
+    final match = _lookupMethods(wildcard.methods, method);
+    if (match != null) return match;
+  }
+
+  return null;
+}
+
+void _collectAll<T>(
+  RouterNode<T> node,
+  String method,
+  List<String> segments,
+  int index,
+  bool caseSensitive,
+  MatchAccumulator<T> acc,
+) {
+  final wildcard = node.wildcard;
+  if (wildcard != null) {
+    _addBucketMatches(wildcard.methods, method, segments, acc);
+  }
+
+  final param = node.param;
+  if (param != null) {
+    _collectAll(param, method, segments, index + 1, caseSensitive, acc);
+    if (index == segments.length) {
+      final tail = _lookupMethods(param.methods, method);
+      if (tail != null &&
+          tail.isNotEmpty &&
+          tail.first.paramsMap?.last.optional == true) {
+        _addRoutes(tail, 1, segments, acc);
+      }
+    }
+  }
+
+  if (index < segments.length) {
+    final rawSegment = segments[index];
+    final segment = caseSensitive ? rawSegment : rawSegment.toLowerCase();
+    final staticChild = node.statics?[segment];
+    if (staticChild != null) {
+      _collectAll(staticChild, method, segments, index + 1, caseSensitive, acc);
+    }
+  }
+
+  if (index == segments.length) {
+    _addBucketMatches(node.methods, method, segments, acc);
+  }
+}
+
+void _addBucketMatches<T>(
+  Map<String, List<RouteData<T>>>? methods,
+  String method,
+  List<String> segments,
+  MatchAccumulator<T> acc,
+) {
+  if (methods == null) return;
+  final any = methods[''];
+  if (any != null) _addRoutes(any, 0, segments, acc);
+  if (method.isNotEmpty) {
+    final exact = methods[method];
+    if (exact != null) _addRoutes(exact, 1, segments, acc);
+  }
+}
+
+void _addRoutes<T>(
+  List<RouteData<T>> routes,
+  int methodRank,
+  List<String> segments,
+  MatchAccumulator<T> acc,
+) {
+  for (final route in routes) {
+    acc.add(route.materialize(segments), route.rank, methodRank, route.order);
+  }
+}
+
+List<RouteData<T>>? _lookupMethods<T>(
+  Map<String, List<RouteData<T>>>? methods,
+  String method,
+) {
+  if (methods == null) return null;
+  return methods[method] ?? methods[''];
+}
+
+void _addMethodRoute<T>(
+  RouterNode<T> node,
+  String method,
+  RouteData<T> route,
+  DuplicatePolicy policy,
+  String pattern,
+) {
+  node.methods ??= {};
+  final bucket = node.methods!.putIfAbsent(method, () => <RouteData<T>>[]);
+  final duplicateIndexes = <int>[];
+  for (var i = 0; i < bucket.length; i++) {
+    if (bucket[i].shapeKey == route.shapeKey) {
+      duplicateIndexes.add(i);
+    }
+  }
+
+  if (duplicateIndexes.isNotEmpty) {
+    for (final index in duplicateIndexes) {
+      final existing = bucket[index];
+      if (!_sameCaptureNames(existing.captureNames, route.captureNames)) {
+        throw FormatException('$dupShape$pattern');
+      }
+    }
+
+    switch (policy) {
+      case DuplicatePolicy.reject:
+        throw FormatException('${_dupPrefix(route.paramsMap, pattern)}$pattern');
+      case DuplicatePolicy.replace:
+        for (var i = duplicateIndexes.length - 1; i >= 0; i--) {
+          bucket.removeAt(duplicateIndexes[i]);
+        }
+        bucket.add(route);
+      case DuplicatePolicy.keepFirst:
+        return;
+      case DuplicatePolicy.append:
+        bucket.add(route);
+    }
+  } else {
+    bucket.add(route);
+  }
+  bucket.sort((a, b) {
+    final r = b.matchRank - a.matchRank;
+    return r != 0 ? r : a.order - b.order;
+  });
+}
+
+bool _sameCaptureNames(List<String> a, List<String> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (normalizeUnnamedGroupKey(a[i]) != normalizeUnnamedGroupKey(b[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+String _dupPrefix(List<ParamSpec>? paramsMap, String pattern) {
+  if (paramsMap == null || paramsMap.isEmpty) return dupShape;
+  final last = paramsMap.last;
+  if (last.index < 0) {
+    return paramsMap.length == 1 && last.index == -1 ? dupFallback : dupWildcard;
+  }
+  return dupShape;
+}
+
+int _routeSpecificity(
+  bool hasParams,
+  bool structured,
+  bool sawHigh,
+  bool sawLow,
+) {
+  if (!hasParams) return structured ? specStruct : specExact;
+  if (sawHigh || sawLow || structured) return specStruct;
+  return specDyn;
+}
+
+int _matchSpecificity(
+  bool hasParams,
+  bool structured,
+  bool sawParam,
+  bool sawHigh,
+  bool sawLow,
+) {
+  if (!hasParams && !structured) return 5;
+  if (sawHigh || (structured && !hasParams)) return 4;
+  if (sawParam && !structured) return 3;
+  if (hasParams || sawLow || structured) return 2;
+  return 1;
+}
+
+int _constraintScore(bool sawHigh, bool sawLow) => sawHigh ? 2 : sawLow ? 1 : 0;
+
+class CompiledSegmentPattern {
+  const CompiledSegmentPattern(
+    this.pattern,
+    this.shape,
+    this.captureNames,
+    this.staticChars,
+    this.lowPriority,
+    this.nextUnnamed,
   );
 
-  void _writeCapture(
-    String cap,
-    String name, {
-    int extraGroups = 0,
-    bool slashPrefixed = false,
-    bool optional = false,
-  }) {
-    if (optional) {
-      _write('(?:');
-      if (slashPrefixed) _write('/');
-      _write(cap);
-      _write(')?');
-    } else {
-      if (slashPrefixed) _write('/');
-      _write(cap);
-    }
-    names.add(name);
-    groupCount++;
-    groupIndexes.add(groupCount);
-    groupCount += extraGroups;
-  }
-
-  void _writeLiteral(String literal) {
-    staticChars += countStaticChars(literal);
-    _cur.$1.write(RegExp.escape(literal));
-    _cur.$2.write(
-      RegExp.escape(caseSensitive ? literal : literal.toLowerCase()),
-    );
-  }
-
-  void _writeSegment(int start, int end) {
-    var cursor = start, lastWasParam = false, hasLiteral = false, capCount = 0;
-    while (cursor < end) {
-      final c = pattern.codeUnitAt(cursor);
-      if (c == asteriskCode) {
-        _writeCapture('([^/]*)', '${unnamedCount++}');
-        needsCompiled = true;
-        if (constraintScore < 1) constraintScore = 1;
-        if (hasLiteral || ++capCount > 1) specificity = specStruct;
-        cursor++;
-        lastWasParam = false;
-        continue;
-      }
-      if (c == colonCode) {
-        cursor = _writeNamedCapture(cursor, end, lastWasParam);
-        needsCompiled = true;
-        if (hasLiteral || ++capCount > 1) specificity = specStruct;
-        lastWasParam = true;
-        continue;
-      }
-      final litStart = cursor++;
-      while (cursor < end) {
-        final cc = pattern.codeUnitAt(cursor);
-        if (cc == colonCode || cc == asteriskCode) break;
-        cursor++;
-      }
-      _writeLiteral(pattern.substring(litStart, cursor));
-      hasLiteral = true;
-      if (capCount > 0) specificity = specStruct;
-      lastWasParam = false;
-    }
-  }
-
-  bool writeGrouped(int start, int end, bool lastWasParam) {
-    var cursor = start;
-    while (cursor < end) {
-      final c = pattern.codeUnitAt(cursor);
-      if (c == openBraceCode) {
-        final gEnd = _findGroupEnd(pattern, cursor);
-        final optional =
-            gEnd + 1 < pattern.length &&
-            pattern.codeUnitAt(gEnd + 1) == questionCode;
-        if (optional) {
-          final saved = _cur;
-          _cur = (StringBuffer(), StringBuffer());
-          lastWasParam = writeGrouped(cursor + 1, gEnd, lastWasParam);
-          final tmpR = _cur.$1, tmpS = _cur.$2;
-          _cur = saved;
-          bucket = bucketDeferred;
-          if (constraintScore < 1) constraintScore = 1;
-          saved.$1
-            ..write('(?:')
-            ..write(tmpR)
-            ..write(')?');
-          saved.$2
-            ..write('(?:')
-            ..write(tmpS)
-            ..write(')?');
-        } else {
-          lastWasParam = writeGrouped(cursor + 1, gEnd, lastWasParam);
-        }
-        cursor = gEnd + (optional ? 2 : 1);
-        needsCompiled = true;
-        continue;
-      }
-      if (c == slashCode) {
-        _write('/');
-        cursor++;
-        lastWasParam = false;
-        continue;
-      }
-      if (c == asteriskCode) {
-        if (cursor + 1 < end &&
-            pattern.codeUnitAt(cursor + 1) == asteriskCode) {
-          throw FormatException(
-            'Unsupported segment syntax in route: $pattern',
-          );
-        }
-        _writeCapture('([^/]*)', '${unnamedCount++}');
-        if (bucket < bucketLate) bucket = bucketLate;
-        if (constraintScore < 1) constraintScore = 1;
-        cursor++;
-        lastWasParam = false;
-        continue;
-      }
-      if (c == colonCode) {
-        cursor = _writeNamedCapture(cursor, end, lastWasParam);
-        lastWasParam = true;
-        continue;
-      }
-      final litStart = cursor++;
-      while (cursor < end) {
-        final cc = pattern.codeUnitAt(cursor);
-        if (cc == slashCode ||
-            cc == colonCode ||
-            cc == asteriskCode ||
-            cc == openBraceCode ||
-            cc == closeBraceCode) {
-          break;
-        }
-        cursor++;
-      }
-      _writeLiteral(pattern.substring(litStart, cursor));
-      lastWasParam = false;
-    }
-    return lastWasParam;
-  }
-
-  int _writeNamedCapture(int cursor, int end, bool lastWasParam) {
-    if (lastWasParam) {
-      throw FormatException('Unsupported segment syntax in route: $pattern');
-    }
-    var nameEnd = cursor + 1;
-    while (nameEnd < end &&
-        isParamCode(pattern.codeUnitAt(nameEnd), nameEnd == cursor + 1)) {
-      nameEnd++;
-    }
-    final name = pattern.substring(cursor + 1, nameEnd);
-    if (!validParamSlice(name, 0, name.length)) {
-      throw FormatException('Invalid parameter name in route: $pattern');
-    }
-    if (nameEnd < end && pattern.codeUnitAt(nameEnd) == 40) {
-      final regexEnd = _findRegexEnd(pattern, nameEnd, end);
-      final body = pattern.substring(nameEnd + 1, regexEnd);
-      if (constraintScore < 2) constraintScore = 2;
-      _writeCapture('($body)', name, extraGroups: _countCapturingGroups(body));
-      return regexEnd + 1;
-    }
-    _writeCapture('([^/]+)', name);
-    return nameEnd;
-  }
+  final SegmentPattern pattern;
+  final String shape;
+  final List<String> captureNames;
+  final int staticChars;
+  final bool lowPriority;
+  final int nextUnnamed;
 }
 
-// ── pattern compiler helpers ───────────────────────────────────────────────
+class ModifierExpansion {
+  const ModifierExpansion(this.path, this.structured, [this.restOptional]);
 
-bool _containsStructuredBrace(String pattern) {
-  const backslash = 92, zero = 48, nine = 57;
-  for (var i = 0; i < pattern.length; i++) {
-    if (pattern.codeUnitAt(i) != openBraceCode) continue;
-    if (i > 0 && pattern.codeUnitAt(i - 1) == backslash) continue;
-    if (i + 1 >= pattern.length) return true;
-    final next = pattern.codeUnitAt(i + 1);
-    if (next >= zero && next <= nine) continue;
-    return true;
+  final String path;
+  final bool structured;
+  final bool? restOptional;
+}
+
+CompiledSegmentPattern compileSegmentPattern(
+  String segment,
+  bool caseSensitive,
+  int unnamedStart,
+) {
+  final regex = StringBuffer('^');
+  final shape = StringBuffer();
+  final captureNames = <String>[];
+  var staticChars = 0;
+  var nextUnnamed = unnamedStart;
+  var cursor = 0;
+  var lastWasCapture = false;
+
+  while (cursor < segment.length) {
+    final code = segment.codeUnitAt(cursor);
+    if (code == colonCode) {
+      if (lastWasCapture) {
+        throw FormatException('Unsupported segment syntax in route: /$segment');
+      }
+      final (next, name, body) = _readParamToken(segment, cursor);
+      final groupName = name;
+      if (body != null) {
+        regex.write('(?<$groupName>$body)');
+        shape.write('($body)');
+      } else {
+        regex.write('(?<$groupName>[^/]+)');
+        shape.write('(:)');
+      }
+      captureNames.add(groupName);
+      cursor = next;
+      lastWasCapture = true;
+      continue;
+    }
+
+    if (code == asteriskCode) {
+      final name = toUnnamedGroupKey(nextUnnamed++);
+      regex.write('(?<$name>[^/]*)');
+      shape.write('(*)');
+      captureNames.add(name);
+      cursor++;
+      lastWasCapture = false;
+      continue;
+    }
+
+    final start = cursor++;
+    while (cursor < segment.length) {
+      final next = segment.codeUnitAt(cursor);
+      if (next == colonCode || next == asteriskCode) break;
+      cursor++;
+    }
+    final literal = resolveEscapePlaceholders(segment.substring(start, cursor));
+    regex.write(RegExp.escape(literal));
+    shape.write(RegExp.escape(caseSensitive ? literal : literal.toLowerCase()));
+    staticChars += literal.length;
+    lastWasCapture = false;
   }
-  return false;
+
+  regex.write(r'$');
+  return CompiledSegmentPattern(
+    SegmentPattern(
+      RegExp(regex.toString(), caseSensitive: caseSensitive),
+      captureNames,
+    ),
+    shape.toString(),
+    captureNames.map(normalizeUnnamedGroupKey).toList(),
+    staticChars,
+    false,
+    nextUnnamed,
+  );
+}
+
+(int, String, String?) _readParamToken(String segment, int start) {
+  var nameEnd = start + 1;
+  while (nameEnd < segment.length &&
+      isParamCode(segment.codeUnitAt(nameEnd), nameEnd == start + 1)) {
+    nameEnd++;
+  }
+  final name = segment.substring(start + 1, nameEnd);
+  if (!validParamSlice(name, 0, name.length)) {
+    throw FormatException('Invalid parameter name in route: /$segment');
+  }
+  if (nameEnd < segment.length && segment.codeUnitAt(nameEnd) == 40) {
+    final regexEnd = _findRegexEnd(segment, nameEnd, segment.length);
+    return (regexEnd + 1, name, segment.substring(nameEnd + 1, regexEnd));
+  }
+  return (nameEnd, name, null);
+}
+
+String encodeEscapes(String path) => path
+    .replaceAll(r'\:', '\uFFFDA')
+    .replaceAll(r'\(', '\uFFFDB')
+    .replaceAll(r'\)', '\uFFFDC')
+    .replaceAll(r'\{', '\uFFFDD')
+    .replaceAll(r'\}', '\uFFFDE')
+    .replaceAll(r'\*', '\uFFFDW');
+
+String decodeEscaped(String segment) => resolveEscapePlaceholders(segment)
+    .replaceAll('\uFFFDW', '*');
+
+String resolveEscapePlaceholders(String value) => value
+    .replaceAll('\uFFFDA', ':')
+    .replaceAll('\uFFFDB', '(')
+    .replaceAll('\uFFFDC', ')')
+    .replaceAll('\uFFFDD', '{')
+    .replaceAll('\uFFFDE', '}');
+
+List<ModifierExpansion>? expandModifiers(List<String> segments) {
+  final rx = RegExp(r'^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$');
+  for (var i = 0; i < segments.length; i++) {
+    final match = rx.firstMatch(segments[i]);
+    if (match == null) continue;
+    final base = match.group(1)!;
+    final modifier = match.group(2)!;
+    final pre = segments.sublist(0, i);
+    final suf = segments.sublist(i + 1);
+    if (modifier == '?') {
+      return [
+        ModifierExpansion('/${[...pre, base, ...suf].join('/')}', true),
+        ModifierExpansion('/${[...pre, ...suf].join('/')}', true),
+      ];
+    }
+    final name = RegExp(r':([\w-]+)').firstMatch(base)?.group(1) ?? '_';
+    final wildcard = '/${[...pre, '**:$name', ...suf].join('/')}';
+    if (modifier == '+') return [ModifierExpansion(wildcard, false, false)];
+    return [
+      ModifierExpansion(wildcard, false, true),
+      ModifierExpansion('/${[...pre, ...suf].join('/')}', true),
+    ];
+  }
+  return null;
+}
+
+List<String>? expandGroupDelimiters(String path) {
+  final start = _findStructuredBrace(path);
+  if (start < 0) return null;
+  final end = _findGroupEnd(path, start);
+  final hasMod = end + 1 < path.length &&
+      (path.codeUnitAt(end + 1) == questionCode ||
+          path.codeUnitAt(end + 1) == plusCode ||
+          path.codeUnitAt(end + 1) == asteriskCode);
+  final mod = hasMod ? path[end + 1] : null;
+  final pre = path.substring(0, start);
+  final body = path.substring(start + 1, end);
+  final suf = path.substring(end + (hasMod ? 2 : 1));
+  if (!hasMod) return ['$pre$body$suf'];
+  if (mod == '?') return ['$pre$body$suf', '$pre$suf'];
+  if (body.contains('/')) {
+    throw FormatException('unsupported group repetition across segments');
+  }
+  return ['$pre(?:$body)$mod$suf'];
+}
+
+int _findStructuredBrace(String pattern) {
+  var depth = 0;
+  for (var i = 0; i < pattern.length; i++) {
+    final code = pattern.codeUnitAt(i);
+    if (code == 92) {
+      i++;
+      continue;
+    }
+    if (code == 40) {
+      depth++;
+      continue;
+    }
+    if (code == 41 && depth > 0) {
+      depth--;
+      continue;
+    }
+    if (code == openBraceCode && depth == 0) return i;
+  }
+  return -1;
 }
 
 int _findGroupEnd(String pattern, int start) {
   var depth = 0;
   for (var i = start; i < pattern.length; i++) {
-    final c = pattern.codeUnitAt(i);
-    if (c == openBraceCode) depth++;
-    if (c == closeBraceCode && --depth == 0) return i;
+    final code = pattern.codeUnitAt(i);
+    if (code == 92) {
+      i++;
+      continue;
+    }
+    if (code == 40) {
+      depth++;
+      continue;
+    }
+    if (code == 41 && depth > 0) {
+      depth--;
+      continue;
+    }
+    if (code == openBraceCode && depth == 0) {
+      depth = -1;
+      continue;
+    }
+    if (code == closeBraceCode && depth == -1) return i;
   }
   throw FormatException('Unclosed group in route: $pattern');
 }
 
-int _findRegexEnd(String pattern, int start, int segEnd) {
-  var depth = 0, escaped = false, inClass = false;
-  for (var i = start; i < segEnd; i++) {
-    final c = pattern.codeUnitAt(i);
+bool hasSegmentWildcard(String segment) {
+  var depth = 0;
+  for (var i = 0; i < segment.length; i++) {
+    final code = segment.codeUnitAt(i);
+    if (code == 92) {
+      i++;
+      continue;
+    }
+    if (code == 40) {
+      depth++;
+      continue;
+    }
+    if (code == 41 && depth > 0) {
+      depth--;
+      continue;
+    }
+    if (code == asteriskCode && depth == 0) return true;
+  }
+  return false;
+}
+
+List<String> splitPath(String path) {
+  if (path == '/') return const [];
+  final parts = path.split('/');
+  final segments = parts.sublist(1);
+  if (segments.isNotEmpty && segments.last.isEmpty) {
+    return segments.sublist(0, segments.length - 1);
+  }
+  return segments;
+}
+
+String toUnnamedGroupKey(int index) => '$unnamedGroupPrefix$index';
+
+String? _readRestName(String segment) {
+  if (segment == '**') return '_';
+  if (!segment.startsWith('**:')) {
+    throw FormatException('Invalid wildcard segment: /$segment');
+  }
+  final name = segment.substring(3);
+  if (!validParamSlice(name, 0, name.length)) {
+    throw FormatException('Invalid parameter name in route: /$segment');
+  }
+  return name;
+}
+
+int _findRegexEnd(String pattern, int start, int end) {
+  var depth = 0;
+  var escaped = false;
+  var inClass = false;
+  for (var i = start; i < end; i++) {
+    final code = pattern.codeUnitAt(i);
     if (escaped) {
       escaped = false;
-    } else if (c == 92) {
+    } else if (code == 92) {
       escaped = true;
     } else if (inClass) {
-      if (c == 93) inClass = false;
-    } else if (c == 91) {
+      if (code == 93) inClass = false;
+    } else if (code == 91) {
       inClass = true;
-    } else if (c == 40) {
+    } else if (code == 40) {
       depth++;
-    } else if (c == 41 && --depth == 0) {
+    } else if (code == 41 && --depth == 0) {
       return i;
     }
   }
   throw FormatException('Unclosed regex in route: $pattern');
 }
 
-int _countCapturingGroups(String body) {
-  var count = 0, escaped = false, inClass = false;
-  for (var i = 0; i < body.length; i++) {
-    final c = body.codeUnitAt(i);
-    if (escaped) {
-      escaped = false;
-    } else if (c == 92) {
-      escaped = true;
-    } else if (inClass) {
-      if (c == 93) inClass = false;
-    } else if (c == 91) {
-      inClass = true;
-    } else if (c == 40) {
-      if (i + 1 < body.length && body.codeUnitAt(i + 1) == questionCode) {
-        if (i + 2 >= body.length) continue;
-        final marker = body.codeUnitAt(i + 2);
-        if (marker == colonCode || marker == 61 || marker == 33) continue;
-        if (marker == 60) {
-          if (i + 3 < body.length) {
-            final next = body.codeUnitAt(i + 3);
-            if (next == 61 || next == 33) continue;
-          }
-          count++;
-        }
-        continue;
-      }
-      count++;
-    }
+extension<T> on List<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
+
+void _recordCaptureName(
+  Set<String> seen,
+  List<String> captureNames,
+  String name,
+  String path,
+) {
+  final normalized = normalizeUnnamedGroupKey(name);
+  if (!seen.add(normalized)) {
+    throw FormatException('Duplicate capture name in route: $path');
   }
-  return count;
+  captureNames.add(name);
 }

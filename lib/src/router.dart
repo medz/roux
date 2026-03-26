@@ -1,8 +1,8 @@
 // Public router API.
 
+import 'cache.dart';
 import 'model.dart';
 import 'path.dart';
-import 'cache.dart';
 import 'radix.dart';
 
 /// A lightweight, expressive path router.
@@ -16,26 +16,30 @@ class Router<T> {
     bool normalizePath = false,
     int cacheSize = 256,
   }) : _policy = duplicatePolicy,
+       _caseSensitive = caseSensitive,
        _decodePath = decodePath,
        _normalizePath = normalizePath,
-       _engine = Radix<T>(caseSensitive),
+       _root = RouterNode<T>('/'),
+       _staticRoutes = <String, RouterNode<T>>{},
        _cache = cacheSize > 0 ? RouteCache(cacheSize) : null {
     if (routes != null && routes.isNotEmpty) addAll(routes);
   }
 
   final DuplicatePolicy _policy;
-  final bool _decodePath, _normalizePath;
-  final Radix<T> _engine;
-  // Only caches successful matches; misses are not stored.
+  final bool _caseSensitive;
+  final bool _decodePath;
+  final bool _normalizePath;
+  final RouterNode<T> _root;
+  final Map<String, RouterNode<T>> _staticRoutes;
   final RouteCache<String, RouteMatch<T>>? _cache;
   int _order = 0;
 
   static String _normalizeMethod(String method) {
-    final m = method.trim().toUpperCase();
-    if (m.isEmpty) {
+    final normalized = method.trim().toUpperCase();
+    if (normalized.isEmpty) {
       throw ArgumentError.value(method, 'method', 'Method must not be empty.');
     }
-    return m;
+    return normalized;
   }
 
   /// Registers a single route.
@@ -45,8 +49,20 @@ class Router<T> {
     String? method,
     DuplicatePolicy? duplicatePolicy,
   }) {
-    final m = method != null ? _normalizeMethod(method) : null;
-    _engine.add(path, data, m, duplicatePolicy ?? _policy, _order++);
+    final normalized = normalizeRoutePath(path);
+    if (normalized == null) {
+      throw FormatException('Route patterns must start with "/": $path');
+    }
+    addRoute(
+      _root,
+      _staticRoutes,
+      _caseSensitive,
+      method != null ? _normalizeMethod(method) : '',
+      normalized,
+      data,
+      duplicatePolicy ?? _policy,
+      _order++,
+    );
     _cache?.clear();
   }
 
@@ -56,37 +72,73 @@ class Router<T> {
     String? method,
     DuplicatePolicy? duplicatePolicy,
   }) {
-    final m = method != null ? _normalizeMethod(method) : null;
+    final normalizedMethod = method != null ? _normalizeMethod(method) : '';
     final policy = duplicatePolicy ?? _policy;
-    for (final e in routes.entries) {
-      _engine.add(e.key, e.value, m, policy, _order++);
+    for (final entry in routes.entries) {
+      final normalizedPath = normalizeRoutePath(entry.key);
+      if (normalizedPath == null) {
+        throw FormatException(
+          'Route patterns must start with "/": ${entry.key}',
+        );
+      }
+      addRoute(
+        _root,
+        _staticRoutes,
+        _caseSensitive,
+        normalizedMethod,
+        normalizedPath,
+        entry.value,
+        policy,
+        _order++,
+      );
     }
     _cache?.clear();
   }
 
   /// Returns the best matching route for [path].
   RouteMatch<T>? match(String path, {String? method}) {
-    final m = method != null ? _normalizeMethod(method) : null;
+    final normalizedMethod = method != null ? _normalizeMethod(method) : '';
     final prepared = _preparePath(path);
     if (prepared == null) return null;
 
-    if (_cache != null) {
-      final key = m != null ? '$m\x00$prepared' : prepared;
-      final cached = _cache.get(key);
-      if (cached != null) return cached;
-      final result = _engine.match(prepared, m);
-      if (result != null) _cache.put(key, result);
-      return result;
+    final cache = _cache;
+    if (cache == null) {
+      return findRoute(
+        _root,
+        _staticRoutes,
+        _caseSensitive,
+        normalizedMethod,
+        prepared,
+      );
     }
-    return _engine.match(prepared, m);
+
+    final key = normalizedMethod.isEmpty ? prepared : '$normalizedMethod\x00$prepared';
+    final cached = cache.get(key);
+    if (cached != null) return cached;
+
+    final result = findRoute(
+      _root,
+      _staticRoutes,
+      _caseSensitive,
+      normalizedMethod,
+      prepared,
+    );
+    if (result != null) {
+      cache.put(key, result);
+    }
+    return result;
   }
 
   /// Returns all matching routes for [path], least specific to most specific.
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
-    final m = method != null ? _normalizeMethod(method) : null;
     final prepared = _preparePath(path);
     if (prepared == null) return const [];
-    return _engine.matchAll(prepared, m);
+    return findAllRoutes(
+      _root,
+      _caseSensitive,
+      method != null ? _normalizeMethod(method) : '',
+      prepared,
+    );
   }
 
   String? _preparePath(String path) {
@@ -97,16 +149,15 @@ class Router<T> {
         return null;
       }
     }
-    final String? normalized;
-    if (_normalizePath) {
-      normalized = normalizeRoutePath(path);
-    } else if (path.startsWith('/')) {
-      normalized = trimTrailingSlash(path);
-    } else {
+
+    final normalized = _normalizePath
+        ? normalizeRoutePath(path)
+        : path.startsWith('/')
+        ? trimTrailingSlash(path)
+        : null;
+    if (normalized == null || hasEmptySegments(normalized)) {
       return null;
     }
-    if (normalized == null) return null;
-    if (_engine.needsStrict && hasEmptySegments(normalized)) return null;
     return normalized;
   }
 }
