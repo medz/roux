@@ -17,239 +17,190 @@ With Flutter:
 flutter pub add roux
 ```
 
-## Usage
+## Quick Start
 
 ```dart
 import 'package:roux/roux.dart';
 
-final router = Router<String>(
-  routes: {
-    '/': 'root',
-    '/users/all': 'users-all',
-    '/users/:id': 'users-id',
-    '/users/*': 'users-one-segment',
-    '/users/**:wildcard': 'users-wildcard',
-    '/**:wildcard': 'global-fallback',
-  },
-);
+void main() {
+  final router = Router<String>();
 
-final match = router.match('/users/123');
-print(match?.data);   // users-id
-print(match?.params); // {id: 123}
+  router.add('/', 'root');
+  router.add('/users/all', 'usersAll');
+  router.add('/users/:id', 'userDetail');
+  router.add('/users/*', 'usersWildcard');
+  router.add('/**', 'globalFallback');
 
-final stack = router.matchAll('/users/123');
-print(
-  stack.map((match) => match.data),
-); // (global-fallback, users-wildcard, users-id, users-one-segment)
+  final match = router.find('/users/42');
+  print(match?.data);   // userDetail
+  print(match?.params); // {id: 42}
+
+  final all = router.findAll('/users/all');
+  print(all.map((m) => m.data)); // (globalFallback, usersWildcard, usersAll)
+}
 ```
 
-Register incrementally:
+## API
+
+```dart
+final router = Router<String>(
+  caseSensitive: false,
+  cache: LRUCache<String>(),
+);
+
+router.add('/posts', 'posts');
+router.add('/posts/:id', 'post', method: 'GET');
+
+final match = router.find('/posts/42', method: 'GET');
+final matches = router.findAll('/posts/42', method: 'GET');
+
+router.remove('GET', '/posts/:id');
+```
+
+### `Router`
+
+- `Router({bool caseSensitive = false, Cache<T>? cache})`
+- `void add(String path, T data, {String? method})`
+- `RouteMatch<T>? find(String path, {String? method})`
+- `List<RouteMatch<T>> findAll(String path, {String? method})`
+- `bool remove(String method, String path)`
+
+### `RouteMatch`
+
+- `data` is the registered payload.
+- `params` is always a `Map<String, String>`.
+- Routes without params return an empty map.
+
+## Route Syntax
+
+| Syntax                      | Meaning                           | Example params                          |
+| --------------------------- | --------------------------------- | --------------------------------------- |
+| `/users/all`                | Exact static route                | `{}`                                    |
+| `/users/:id`                | Named single-segment param        | `{id: 42}`                              |
+| `/users/*`                  | Unnamed single-segment wildcard   | `{0: 42}`                               |
+| `/users/**:rest`            | Named remainder wildcard          | `{rest: a/b}`                           |
+| `/users/**`                 | Unnamed remainder wildcard        | `{_: a/b}`                              |
+| `/files/:name.:ext`         | Embedded params in one segment    | `{name: readme, ext: md}`               |
+| `/files/file-*-*.png`       | Embedded wildcards in one segment | `{0: a, 1: b}`                          |
+| `/users/:id(\\d+)`          | Named regex param                 | `{id: 42}`                              |
+| `/path/(\\d+)`              | Unnamed regex group               | `{0: 42}`                               |
+| `/users/:id?`               | Optional segment param            | `{}` or `{id: 42}`                      |
+| `/files/:path+`             | One-or-more repeated segments     | `{path: a/b}`                           |
+| `/assets/:rest*`            | Zero-or-more repeated segments    | `{}` or `{rest: a/b}`                   |
+| `/foo{bar}`                 | Mandatory group suffix            | `{}`                                    |
+| `/book{s}?`                 | Optional group suffix             | `{}`                                    |
+| `/users{/:id}?`             | Optional grouped suffix           | `{}` or `{id: 42}`                      |
+| `/blog/:id(\\d+){-:title}?` | Mixed regex, params, and groups   | `{id: 123}` or `{id: 123, title: post}` |
+
+## Path Handling
+
+`roux` matches pathnames only.
+
+- Leading slash is normalized: `users/:id` behaves like `/users/:id`.
+- Trailing slash is ignored: `/users` and `/users/` match the same route.
+- Repeated slashes are collapsed during registration and lookup.
+- `.` and `..` segments are normalized during registration and lookup.
+- Percent-encoded bytes are matched literally and are not URI-decoded.
+
+Examples:
 
 ```dart
 final router = Router<String>();
 
-router.add('/posts', 'posts');
-router.add('/posts/:id', 'post-detail');
-router.add('/posts/**:rest', 'post-fallback');
+router.add('users/:id', 'user');
+router.add('/users/./profile', 'profile');
+router.add('/caf%C3%A9', 'cafe');
+
+print(router.find('/users/42')?.params);       // {id: 42}
+print(router.find('/users/profile')?.data);    // profile
+print(router.find('/caf%C3%A9')?.data);        // cafe
+print(router.find('/café'));                   // null
 ```
 
-Method-specific routes use `method:` on `add`, `addAll`, `match`, and
-`matchAll`.
+## Matching Rules
 
-## Route Patterns
+For `find(...)`, the broad precedence is:
 
-Supported route shapes:
+- static routes beat params
+- params beat wildcards
+- more specific regex or embedded param routes can beat plain params
+- method-specific routes beat method-agnostic routes in the same slot
 
-| Syntax | Meaning | Example |
-| --- | --- | --- |
-| `/users/all` | Exact static route | `/users/all` |
-| `/users/:id` | Named single-segment param | `/users/:id` |
-| `/users/*` | Single-segment wildcard | `/users/*` |
-| `/users/**:rest` | Named remainder wildcard | `/users/**:rest` |
-| `/users/**` | Unnamed remainder wildcard | `/users/**` |
-| `/files/:name.:ext` | Embedded params inside one segment | `/files/:name.:ext` |
-| `/files/file-*.png` | Embedded wildcard inside one segment | `/files/file-*.png` |
-| `/users/:id(\\d+)` | Named regex param | `/users/:id(\\d+)` |
-| `/users/:id?` | Optional param segment | `/users/:id?` |
-| `/files/:path+` | One-or-more repeated segments | `/files/:path+` |
-| `/files/:path*` | Zero-or-more repeated segments | `/files/:path*` |
-| `/foo{bar}` | Mandatory non-capturing group | `/foo{bar}` |
-| `/book{s}?` | Optional non-capturing group | `/book{s}?` |
-| `/users{/:id}?` | Optional grouped suffix | `/users{/:id}?` |
-| `/blog/:id(\\d+){-:title}?` | Mixed params, regex, and optional group | `/blog/:id(\\d+){-:title}?` |
+For `findAll(...)`, matches are returned from broad to specific.
 
-Rules:
-
-- Route patterns must start with `/`.
-- `*` matches exactly one segment.
-- `**` and `**:name` match the remaining path and must be the final segment.
-- `roux` routes pathnames only. It does not parse `protocol`, `hostname`,
-  `search`, or `hash`.
-
-## Input Processing
-
-Path preprocessing is conservative by default:
+Example:
 
 ```dart
-final router = Router<String>(
-  caseSensitive: true,
-  decodePath: false,
-  normalizePath: false,
-);
+final router = Router<String>();
+router.add('/users/**', 'wildcard');
+router.add('/users/:id', 'param');
+router.add('/users/all', 'static');
+
+print(router.find('/users/all')?.data); // static
+print(router.findAll('/users/all').map((m) => m.data));
+// (wildcard, param, static)
 ```
 
-| Option | Default | Effect |
-| --- | --- | --- |
-| `caseSensitive` | `true` | Match paths with case sensitivity. |
-| `decodePath` | `false` | Leave `%xx` sequences untouched. |
-| `normalizePath` | `false` | Repeated `/`, `.` and `..` are not normalized; empty segments are rejected. |
+## HTTP Method Matching
 
-- `caseSensitive: false` ignores case for static and compiled matching while
-  preserving original parameter values.
-- `decodePath: true` decodes `%xx` sequences before matching. Invalid encodings
-  fail closed and return no match.
-- With `normalizePath: false`, repeated `/` create empty segments and fail
-  closed. For example, `match('/a//b')` returns no match.
-- `normalizePath: true` collapses repeated `/`, removes `.` segments, resolves
-  `..`, and rejects paths that would escape above `/`.
-
-Lookup processing order:
-
-1. URL decoding, if enabled
-2. Path normalization, if enabled
-3. Route matching
-
-Because decoding runs first, `decodePath: true` can change segment boundaries.
-For example, `/a%2Fb` becomes `/a/b` before matching.
-
-`match(...)` priority is path-dependent, but the broad rules are:
-
-- Exact static routes win first.
-- Structured dynamic routes participate in single-match precedence too. This
-  includes embedded patterns, regex params, grouped patterns, optional
-  segments, and repeated segments.
-- Regex and shell-style structured patterns can beat plain `:param` routes.
-- Plain `:param` routes beat single-segment wildcards.
-- Single-segment wildcards beat remainder wildcards.
-- Global fallback is always last.
-
-Examples:
-
-- `/users/:id(\\d+)` beats `/users/:id` for `/users/42`.
-- `/files/file-*.png` beats `/files/:name.:ext` for `/files/file-a.png`.
-- `/users/:id` beats `/users{/:id}?` for `/users/42`.
-
-`matchAll(...)` order is always less specific to more specific. Broadly:
-
-- remainder routes
-- single-segment dynamic routes
-- structured dynamic routes, including embedded, regex, grouped, optional, and
-  repeated patterns
-- exact static routes
-
-## Differences from URLPattern
-
-- `roux` routes pathname only. There is no `protocol`, `hostname`, `port`,
-  `search`, `hash`, or `baseURL` matching.
-- Patterns must start with `/`.
-- `*` matches exactly one segment. `**` and `**:name` match the remaining path.
-  This differs from `URLPattern`, where `*` is more permissive.
-- URL decoding is configurable and off by default with `decodePath: false`.
-- Path normalization is configurable and off by default with
-  `normalizePath: false`.
-- Case sensitivity is configurable through `caseSensitive`.
-- Trailing slash on lookup input is ignored, so `/users` and `/users/` match
-  the same route.
-
-## Duplicate Policy
-
-Duplicate route handling is configurable at both router and call level:
+Method names are trimmed and uppercased internally.
 
 ```dart
-final router = Router<String>(
-  duplicatePolicy: DuplicatePolicy.replace,
-  caseSensitive: false,
-  decodePath: true,
-  normalizePath: true,
-  routes: {'/users/:id': 'first'},
-);
+final router = Router<String>();
+router.add('/users/:id', 'any');
+router.add('/users/:id', 'get', method: ' get ');
 
-router.add('/users/:id', 'second');
-print(router.match('/users/42')?.data); // second
+print(router.find('/users/1')?.data);                 // any
+print(router.find('/users/1', method: 'GET')?.data);  // get
+print(router.find('/users/1', method: 'POST')?.data); // any
 ```
 
-Available policies:
-
-- `DuplicatePolicy.reject` throws on duplicate route shapes.
-- `DuplicatePolicy.replace` keeps the latest retained entry.
-- `DuplicatePolicy.keepFirst` keeps the earliest retained entry.
-- `DuplicatePolicy.append` retains all entries in registration order.
-
-Per-call overrides are also supported:
+`findAll` returns only the selected method bucket:
 
 ```dart
-router.add(
-  '/users/:id',
-  'third',
-  duplicatePolicy: DuplicatePolicy.keepFirst,
-);
+final router = Router<String>();
+router.add('/api/:id', 'any');
+router.add('/api/:id', 'get', method: 'GET');
+
+print(router.findAll('/api/1', method: 'GET').map((m) => m.data));
+// (get)
 ```
 
-To retain multiple handlers in the same normalized slot:
+## Cache
+
+You can provide any `Cache<T>` implementation, or use `LRUCache<T>`.
 
 ```dart
-final router = Router<String>(duplicatePolicy: DuplicatePolicy.append);
-router.add('/**:wildcard', 'global-logger');
-router.add('/**:wildcard', 'root-scope-middleware');
+final router = Router<String>(cache: LRUCache(256));
+router.add('/users/:id', 'user');
 
-print(router.match('/users/42')?.data); // global-logger
-print(
-  router.matchAll('/users/42').map((match) => match.data),
-); // (global-logger, root-scope-middleware)
+final first = router.find('/users/42');
+final second = router.find('/users/42');
+
+print(identical(first, second)); // true
 ```
 
-Parameter-name drift remains a hard error under all policies. For example,
-`/users/:id` and `/users/:name` still conflict.
+The cache is cleared after `add(...)` and `remove(...)`.
 
-## Benchmarks
+## Validation and Escapes
 
-Benchmarks are split into three single-scenario scripts.
-Each process runs one target only to avoid cross-target warmup bias.
+Invalid param names or unclosed regex / group syntax throw `FormatException`.
 
-Primary comparison benchmark:
+Escaped syntax characters are treated literally:
 
-```bash
-dart run bench/aligned_feature.dart roux 500 50000 4096
-dart run bench/aligned_feature.dart relic 500 50000 4096
+```dart
+final router = Router<String>();
+
+router.add(r'/v\:1/users', 'versioned');
+router.add(r'/files/\*', 'star-file');
+
+print(router.find('/v:1/users')?.data); // versioned
+print(router.find('/files/*')?.data);   // star-file
 ```
 
-This is the benchmark to use for ongoing roux vs relic comparison.
-It compares a shared dirty-normalized pathname contract with params consumed.
-`roux` runs with `normalizePath: true`.
-`relic` uses its built-in always-normalized lookup behavior.
-Dynamic paths are intentionally reused under a bounded cardinality so the
-comparison measures routing work instead of `relic` intern-cache thrash.
+## Example
 
-Minimal feature set:
-
-```bash
-dart run bench/minimal_feature.dart roux 500 50000 4096
-dart run bench/minimal_feature.dart relic 500 50000 4096
-```
-
-Maximal feature contract:
-
-```bash
-dart run bench/maximal_feature.dart roux 500 50000 4096
-dart run bench/maximal_feature.dart relic 500 50000 4096
-```
-
-Cache-thrash stress benchmark:
-
-```bash
-dart run bench/cache_thrash_feature.dart roux 500 50000
-dart run bench/cache_thrash_feature.dart relic 500 50000
-```
+See [`example/main.dart`](example/main.dart) for a runnable example.
 
 ## License
 
