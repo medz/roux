@@ -1,15 +1,13 @@
 // ignore_for_file: public_member_api_docs
 
-const int slashCode = 47;
-
 String normalizePath(String path) {
   if (path.isEmpty) return '/';
-  if (path.codeUnitAt(0) != slashCode) path = '/$path';
+  if (path.codeUnitAt(0) != 47 /* / */ ) path = '/$path';
   if (path.length == 1) return path;
 
   var start = 1;
   for (var i = 1; i < path.length; i++) {
-    if (path.codeUnitAt(i) != slashCode) continue;
+    if (path.codeUnitAt(i) != 47 /* / */ ) continue;
     if (_segmentKind(path, start, i) >= 0) return _normalizeTail(path);
     start = i + 1;
   }
@@ -24,8 +22,8 @@ String normalizePath(String path) {
 
 String canonicalizeRoutePath(String path) {
   if (path.isEmpty) return '/';
-  if (path.codeUnitAt(0) != slashCode) path = '/$path';
-  while (path.length > 1 && path.codeUnitAt(path.length - 1) == slashCode) {
+  if (path.codeUnitAt(0) != 47 /* / */ ) path = '/$path';
+  while (path.length > 1 && path.codeUnitAt(path.length - 1) == 47 /* / */ ) {
     path = path.substring(0, path.length - 1);
   }
   return path;
@@ -54,12 +52,12 @@ int _segmentKind(String path, int start, int end) {
 String _normalizeTail(String path) {
   final kept = <String>[];
   for (var read = path.length - 1, skip = 0; read >= 0; read--) {
-    while (read >= 0 && path.codeUnitAt(read) == slashCode) {
+    while (read >= 0 && path.codeUnitAt(read) == 47 /* / */ ) {
       read--;
     }
     if (read < 0) break;
     final segmentEnd = read + 1;
-    while (read >= 0 && path.codeUnitAt(read) != slashCode) {
+    while (read >= 0 && path.codeUnitAt(read) != 47 /* / */ ) {
       read--;
     }
     final segmentStart = read + 1;
