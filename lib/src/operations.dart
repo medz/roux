@@ -391,9 +391,31 @@ final _modifierRx = RegExp(r'^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$');
 
     if (code == colonCode) {
       final (next, name, body) = _readParamToken(segment, cursor);
-      regex.write('(?<$name>${body ?? r'[^/]+'})');
+      if (body == null) {
+        regex.write('(?<$name>${r'[^/]+'})');
+      } else {
+        final (rewrittenBody, innerCaptureNames, nextIndex) =
+            _rewriteUnnamedRegexGroups(body, nextUnnamed);
+        regex.write('(?<$name>$rewrittenBody)');
+        captureNames.addAll(innerCaptureNames);
+        nextUnnamed = nextIndex;
+      }
       captureNames.add(name);
       cursor = next;
+      continue;
+    }
+
+    if (code == 40 /* ( */ ) {
+      final end = _findRegexEnd(segment, cursor, segment.length);
+      final name = toUnnamedGroupKey(nextUnnamed++);
+      final body = segment.substring(cursor + 1, end);
+      final (rewrittenBody, innerCaptureNames, nextIndex) =
+          _rewriteUnnamedRegexGroups(body, nextUnnamed);
+      regex.write('(?<$name>$rewrittenBody)');
+      captureNames.add(name);
+      captureNames.addAll(innerCaptureNames);
+      nextUnnamed = nextIndex;
+      cursor = end + 1;
       continue;
     }
 
@@ -463,6 +485,64 @@ int _findRegexEnd(String s, int start, int end) {
     }
   }
   throw FormatException('Unclosed regex in route: $s');
+}
+
+(String, List<String>, int) _rewriteUnnamedRegexGroups(
+  String pattern,
+  int unnamedStart,
+) {
+  final regex = StringBuffer();
+  final captureNames = <String>[];
+  var nextUnnamed = unnamedStart;
+  var escaped = false;
+  var inClass = false;
+
+  for (var i = 0; i < pattern.length; i++) {
+    final code = pattern.codeUnitAt(i);
+
+    if (escaped) {
+      regex.write(pattern[i]);
+      escaped = false;
+      continue;
+    }
+
+    if (code == 92 /* \ */ ) {
+      regex.write(pattern[i]);
+      escaped = true;
+      continue;
+    }
+
+    if (inClass) {
+      regex.write(pattern[i]);
+      if (code == 93 /* ] */ ) {
+        inClass = false;
+      }
+      continue;
+    }
+
+    if (code == 91 /* [ */ ) {
+      regex.write(pattern[i]);
+      inClass = true;
+      continue;
+    }
+
+    if (code == 40 /* ( */ ) {
+      final nextCode = i + 1 < pattern.length ? pattern.codeUnitAt(i + 1) : -1;
+      if (nextCode == 63 /* ? */ ) {
+        regex.write(pattern[i]);
+        continue;
+      }
+
+      final name = toUnnamedGroupKey(nextUnnamed++);
+      regex.write('(?<$name>');
+      captureNames.add(name);
+      continue;
+    }
+
+    regex.write(pattern[i]);
+  }
+
+  return (regex.toString(), captureNames, nextUnnamed);
 }
 
 String encodeEscapes(String path) {

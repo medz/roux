@@ -75,6 +75,23 @@ void main() {
       expect(router.find('/users/nope'), isNull);
     });
 
+    test('supports unnamed regex groups', () {
+      final router = Router<String>();
+      router.add(r'/path/(\d+)', 'group');
+
+      expect(router.find('/path/123')?.params, {'0': '123'});
+      expect(router.find('/path/abc'), isNull);
+    });
+
+    test('supports multiple unnamed regex groups across segments', () {
+      final router = Router<String>();
+      router.add(r'/path/(\d+)/(\w+)', 'groups');
+
+      expect(router.find('/path/123/abc')?.params, {'0': '123', '1': 'abc'});
+      expect(router.find('/path/123/!'), isNull);
+      expect(router.findAll('/path/123/!').first.params, {'0': '123'});
+    });
+
     test('supports optional params', () {
       final router = Router<String>();
       router.add('/users/:id?', 'user');
