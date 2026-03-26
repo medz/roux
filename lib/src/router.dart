@@ -1,6 +1,7 @@
 import 'cache.dart';
 import 'model.dart';
 import 'operations.dart';
+import 'path.dart';
 
 /// A lightweight, expressive path router.
 class Router<T> {
@@ -18,14 +19,21 @@ class Router<T> {
 
   /// Registers a route pattern and its associated data.
   void add(String path, T data, {String? method}) {
-    addRoute(_root, _staticRoutes, caseSensitive, _m(method), path, data);
+    addRoute(
+      _root,
+      _staticRoutes,
+      caseSensitive,
+      _m(method),
+      canonicalizeRoutePath(path),
+      data,
+    );
     cache?.clear();
   }
 
   /// Returns the best match for [path], or `null` when none exists.
   RouteMatch<T>? find(String path, {String? method}) {
     final m = _m(method);
-    final p = _p(path);
+    final p = normalizePath(path);
     final key = m.isEmpty ? p : '$m\x00$p';
     if (cache?.get(key) case final RouteMatch<T> value) {
       return value;
@@ -38,7 +46,7 @@ class Router<T> {
 
   /// Returns all matches for [path] in broad-to-specific order.
   List<RouteMatch<T>> findAll(String path, {String? method}) =>
-      findAllRoutes(_root, caseSensitive, _m(method), _p(path));
+      findAllRoutes(_root, caseSensitive, _m(method), normalizePath(path));
 
   /// Removes all routes stored under the exact method and path pattern.
   bool remove(String method, String path) {
@@ -47,13 +55,11 @@ class Router<T> {
       _staticRoutes,
       caseSensitive,
       _m(method),
-      path,
+      canonicalizeRoutePath(path),
     );
     if (removed) cache?.clear();
     return removed;
   }
 
   static String _m(String? method) => method?.trim().toUpperCase() ?? '';
-  static String _p(String path) =>
-      '/${Uri(path: path).pathSegments.where((s) => s.isNotEmpty).join('/')}';
 }

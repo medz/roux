@@ -34,6 +34,35 @@ void main() {
 
       expect(router.find('//users///42/')?.params, {'id': '42'});
     });
+
+    test('route registration canonicalizes missing and trailing slashes', () {
+      final router = Router<String>();
+      router.add('users/:id', 'user');
+      router.add('/with-trailing/', 'trailing');
+
+      expect(router.find('/users/42')?.params, {'id': '42'});
+      expect(router.find('/with-trailing')?.data, 'trailing');
+      expect(router.find('/with-trailing/')?.data, 'trailing');
+    });
+
+    test('matches literal percent-encoded static paths', () {
+      final router = Router<String>(caseSensitive: true);
+      router.add('/caf%C3%A9', 'cafe');
+
+      expect(router.find('/caf%C3%A9')?.data, 'cafe');
+      expect(router.find('/café'), isNull);
+      expect(router.find('/caf%c3%a9'), isNull);
+    });
+
+    test('lookup normalizes dot segments without Uri decoding', () {
+      final router = Router<String>();
+      router.add('/users/profile', 'profile');
+      router.add('/profile', 'root-profile');
+
+      expect(router.find('/users/./profile')?.data, 'profile');
+      expect(router.find('/users/team/../profile')?.data, 'profile');
+      expect(router.find('/users/../profile')?.data, 'root-profile');
+    });
   });
 
   group('params and patterns', () {
