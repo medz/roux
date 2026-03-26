@@ -77,7 +77,7 @@ void addRoute<T>(
       if (i != segments.length - 1) {
         throw FormatException('Double wildcard must be the final segment: /$path');
       }
-      node.wildcard ??= RouterNode<T>('**');
+      node.wildcard ??= RouterNode<T>();
       node = node.wildcard!;
       final name = _readRestName(segment);
       paramsMap.add(ParamSpec(-(i + 1), name ?? '_', restOptional ?? true));
@@ -93,7 +93,7 @@ void addRoute<T>(
         segment.contains('(') ||
         hasSegmentWildcard(segment);
     if (isDynamic) {
-      node.param ??= RouterNode<T>('*');
+      node.param ??= RouterNode<T>();
       node = node.param!;
 
       if (segment == '*') {
@@ -135,11 +135,7 @@ void addRoute<T>(
         ..write('/')
         ..write(compiled.shape);
       staticChars += compiled.staticChars;
-      if (compiled.lowPriority) {
-        sawLow = true;
-      } else {
-        sawHigh = true;
-      }
+      sawHigh = true;
       continue;
     }
 
@@ -153,7 +149,7 @@ void addRoute<T>(
 
     final key = caseSensitive ? segment : segment.toLowerCase();
     node.statics ??= {};
-    node = node.statics!.putIfAbsent(key, () => RouterNode<T>(key));
+    node = node.statics!.putIfAbsent(key, RouterNode<T>.new);
     shape
       ..write('/')
       ..write(key);
@@ -229,27 +225,7 @@ List<RouteData<T>>? _lookupTree<T>(
   if (index == segments.length) {
     final end = _lookupMethods(node.methods, method);
     if (end != null && end.isNotEmpty) return end;
-
-    final param = node.param;
-    if (param != null) {
-      final tail = _lookupMethods(param.methods, method);
-      if (tail != null &&
-          tail.isNotEmpty &&
-          tail.first.paramsMap?.last.optional == true) {
-        return tail;
-      }
-    }
-
-    final wildcard = node.wildcard;
-    if (wildcard != null) {
-      final tail = _lookupMethods(wildcard.methods, method);
-      if (tail != null &&
-          tail.isNotEmpty &&
-          tail.first.paramsMap?.last.optional == true) {
-        return tail;
-      }
-    }
-    return null;
+    return _optionalTail(node.param, method) ?? _optionalTail(node.wildcard, method);
   }
 
   final rawSegment = segments[index];
@@ -304,10 +280,8 @@ void _collectAll<T>(
   if (param != null) {
     _collectAll(param, method, segments, index + 1, caseSensitive, acc);
     if (index == segments.length) {
-      final tail = _lookupMethods(param.methods, method);
-      if (tail != null &&
-          tail.isNotEmpty &&
-          tail.first.paramsMap?.last.optional == true) {
+      final tail = _optionalTail(param, method);
+      if (tail != null) {
         _addRoutes(tail, 1, segments, acc);
       }
     }
@@ -453,31 +427,23 @@ int _matchSpecificity(
 
 int _constraintScore(bool sawHigh, bool sawLow) => sawHigh ? 2 : sawLow ? 1 : 0;
 
-class CompiledSegmentPattern {
-  const CompiledSegmentPattern(
-    this.pattern,
-    this.shape,
-    this.captureNames,
-    this.staticChars,
-    this.lowPriority,
-    this.nextUnnamed,
-  );
-
-  final SegmentPattern pattern;
-  final String shape;
-  final List<String> captureNames;
-  final int staticChars;
-  final bool lowPriority;
-  final int nextUnnamed;
+List<RouteData<T>>? _optionalTail<T>(RouterNode<T>? node, String method) {
+  final tail = _lookupMethods(node?.methods, method);
+  return tail != null && tail.isNotEmpty && tail.first.paramsMap?.last.optional == true
+      ? tail
+      : null;
 }
 
-class ModifierExpansion {
-  const ModifierExpansion(this.path, this.structured, [this.restOptional]);
+typedef CompiledSegmentPattern =
+    ({
+      SegmentPattern pattern,
+      String shape,
+      List<String> captureNames,
+      int staticChars,
+      int nextUnnamed,
+    });
 
-  final String path;
-  final bool structured;
-  final bool? restOptional;
-}
+typedef ModifierExpansion = ({String path, bool structured, bool? restOptional});
 
 CompiledSegmentPattern compileSegmentPattern(
   String segment,
@@ -537,16 +503,15 @@ CompiledSegmentPattern compileSegmentPattern(
   }
 
   regex.write(r'$');
-  return CompiledSegmentPattern(
-    SegmentPattern(
+  return (
+    pattern: SegmentPattern(
       RegExp(regex.toString(), caseSensitive: caseSensitive),
       captureNames,
     ),
-    shape.toString(),
-    captureNames.map(normalizeUnnamedGroupKey).toList(),
-    staticChars,
-    false,
-    nextUnnamed,
+    shape: shape.toString(),
+    captureNames: captureNames.map(normalizeUnnamedGroupKey).toList(),
+    staticChars: staticChars,
+    nextUnnamed: nextUnnamed,
   );
 }
 
@@ -596,25 +561,60 @@ List<ModifierExpansion>? expandModifiers(List<String> segments) {
     final suf = segments.sublist(i + 1);
     if (modifier == '?') {
       return [
-        ModifierExpansion('/${[...pre, base, ...suf].join('/')}', true),
-        ModifierExpansion('/${[...pre, ...suf].join('/')}', true),
+        (path: '/${[...pre, base, ...suf].join('/')}', structured: true, restOptional: null),
+        (path: '/${[...pre, ...suf].join('/')}', structured: true, restOptional: null),
       ];
     }
     final name = RegExp(r':([\w-]+)').firstMatch(base)?.group(1) ?? '_';
     final wildcard = '/${[...pre, '**:$name', ...suf].join('/')}';
-    if (modifier == '+') return [ModifierExpansion(wildcard, false, false)];
+    if (modifier == '+') {
+      return [(path: wildcard, structured: false, restOptional: false)];
+    }
     return [
-      ModifierExpansion(wildcard, false, true),
-      ModifierExpansion('/${[...pre, ...suf].join('/')}', true),
+      (path: wildcard, structured: false, restOptional: true),
+      (path: '/${[...pre, ...suf].join('/')}', structured: true, restOptional: null),
     ];
   }
   return null;
 }
 
 List<String>? expandGroupDelimiters(String path) {
-  final start = _findStructuredBrace(path);
+  var start = -1;
+  var depth = 0;
+  for (var i = 0; i < path.length; i++) {
+    final code = path.codeUnitAt(i);
+    if (code == 92) {
+      i++;
+    } else if (code == 40) {
+      depth++;
+    } else if (code == 41 && depth > 0) {
+      depth--;
+    } else if (code == openBraceCode && depth == 0) {
+      start = i;
+      break;
+    }
+  }
   if (start < 0) return null;
-  final end = _findGroupEnd(path, start);
+
+  var end = -1;
+  depth = 0;
+  for (var i = start + 1; i < path.length; i++) {
+    final code = path.codeUnitAt(i);
+    if (code == 92) {
+      i++;
+    } else if (code == 40) {
+      depth++;
+    } else if (code == 41 && depth > 0) {
+      depth--;
+    } else if (code == closeBraceCode && depth == 0) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) {
+    throw FormatException('Unclosed group in route: $path');
+  }
+
   final hasMod = end + 1 < path.length &&
       (path.codeUnitAt(end + 1) == questionCode ||
           path.codeUnitAt(end + 1) == plusCode ||
@@ -629,52 +629,6 @@ List<String>? expandGroupDelimiters(String path) {
     throw FormatException('unsupported group repetition across segments');
   }
   return ['$pre(?:$body)$mod$suf'];
-}
-
-int _findStructuredBrace(String pattern) {
-  var depth = 0;
-  for (var i = 0; i < pattern.length; i++) {
-    final code = pattern.codeUnitAt(i);
-    if (code == 92) {
-      i++;
-      continue;
-    }
-    if (code == 40) {
-      depth++;
-      continue;
-    }
-    if (code == 41 && depth > 0) {
-      depth--;
-      continue;
-    }
-    if (code == openBraceCode && depth == 0) return i;
-  }
-  return -1;
-}
-
-int _findGroupEnd(String pattern, int start) {
-  var depth = 0;
-  for (var i = start; i < pattern.length; i++) {
-    final code = pattern.codeUnitAt(i);
-    if (code == 92) {
-      i++;
-      continue;
-    }
-    if (code == 40) {
-      depth++;
-      continue;
-    }
-    if (code == 41 && depth > 0) {
-      depth--;
-      continue;
-    }
-    if (code == openBraceCode && depth == 0) {
-      depth = -1;
-      continue;
-    }
-    if (code == closeBraceCode && depth == -1) return i;
-  }
-  throw FormatException('Unclosed group in route: $pattern');
 }
 
 bool hasSegmentWildcard(String segment) {

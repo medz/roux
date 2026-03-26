@@ -14,7 +14,6 @@ const String dupShape = 'Duplicate route shape conflicts with existing route: ';
 const String dupWildcard =
     'Duplicate wildcard route shape at prefix for pattern: ';
 const String dupFallback = 'Duplicate global fallback route: ';
-const String emptySegment = 'Route pattern contains empty segment: ';
 const String unnamedGroupPrefix = '__roux_unnamed_';
 
 enum DuplicatePolicy { reject, replace, keepFirst, append }
@@ -26,9 +25,6 @@ class RouteMatch<T> {
 }
 
 class RouterNode<T> {
-  RouterNode(this.key);
-
-  final String key;
   Map<String, RouterNode<T>>? statics;
   RouterNode<T>? param;
   RouterNode<T>? wildcard;

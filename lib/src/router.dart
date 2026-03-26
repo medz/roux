@@ -19,7 +19,7 @@ class Router<T> {
        _caseSensitive = caseSensitive,
        _decodePath = decodePath,
        _normalizePath = normalizePath,
-       _root = RouterNode<T>('/'),
+       _root = RouterNode<T>(),
        _staticRoutes = <String, RouterNode<T>>{},
        _cache = cacheSize > 0 ? RouteCache(cacheSize) : null {
     if (routes != null && routes.isNotEmpty) addAll(routes);
