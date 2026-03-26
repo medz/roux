@@ -1,2 +1,2 @@
 export 'src/router.dart';
-export 'src/route_model.dart' show DuplicatePolicy, RouteMatch;
+export 'src/model.dart' show DuplicatePolicy, RouteMatch;

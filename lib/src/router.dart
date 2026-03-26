@@ -1,31 +1,42 @@
-import 'route_model.dart';
-import 'route_path.dart';
-import 'method_table.dart';
-import 'route_set.dart';
+// Public router API.
 
-/// Experimental router facade with RouteSet/Input/MethodTable split.
+import 'model.dart';
+import 'path.dart';
+import 'cache.dart';
+import 'radix.dart';
+
+/// A lightweight, expressive path router.
 class Router<T> {
-  /// Creates an experimental router with the same surface as the main router.
+  /// Creates a router with optional initial [routes] and configuration.
   Router({
     Map<String, T>? routes,
     DuplicatePolicy duplicatePolicy = DuplicatePolicy.reject,
     bool caseSensitive = true,
     bool decodePath = false,
     bool normalizePath = false,
-  }) : _duplicatePolicy = duplicatePolicy,
-       _caseSensitive = caseSensitive,
+    int cacheSize = 256,
+  }) : _policy = duplicatePolicy,
        _decodePath = decodePath,
        _normalizePath = normalizePath,
-       _sharedRoutes = RouteSet(caseSensitive) {
+       _engine = Radix<T>(caseSensitive),
+       _cache = cacheSize > 0 ? RouteCache(cacheSize) : null {
     if (routes != null && routes.isNotEmpty) addAll(routes);
   }
 
-  final RouteSet<T> _sharedRoutes;
-  final _methodRoutes = MethodTable<T>();
-  final DuplicatePolicy _duplicatePolicy;
-  final bool _caseSensitive, _decodePath, _normalizePath;
-  bool _hasSharedRoutes = false;
-  int _nextRegistrationOrder = 0;
+  final DuplicatePolicy _policy;
+  final bool _decodePath, _normalizePath;
+  final Radix<T> _engine;
+  // Only caches successful matches; misses are not stored.
+  final RouteCache<String, RouteMatch<T>>? _cache;
+  int _order = 0;
+
+  static String _normalizeMethod(String method) {
+    final m = method.trim().toUpperCase();
+    if (m.isEmpty) {
+      throw ArgumentError.value(method, 'method', 'Method must not be empty.');
+    }
+    return m;
+  }
 
   /// Registers a single route.
   void add(
@@ -34,99 +45,51 @@ class Router<T> {
     String? method,
     DuplicatePolicy? duplicatePolicy,
   }) {
-    if (method == null) _hasSharedRoutes = true;
-    _routeSetFor(method).addRoute(
-      path,
-      data,
-      duplicatePolicy ?? _duplicatePolicy,
-      _nextRegistrationOrder++,
-    );
+    final m = method != null ? _normalizeMethod(method) : null;
+    _engine.add(path, data, m, duplicatePolicy ?? _policy, _order++);
+    _cache?.clear();
   }
 
-  /// Registers multiple routes under a shared configuration.
+  /// Registers multiple routes.
   void addAll(
     Map<String, T> routes, {
     String? method,
     DuplicatePolicy? duplicatePolicy,
   }) {
-    if (method == null && routes.isNotEmpty) _hasSharedRoutes = true;
-    final routeSet = _routeSetFor(method);
-    final policy = duplicatePolicy ?? _duplicatePolicy;
-    for (final entry in routes.entries) {
-      routeSet.addRoute(
-        entry.key,
-        entry.value,
-        policy,
-        _nextRegistrationOrder++,
-      );
+    final m = method != null ? _normalizeMethod(method) : null;
+    final policy = duplicatePolicy ?? _policy;
+    for (final e in routes.entries) {
+      _engine.add(e.key, e.value, m, policy, _order++);
     }
+    _cache?.clear();
   }
 
-  /// Returns the best route match for [path].
-  @pragma('vm:prefer-inline')
+  /// Returns the best matching route for [path].
   RouteMatch<T>? match(String path, {String? method}) {
-    if (!_hasSharedRoutes && !_decodePath) {
-      RouteSet<T>? routeSet;
-      if (method != null) {
-        final commonIndex = commonMethodIndex(method);
-        routeSet = commonIndex < 0
-            ? null
-            : _methodRoutes.commonRoutes[commonIndex];
-      }
-      if (routeSet != null && !routeSet.needsStrict) {
-        if (path.isEmpty || path.codeUnitAt(0) != slashCode) return null;
-        if (!_normalizePath) {
-          final last = path.length - 1;
-          if (path.length > 1 &&
-              path.codeUnitAt(last) == slashCode &&
-              path.codeUnitAt(last - 1) != slashCode) {
-            path = path.substring(0, last);
-          }
-          return routeSet.matchBest(path);
-        }
-        if (routeSet.canNormBest || routeSet.canNormExact) {
-          return routeSet.matchBestNormalized(path);
-        }
-        final normalized = normalizeRoutePath(path);
-        return normalized == null ? null : routeSet.matchBest(normalized);
-      }
+    final m = method != null ? _normalizeMethod(method) : null;
+    final prepared = _preparePath(path);
+    if (prepared == null) return null;
+
+    if (_cache != null) {
+      final key = m != null ? '$m\x00$prepared' : prepared;
+      final cached = _cache.get(key);
+      if (cached != null) return cached;
+      final result = _engine.match(prepared, m);
+      if (result != null) _cache.put(key, result);
+      return result;
     }
-    final routeSet = method == null ? null : _methodRoutes.lookupMethod(method);
-    final strict =
-        _sharedRoutes.needsStrict || (routeSet?.needsStrict ?? false);
-    final normalized = _preparePath(path, strict);
-    if (normalized == null) return null;
-    return routeSet?.matchBest(normalized) ??
-        _sharedRoutes.matchBest(normalized);
+    return _engine.match(prepared, m);
   }
 
-  /// Returns every route match for [path] from broadest to most specific.
-  @pragma('vm:prefer-inline')
+  /// Returns all matching routes for [path], least specific to most specific.
   List<RouteMatch<T>> matchAll(String path, {String? method}) {
-    final routeSet = method == null ? null : _methodRoutes.lookupMethod(method);
-    final strict =
-        _sharedRoutes.needsStrict || (routeSet?.needsStrict ?? false);
-    final normalized = _preparePath(path, strict);
-    if (normalized == null) return [];
-    final collected = MatchAccumulator<T>(
-      routeSet != null || _sharedRoutes.needsSort,
-    );
-    _sharedRoutes.collectMatches(normalized, 0, collected);
-    if (routeSet != null) routeSet.collectMatches(normalized, 1, collected);
-    return collected.matches;
+    final m = method != null ? _normalizeMethod(method) : null;
+    final prepared = _preparePath(path);
+    if (prepared == null) return const [];
+    return _engine.matchAll(prepared, m);
   }
 
-  RouteSet<T> _routeSetFor(String? method) => method == null
-      ? _sharedRoutes
-      : _methodRoutes.forWriteMethod(method, _caseSensitive);
-
-  String? _preparePath(String path, bool strict) {
-    if (!_decodePath && !_normalizePath) {
-      if (!path.startsWith('/')) return null;
-      if (!strict) return trimTrailingSlash(path);
-      final trimmed = trimTrailingSlash(path);
-      return hasEmptySegments(trimmed) ? null : trimmed;
-    }
+  String? _preparePath(String path) {
     if (_decodePath && path.contains('%')) {
       try {
         path = Uri.decodeFull(path);
@@ -134,12 +97,16 @@ class Router<T> {
         return null;
       }
     }
-    final normalized = _normalizePath
-        ? normalizeRoutePath(path)
-        : path.startsWith('/')
-        ? trimTrailingSlash(path)
-        : null;
-    if (normalized == null || !strict) return normalized;
-    return hasEmptySegments(normalized) ? null : normalized;
+    final String? normalized;
+    if (_normalizePath) {
+      normalized = normalizeRoutePath(path);
+    } else if (path.startsWith('/')) {
+      normalized = trimTrailingSlash(path);
+    } else {
+      return null;
+    }
+    if (normalized == null) return null;
+    if (_engine.needsStrict && hasEmptySegments(normalized)) return null;
+    return normalized;
   }
 }
