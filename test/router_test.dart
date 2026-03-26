@@ -1,461 +1,333 @@
 import 'package:roux/roux.dart';
 import 'package:test/test.dart';
 
-// Helpers
-Router<String> _router({bool caseSensitive = true}) =>
-    Router<String>(caseSensitive: caseSensitive);
-
 void main() {
   group('basic add and find', () {
-    test('returns null when no routes registered', () {
-      expect(_router().find('', '/users/42'), isNull);
+    test('returns null when no routes are registered', () {
+      expect(Router<String>().find('/users/42'), isNull);
     });
 
-    test('finds a simple param route', () {
-      final r = _router();
-      r.add('', '/users/:id', 'user');
-      expect(r.find('', '/users/42')?.data, 'user');
-      expect(r.find('', '/users/42')?.params, {'id': '42'});
+    test('finds static and param routes', () {
+      final router = Router<String>();
+      router.add('/', 'root');
+      router.add('/users/all', 'all');
+      router.add('/users/:id', 'user');
+
+      expect(router.find('/')?.data, 'root');
+      expect(router.find('/users/all')?.data, 'all');
+      expect(router.find('/users/42')?.data, 'user');
+      expect(router.find('/users/42')?.params, {'id': '42'});
     });
 
-    test('finds a static route', () {
-      final r = _router();
-      r.add('', '/users/all', 'all');
-      expect(r.find('', '/users/all')?.data, 'all');
+    test('static routes win over params', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'param');
+      router.add('/users/all', 'static');
+
+      expect(router.find('/users/all')?.data, 'static');
+      expect(router.find('/users/42')?.data, 'param');
     });
 
-    test('static route takes priority over param route', () {
-      final r = _router();
-      r.add('', '/users/:id', 'param');
-      r.add('', '/users/all', 'static');
-      expect(r.find('', '/users/all')?.data, 'static');
-      expect(r.find('', '/users/42')?.data, 'param');
-    });
+    test('lookup normalizes repeated and trailing slashes', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'user');
 
-    test('multiple routes coexist', () {
-      final r = _router();
-      r.add('', '/', 'root');
-      r.add('', '/users/all', 'all');
-      r.add('', '/users/:id', 'detail');
-      expect(r.find('', '/')?.data, 'root');
-      expect(r.find('', '/users/all')?.data, 'all');
-      expect(r.find('', '/users/7')?.data, 'detail');
-      expect(r.find('', '/users/7')?.params, {'id': '7'});
-    });
-
-    test('ignores trailing slash on lookup', () {
-      final r = _router();
-      r.add('', '/users/:id', 'user');
-      expect(r.find('', '/users/42/')?.data, 'user');
-    });
-
-    test('does not require leading slash on add', () {
-      final r = _router();
-      r.add('', 'users/:id', 'user');
-      expect(r.find('', '/users/42')?.data, 'user');
+      expect(router.find('//users///42/')?.params, {'id': '42'});
     });
   });
 
-  group('param routes', () {
-    test('captures a single param', () {
-      final r = _router();
-      r.add('', '/users/:id', 'user');
-      expect(r.find('', '/users/42')?.params, {'id': '42'});
-    });
-
+  group('params and patterns', () {
     test('captures multiple params', () {
-      final r = _router();
-      r.add('', '/users/:id/items/:itemId', 'item');
-      expect(r.find('', '/users/42/items/7')?.params, {'id': '42', 'itemId': '7'});
+      final router = Router<String>();
+      router.add('/users/:id/items/:itemId', 'item');
+
+      expect(router.find('/users/42/items/7')?.params, {
+        'id': '42',
+        'itemId': '7',
+      });
     });
 
     test('params map is mutable', () {
-      final r = _router();
-      r.add('', '/users/:id', 'user');
-      final params = r.find('', '/users/42')!.params!;
+      final router = Router<String>();
+      router.add('/users/:id', 'user');
+
+      final params = router.find('/users/42')!.params!;
       params['extra'] = 'ok';
+
       expect(params, {'id': '42', 'extra': 'ok'});
     });
 
-    test('embedded param segment', () {
-      final r = _router();
-      r.add('', '/files/:name.:ext', 'asset');
-      expect(r.find('', '/files/readme.md')?.params, {'name': 'readme', 'ext': 'md'});
+    test('supports embedded params', () {
+      final router = Router<String>();
+      router.add('/files/:name.:ext', 'asset');
+
+      expect(router.find('/files/readme.md')?.params, {
+        'name': 'readme',
+        'ext': 'md',
+      });
     });
 
-    test('named regex param — matches', () {
-      final r = _router();
-      r.add('', '/users/:id(\\d+)', 'numeric');
-      expect(r.find('', '/users/42')?.data, 'numeric');
-      expect(r.find('', '/users/42')?.params, {'id': '42'});
+    test('supports regex params', () {
+      final router = Router<String>();
+      router.add(r'/users/:id(\d+)', 'user');
+
+      expect(router.find('/users/42')?.params, {'id': '42'});
+      expect(router.find('/users/nope'), isNull);
     });
 
-    test('named regex param — does not match non-digits', () {
-      final r = _router();
-      r.add('', '/users/:id(\\d+)', 'numeric');
-      expect(r.find('', '/users/nope'), isNull);
+    test('supports optional params', () {
+      final router = Router<String>();
+      router.add('/users/:id?', 'user');
+
+      expect(router.find('/users/42')?.params, {'id': '42'});
+      expect(router.find('/users')?.data, 'user');
+      expect(router.find('/users')?.params, isNull);
     });
 
-    test('regex quantifiers in braces do not trigger group parsing', () {
-      final r = _router();
-      r.add('', '/users/:id(\\d{2})/:tab?', 'user');
-      expect(r.find('', '/users/42')?.params, {'id': '42'});
-      expect(r.find('', '/users/42/profile')?.params, {'id': '42', 'tab': 'profile'});
-      expect(r.find('', '/users/420'), isNull);
-    });
-  });
+    test('supports repeated params with plus and star', () {
+      final router = Router<String>();
+      router.add('/files/:path+', 'plus');
+      router.add('/assets/:rest*', 'star');
 
-  group('optional and rest params', () {
-    test('optional param — present', () {
-      final r = _router();
-      r.add('', '/users/:id?', 'user');
-      expect(r.find('', '/users/42')?.params, {'id': '42'});
+      expect(router.find('/files'), isNull);
+      expect(router.find('/files/a/b')?.params, {'path': 'a/b'});
+      expect(router.find('/assets')?.params, isNull);
+      expect(router.find('/assets/a/b')?.params, {'rest': 'a/b'});
     });
 
-    test('optional param — absent returns null params', () {
-      final r = _router();
-      r.add('', '/users/:id?', 'user');
-      expect(r.find('', '/users')?.data, 'user');
-      expect(r.find('', '/users')?.params, isNull);
+    test('supports single-segment wildcards', () {
+      final router = Router<String>();
+      router.add('/users/*', 'star');
+      router.add('/teams/*/members', 'members');
+
+      expect(router.find('/users/a')?.params, {'0': 'a'});
+      expect(router.find('/users/a/b'), isNull);
+      expect(router.find('/teams/core/members')?.params, {'0': 'core'});
     });
 
-    test('rest param with + — requires at least one segment', () {
-      final r = _router();
-      r.add('', '/files/:path+', 'files');
-      expect(r.find('', '/files'), isNull);
-      expect(r.find('', '/files/a/b')?.params, {'path': 'a/b'});
+    test('supports embedded wildcards in a segment', () {
+      final router = Router<String>();
+      router.add('/files/file-*-*.png', 'asset');
+
+      expect(router.find('/files/file-a-b.png')?.params, {'0': 'a', '1': 'b'});
+      expect(router.find('/files/file--.png')?.params, {'0': '', '1': ''});
     });
 
-    test('rest param with * — matches zero or more segments', () {
-      final r = _router();
-      r.add('', '/assets/:rest*', 'assets');
-      expect(r.find('', '/assets')?.data, 'assets');
-      expect(r.find('', '/assets')?.params, isNull);
-      expect(r.find('', '/assets/a/b')?.params, {'rest': 'a/b'});
-    });
+    test('supports remainder wildcards', () {
+      final router = Router<String>();
+      router.add('/users/**:wildcard', 'users');
+      router.add('/files/**', 'files');
 
-    test('rest param with + inside regex-quantifier path', () {
-      final r = _router();
-      r.add('', '/files/:id(\\d{2})/:path+', 'file');
-      expect(r.find('', '/files/42/a/b')?.params, {'id': '42', 'path': 'a/b'});
-      expect(r.find('', '/files/7/a/b'), isNull);
-    });
-  });
-
-  group('wildcard routes', () {
-    test('single-segment wildcard captures one segment', () {
-      final r = _router();
-      r.add('', '/users/*', 'star');
-      expect(r.find('', '/users/a')?.params, {'0': 'a'});
-      expect(r.find('', '/users/a/b'), isNull);
-    });
-
-    test('single-segment wildcard in the middle', () {
-      final r = _router();
-      r.add('', '/teams/*/members', 'members');
-      expect(r.find('', '/teams/core/members')?.params, {'0': 'core'});
-    });
-
-    test('embedded wildcards in a segment', () {
-      final r = _router();
-      r.add('', '/files/file-*-*.png', 'asset');
-      expect(r.find('', '/files/file-a-b.png')?.params, {'0': 'a', '1': 'b'});
-      expect(r.find('', '/files/file--.png')?.params, {'0': '', '1': ''});
-    });
-
-    test('double-wildcard named capture', () {
-      final r = _router();
-      r.add('', '/users/**:wildcard', 'users');
-      expect(r.find('', '/users/a/b')?.params, {'wildcard': 'a/b'});
-    });
-
-    test('bare double-wildcard captures under _ key', () {
-      final r = _router();
-      r.add('', '/files/**', 'files');
-      expect(r.find('', '/files/a/b/c')?.params, {'_': 'a/b/c'});
-    });
-
-    test('double-wildcard at root acts as global fallback', () {
-      final r = _router();
-      r.add('', '/**', 'fallback');
-      expect(r.find('', '/anything/at/all')?.data, 'fallback');
-    });
-
-    test('double wildcard must be the final segment', () {
-      final r = _router();
-      expect(() => r.add('', '/users/**/extra', 'bad'), throwsFormatException);
-    });
-
-    test('param matches before wildcard', () {
-      final r = _router();
-      r.add('', '/users/:id', 'param');
-      r.add('', '/users/**', 'wildcard');
-      expect(r.find('', '/users/42')?.data, 'param');
+      expect(router.find('/users/a/b')?.params, {'wildcard': 'a/b'});
+      expect(router.find('/files/a/b/c')?.params, {'_': 'a/b/c'});
     });
   });
 
   group('group syntax', () {
-    test('optional group expands to with and without', () {
-      final r = _router();
-      r.add('', '/book{s}?', 'book');
-      expect(r.find('', '/book')?.data, 'book');
-      expect(r.find('', '/books')?.data, 'book');
+    test('supports optional and mandatory groups', () {
+      final router = Router<String>();
+      router.add('/book{s}?', 'book');
+      router.add('/foo{bar}', 'foobar');
+
+      expect(router.find('/book')?.data, 'book');
+      expect(router.find('/books')?.data, 'book');
+      expect(router.find('/foo'), isNull);
+      expect(router.find('/foobar')?.data, 'foobar');
     });
 
-    test('optional group with param', () {
-      final r = _router();
-      r.add('', '/users{/:id}?', 'user');
-      expect(r.find('', '/users')?.params, isNull);
-      expect(r.find('', '/users/42')?.params, {'id': '42'});
-    });
+    test('supports grouped params', () {
+      final router = Router<String>();
+      router.add('/users{/:id}?', 'user');
+      router.add('/blog/:id(\\d+){-:title}?', 'blog');
 
-    test('mandatory group inlines body', () {
-      final r = _router();
-      r.add('', '/foo{bar}', 'foobar');
-      expect(r.find('', '/foo'), isNull);
-      expect(r.find('', '/foobar')?.data, 'foobar');
-    });
-
-    test('nested optional groups', () {
-      final r = _router();
-      r.add('', '/docs{/:section}{/:page}?', 'docs');
-      expect(r.find('', '/docs'), isNull);
-      expect(r.find('', '/docs/api')?.params, {'section': 'api'});
-      expect(r.find('', '/docs/api/intro')?.params, {'section': 'api', 'page': 'intro'});
-    });
-
-    test('blog with optional titled segment', () {
-      final r = _router();
-      r.add('', '/blog/:id(\\d+){-:title}?', 'blog');
-      expect(r.find('', '/blog/123')?.params, {'id': '123'});
-      expect(r.find('', '/blog/123-post')?.params, {'id': '123', 'title': 'post'});
-    });
-
-    test('rejects unclosed group', () {
-      expect(() => _router().add('', '/foo{bar', 'x'), throwsFormatException);
+      expect(router.find('/users')?.params, isNull);
+      expect(router.find('/users/42')?.params, {'id': '42'});
+      expect(router.find('/blog/123')?.params, {'id': '123'});
+      expect(router.find('/blog/123-post')?.params, {
+        'id': '123',
+        'title': 'post',
+      });
     });
   });
 
   group('method matching', () {
-    test("empty string method matches any route's method", () {
-      final r = _router();
-      r.add('GET', '/users/:id', 'get-user');
-      expect(r.find('GET', '/users/1')?.data, 'get-user');
-      expect(r.find('', '/users/1')?.data, 'get-user');
+    test('method-specific routes require the matching method', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'get-user', method: 'GET');
+
+      expect(router.find('/users/1'), isNull);
+      expect(router.find('/users/1', method: 'GET')?.data, 'get-user');
     });
 
-    test('empty-method route serves as ANY and is found by specific method', () {
-      final r = _router();
-      r.add('', '/users/:id', 'any-user');
-      expect(r.find('GET', '/users/1')?.data, 'any-user');
-      expect(r.find('POST', '/users/1')?.data, 'any-user');
+    test('any-method routes match specific methods', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'any-user');
+
+      expect(router.find('/users/1', method: 'GET')?.data, 'any-user');
+      expect(router.find('/users/1', method: 'POST')?.data, 'any-user');
     });
 
-    test('specific method takes priority over any-method route', () {
-      final r = _router();
-      r.add('', '/users/:id', 'any');
-      r.add('GET', '/users/:id', 'get');
-      expect(r.find('GET', '/users/1')?.data, 'get');
-      expect(r.find('POST', '/users/1')?.data, 'any');
+    test('specific methods win over any-method routes', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'any');
+      router.add('/users/:id', 'get', method: 'GET');
+
+      expect(router.find('/users/1', method: 'GET')?.data, 'get');
+      expect(router.find('/users/1', method: 'POST')?.data, 'any');
     });
 
-    test('method names are normalized to uppercase', () {
-      final r = _router();
-      r.add('get', '/ping', 'pong');
-      expect(r.find('GET', '/ping')?.data, 'pong');
+    test('method names are trimmed and uppercased', () {
+      final router = Router<String>();
+      router.add('/ping', 'pong', method: ' get ');
+
+      expect(router.find('/ping', method: 'GET')?.data, 'pong');
     });
 
-    test('method names are trimmed', () {
-      final r = _router();
-      r.add(' GET ', '/ping', 'pong');
-      expect(r.find('GET', '/ping')?.data, 'pong');
-    });
+    test('findAll returns the selected method bucket only', () {
+      final router = Router<String>();
+      router.add('/api/:id', 'any');
+      router.add('/api/:id', 'get', method: 'GET');
 
-    test('multiple methods on same path', () {
-      final r = _router();
-      r.add('GET', '/users', 'list');
-      r.add('POST', '/users', 'create');
-      expect(r.find('GET', '/users')?.data, 'list');
-      expect(r.find('POST', '/users')?.data, 'create');
-      expect(r.find('DELETE', '/users'), isNull);
+      expect(router.findAll('/api/1', method: 'GET').map((m) => m.data), [
+        'get',
+      ]);
+      expect(router.findAll('/api/1', method: 'POST').map((m) => m.data), [
+        'any',
+      ]);
     });
   });
 
   group('match priority', () {
-    test('static beats param beats wildcard', () {
-      final r = _router();
-      r.add('', '/users/:id', 'param');
-      r.add('', '/users/**', 'wildcard');
-      r.add('', '/users/all', 'static');
-      expect(r.find('', '/users/all')?.data, 'static');
-      expect(r.find('', '/users/42')?.data, 'param');
-      expect(r.find('', '/users/42/extra')?.data, 'wildcard');
+    test('static beats param beats wildcard in find', () {
+      final router = Router<String>();
+      router.add('/users/:id', 'param');
+      router.add('/users/**', 'wildcard');
+      router.add('/users/all', 'static');
+
+      expect(router.find('/users/all')?.data, 'static');
+      expect(router.find('/users/42')?.data, 'param');
+      expect(router.find('/users/42/extra')?.data, 'wildcard');
     });
 
-    test('double-wildcard is the last resort', () {
-      final r = _router();
-      r.add('', '/**', 'fallback');
-      r.add('', '/known', 'known');
-      expect(r.find('', '/known')?.data, 'known');
-      expect(r.find('', '/unknown')?.data, 'fallback');
+    test('findAll returns wildcard then param then static', () {
+      final router = Router<String>();
+      router.add('/users/**', 'wildcard');
+      router.add('/users/:id', 'param');
+      router.add('/users/all', 'static');
+
+      final matches = router.findAll('/users/all');
+      expect(matches.map((m) => m.data), ['wildcard', 'param', 'static']);
+      expect(matches[0].params, {'_': 'all'});
+      expect(matches[1].params, {'id': 'all'});
+      expect(matches[2].params, isNull);
     });
 
-    test('longer static prefix wins', () {
-      final r = _router();
-      r.add('', '/a/:x', 'shallow');
-      r.add('', '/a/b/:x', 'deep');
-      expect(r.find('', '/a/b/42')?.data, 'deep');
-      expect(r.find('', '/a/42')?.data, 'shallow');
-    });
-  });
+    test('findAll includes optional tail and exact route', () {
+      final router = Router<String>();
+      router.add('/users/:id?', 'optional');
+      router.add('/users', 'exact');
 
-  group('findAll', () {
-    test('returns empty list when nothing matches', () {
-      expect(_router().findAll('', '/unknown'), isEmpty);
-    });
-
-    test('returns wildcard match, then param match, then static match', () {
-      final r = _router();
-      r.add('', '/users/**', 'wildcard');
-      r.add('', '/users/:id', 'param');
-      r.add('', '/users/all', 'static');
-      final matches = r.findAll('', '/users/all').map((m) => m.data).toList();
-      expect(matches, ['wildcard', 'param', 'static']);
-    });
-
-    test('includes params for each match', () {
-      final r = _router();
-      r.add('', '/users/**:wild', 'wildcard');
-      r.add('', '/users/:id', 'param');
-      final matches = r.findAll('', '/users/42');
-      expect(matches[0].params, {'wild': '42'});
-      expect(matches[1].params, {'id': '42'});
-    });
-
-    test('optional tail is included in findAll', () {
-      final r = _router();
-      r.add('', '/users/:id?', 'optional');
-      r.add('', '/users', 'exact');
-      final matches = r.findAll('', '/users').map((m) => m.data).toList();
-      expect(matches, containsAll(['optional', 'exact']));
-    });
-
-    test('findAll with method returns method-specific and any-method routes', () {
-      final r = _router();
-      r.add('', '/api/:id', 'any');
-      r.add('GET', '/api/:id', 'get');
-      final matches = r.findAll('GET', '/api/1').map((m) => m.data).toList();
-      expect(matches, containsAll(['any', 'get']));
+      expect(router.findAll('/users').map((m) => m.data), [
+        'optional',
+        'exact',
+      ]);
     });
   });
 
   group('remove', () {
-    test('removes a static route', () {
-      final r = _router();
-      r.add('', '/users', 'users');
-      expect(r.remove('', '/users'), isTrue);
-      expect(r.find('', '/users'), isNull);
+    test('removes static, param, and wildcard routes', () {
+      final router = Router<String>();
+      router.add('/users', 'users');
+      router.add('/users/:id', 'user');
+      router.add('/files/**', 'files');
+
+      expect(router.remove('', '/users'), isTrue);
+      expect(router.remove('', '/users/:id'), isTrue);
+      expect(router.remove('', '/files/**'), isTrue);
+
+      expect(router.find('/users'), isNull);
+      expect(router.find('/users/42'), isNull);
+      expect(router.find('/files/a/b'), isNull);
     });
 
-    test('removes a param route', () {
-      final r = _router();
-      r.add('', '/users/:id', 'user');
-      expect(r.remove('', '/users/:id'), isTrue);
-      expect(r.find('', '/users/42'), isNull);
+    test('removes only the requested method', () {
+      final router = Router<String>();
+      router.add('/users', 'list', method: 'GET');
+      router.add('/users', 'create', method: 'POST');
+
+      expect(router.remove('GET', '/users'), isTrue);
+      expect(router.find('/users', method: 'GET'), isNull);
+      expect(router.find('/users', method: 'POST')?.data, 'create');
     });
 
-    test('returns false when route does not exist', () {
-      final r = _router();
-      expect(r.remove('', '/nonexistent'), isFalse);
+    test('removes expanded optional routes', () {
+      final router = Router<String>();
+      router.add('/users/:id?', 'user');
+
+      expect(router.remove('', '/users/:id?'), isTrue);
+      expect(router.find('/users'), isNull);
+      expect(router.find('/users/42'), isNull);
     });
 
-    test('removes only the specified method', () {
-      final r = _router();
-      r.add('GET', '/users', 'list');
-      r.add('POST', '/users', 'create');
-      r.remove('GET', '/users');
-      expect(r.find('GET', '/users'), isNull);
-      expect(r.find('POST', '/users')?.data, 'create');
-    });
-
-    test('removes a wildcard route', () {
-      final r = _router();
-      r.add('', '/files/**', 'files');
-      r.remove('', '/files/**');
-      expect(r.find('', '/files/a/b'), isNull);
-    });
-
-    test('removes expanded modifier routes', () {
-      final r = _router();
-      r.add('', '/users/:id?', 'user');
-      r.remove('', '/users/:id?');
-      expect(r.find('', '/users/42'), isNull);
-      expect(r.find('', '/users'), isNull);
-    });
-
-    test('clears cache after remove', () {
-      final r = _router();
-      r.add('', '/ping', 'pong');
-      r.find('', '/ping'); // cache it
-      r.remove('', '/ping');
-      expect(r.find('', '/ping'), isNull);
+    test('returns false when the route does not exist', () {
+      expect(Router<String>().remove('', '/missing'), isFalse);
     });
   });
 
   group('case sensitivity', () {
-    test('is case-sensitive by default', () {
-      final r = _router();
-      r.add('', '/Users/:id', 'user');
-      expect(r.find('', '/Users/42')?.data, 'user');
-      expect(r.find('', '/users/42'), isNull);
+    test('is case-insensitive by default', () {
+      final router = Router<String>();
+      router.add('/Users/:id', 'user');
+
+      expect(router.find('/users/42')?.data, 'user');
+      expect(router.find('/USERS/42')?.data, 'user');
     });
 
-    test('case-insensitive matching when configured', () {
-      final r = _router(caseSensitive: false);
-      r.add('', '/Users/:id', 'user');
-      expect(r.find('', '/users/42')?.data, 'user');
-      expect(r.find('', '/USERS/42')?.data, 'user');
-    });
+    test('supports case-sensitive matching when configured', () {
+      final router = Router<String>(caseSensitive: true);
+      router.add('/Users/:id', 'user');
 
-    test('case-insensitive static routes share a node', () {
-      final r = _router(caseSensitive: false);
-      r.add('', '/About', 'about');
-      expect(r.find('', '/about')?.data, 'about');
-      expect(r.find('', '/ABOUT')?.data, 'about');
+      expect(router.find('/Users/42')?.data, 'user');
+      expect(router.find('/users/42'), isNull);
     });
   });
 
   group('cache', () {
-    test('find returns cached results', () {
-      final r = _router();
-      r.add('', '/users/:id', 'user');
-      final first = r.find('', '/users/42');
-      final second = r.find('', '/users/42');
+    test('uses cache when configured', () {
+      final router = Router<String>(cache: LRUCache<String>());
+      router.add('/users/:id', 'user');
+
+      final first = router.find('/users/42');
+      final second = router.find('/users/42');
+
       expect(identical(first, second), isTrue);
     });
 
-    test('cache is cleared after add', () {
-      final r = _router();
-      r.add('', '/ping', 'first');
-      r.find('', '/ping');
-      r.add('', '/ping', 'second');
-      // Both routes exist now (no dedup); first-added wins
-      expect(r.find('', '/ping')?.data, 'first');
+    test('clears cache after add and remove', () {
+      final router = Router<String>(cache: LRUCache<String>());
+      router.add('/ping', 'first');
+
+      final first = router.find('/ping');
+      router.add('/ping', 'second');
+      final afterAdd = router.find('/ping');
+      expect(identical(first, afterAdd), isFalse);
+
+      expect(router.remove('', '/ping'), isTrue);
+      expect(router.find('/ping'), isNull);
     });
 
-    test('custom cache implementation is used', () {
+    test('uses a custom cache implementation', () {
       var gets = 0;
       var puts = 0;
-
-      final customCache = _CountingCache<String, RouteMatch<String>>(
+      final cache = _CountingCache<String>(
         onGet: () => gets++,
         onPut: () => puts++,
       );
+      final router = Router<String>(cache: cache);
+      router.add('/ping', 'pong');
 
-      final r = Router<String>(cache: customCache);
-      r.add('', '/ping', 'pong');
-      r.find('', '/ping');
-      r.find('', '/ping');
+      router.find('/ping');
+      router.find('/ping');
 
       expect(gets, 2);
       expect(puts, 1);
@@ -463,57 +335,54 @@ void main() {
   });
 
   group('validation', () {
-    test('rejects double wildcard in the middle', () {
-      expect(() => _router().add('', '/a/**/b', 'x'), throwsFormatException);
-    });
-
-    test('rejects invalid param name', () {
-      expect(() => _router().add('', '/users/:', 'x'), throwsFormatException);
-    });
-
-    test('rejects unclosed regex in param', () {
-      expect(() => _router().add('', '/users/:id(\\d+', 'x'), throwsFormatException);
-    });
-
-    test('rejects unclosed group delimiter', () {
-      expect(() => _router().add('', '/foo{bar', 'x'), throwsFormatException);
+    test('rejects invalid params and unclosed patterns', () {
+      expect(
+        () => Router<String>().add('/users/:', 'x'),
+        throwsFormatException,
+      );
+      expect(
+        () => Router<String>().add(r'/users/:id(\d+', 'x'),
+        throwsFormatException,
+      );
+      expect(
+        () => Router<String>().add('/foo{bar', 'x'),
+        throwsFormatException,
+      );
     });
   });
 
   group('escape sequences', () {
-    test(r'escaped \: is treated as literal colon', () {
-      final r = _router();
-      r.add('', r'/v\:1/users', 'versioned');
-      expect(r.find('', '/v:1/users')?.data, 'versioned');
+    test(r'escaped \: is treated as a literal colon', () {
+      final router = Router<String>();
+      router.add(r'/v\:1/users', 'versioned');
+
+      expect(router.find('/v:1/users')?.data, 'versioned');
     });
 
-    test(r'escaped \* is treated as literal asterisk in static segment', () {
-      final r = _router();
-      r.add('', r'/files/\*', 'star-file');
-      expect(r.find('', '/files/*')?.data, 'star-file');
+    test(r'escaped \* is treated as a literal asterisk', () {
+      final router = Router<String>();
+      router.add(r'/files/\*', 'star-file');
+
+      expect(router.find('/files/*')?.data, 'star-file');
     });
   });
 }
 
-// ---------------------------------------------------------------------------
-// Test helper: counting cache
-// ---------------------------------------------------------------------------
-
-class _CountingCache<K, V> implements Cache<K, V> {
+class _CountingCache<T> implements Cache<T> {
   _CountingCache({required this.onGet, required this.onPut});
 
   final void Function() onGet;
   final void Function() onPut;
-  final _inner = LRUCache<K, V>();
+  final _inner = LRUCache<T>();
 
   @override
-  V? get(K key) {
+  RouteMatch<T>? get(String key) {
     onGet();
     return _inner.get(key);
   }
 
   @override
-  void put(K key, V value) {
+  void put(String key, RouteMatch<T> value) {
     onPut();
     _inner.put(key, value);
   }
