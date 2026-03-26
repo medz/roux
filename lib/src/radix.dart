@@ -1,4 +1,4 @@
-// Single radix trie — nodes carry typed edges; no separate compiled-route list.
+// Single radix trie — nodes carry typed fields; no edge-list scanning.
 // ignore_for_file: public_member_api_docs
 
 import 'model.dart';
@@ -8,44 +8,39 @@ import 'path.dart';
 
 class _Node<T> {
   final Map<String, _Node<T>> statics = {};
-  List<_Edge<T>>? edges; // sorted: high-pattern → param → low-pattern → catch-all → deferred
+  _ParamEdge<T>? param;
+  _CatchAllEdge<T>? catchAll;
+  List<_PatternEdge<T>>? highPats; // bucketHigh  — before :param
+  List<_PatternEdge<T>>? loPats; // bucketLate/Repeat — after :param
+  List<_PatternEdge<T>>? deferPats; // bucketDeferred — last
   MethodSlot<T>? slot;
 }
 
 // ── edges ─────────────────────────────────────────────────────────────────────
 
-sealed class _Edge<T> {}
-
-/// `:name` — matches one path segment, recurses into child.
-class _ParamEdge<T> extends _Edge<T> {
+class _ParamEdge<T> {
   final _Node<T> child = _Node<T>();
 }
 
-/// `**` — matches all remaining segments.
-class _CatchAllEdge<T> extends _Edge<T> {
+class _CatchAllEdge<T> {
   final MethodSlot<T> slot;
   _CatchAllEdge(this.slot);
 }
 
-/// Compiled regex — handles every other complex syntax.
-class _PatternEdge<T> extends _Edge<T> {
+class _PatternEdge<T> {
   final RegExp regex;
-  final String shape; // full-path shape for duplicate detection
-  final int bucket; // bucketHigh / bucketLate / bucketRepeat / bucketDeferred
+  final String shape;
+  final int bucket;
   final List<int> groupIndexes;
   MethodSlot<T> slot;
-  _PatternEdge(this.regex, this.shape, this.bucket, this.groupIndexes, this.slot);
+  _PatternEdge(
+    this.regex,
+    this.shape,
+    this.bucket,
+    this.groupIndexes,
+    this.slot,
+  );
 }
-
-// ── edge priority ─────────────────────────────────────────────────────────────
-
-int _edgePri(_Edge<dynamic> e) => switch (e) {
-  _PatternEdge<dynamic>(bucket: final b) when b == bucketHigh => 0,
-  _ParamEdge<dynamic>() => 1,
-  _PatternEdge<dynamic>(bucket: final b) when b != bucketDeferred => 2,
-  _CatchAllEdge<dynamic>() => 3,
-  _ => 4, // bucketDeferred
-};
 
 // ── radix engine ──────────────────────────────────────────────────────────────
 
@@ -77,7 +72,6 @@ class Radix<T> {
     }
     final norm = trimTrailingSlash(path);
 
-    // Quick scan: any special chars?
     var hasToken = false;
     for (var i = 1; i < norm.length; i++) {
       final c = norm.codeUnitAt(i);
@@ -128,55 +122,35 @@ class Radix<T> {
           );
           _hasWildcards = true;
           _hasNonExact = true;
-          final dupPrefix =
-              cursor == 1 && names.isEmpty ? dupFallback : dupWildcard;
-          // Find or create _CatchAllEdge
-          _CatchAllEdge<T>? cae;
-          for (final e in node.edges ?? []) {
-            if (e is _CatchAllEdge<T>) {
-              cae = e;
-              break;
-            }
-          }
-          if (cae == null) {
-            cae = _CatchAllEdge(MethodSlot<T>());
-            _insertEdge(node, cae);
-          }
-          cae.slot.add(method, entry, policy, norm, dupPrefix);
+          final dupPrefix = cursor == 1 && names.isEmpty
+              ? dupFallback
+              : dupWildcard;
+          (node.catchAll ??= _CatchAllEdge(
+            MethodSlot<T>(),
+          )).slot.add(method, entry, policy, norm, dupPrefix);
           return;
         }
-        // Single * → complex: fall through to pattern compilation
       }
 
       // Simple :name param
       if (firstCode == colonCode && !segComplex) {
         if (!validParamSlice(norm, cursor + 1, segEnd)) break;
-        _ParamEdge<T>? pe;
-        for (final e in node.edges ?? []) {
-          if (e is _ParamEdge<T>) {
-            pe = e;
-            break;
-          }
-        }
-        if (pe == null) {
-          pe = _ParamEdge<T>();
-          _insertEdge(node, pe);
-        }
-        node = pe.child;
+        node = (node.param ??= _ParamEdge<T>()).child;
         names.add(norm.substring(cursor + 1, segEnd));
         depth++;
         cursor = segEnd < norm.length ? segEnd + 1 : norm.length;
         continue;
       }
 
-      // Complex segment (embedded *, :name?, :name+, {…}, or bare :name with bad chars)
-      if (segComplex || firstCode == colonCode || firstCode == asteriskCode) break;
+      // Complex segment
+      if (segComplex || firstCode == colonCode || firstCode == asteriskCode) {
+        break;
+      }
 
       // Static segment
-      final key =
-          caseSensitive
-              ? norm.substring(cursor, segEnd)
-              : norm.substring(cursor, segEnd).toLowerCase();
+      final key = caseSensitive
+          ? norm.substring(cursor, segEnd)
+          : norm.substring(cursor, segEnd).toLowerCase();
       staticChars += segEnd - cursor;
       node = node.statics.putIfAbsent(key, _Node.new);
       depth++;
@@ -184,7 +158,6 @@ class Radix<T> {
     }
 
     if (cursor >= norm.length) {
-      // Route terminates at this node
       _validateCaptureNames(names, null, norm);
       final entry = RouteEntry<T>(
         data,
@@ -200,7 +173,6 @@ class Radix<T> {
       node.slot!.add(method, entry, policy, norm, dupShape);
       _hasNonExact = _hasNonExact || names.isNotEmpty;
     } else {
-      // Complex segment: compile full-path regex, attach as _PatternEdge at current node
       _hasPatterns = true;
       _hasNonExact = true;
       final compiled = _PatternCompiler<T>(
@@ -212,14 +184,14 @@ class Radix<T> {
       if (compiled == null) {
         throw FormatException('Unsupported segment syntax in route: $norm');
       }
-      // Merge into existing edge with same shape, or insert new one
-      for (final e in node.edges ?? []) {
-        if (e is _PatternEdge<T> && e.shape == compiled.shape) {
-          e.slot.add(method, compiled.entry, policy, norm, dupShape);
+      final list = _patList(node, compiled.bucket);
+      for (final p in list) {
+        if (p.shape == compiled.shape) {
+          p.slot.add(method, compiled.entry, policy, norm, dupShape);
           return;
         }
       }
-      _insertEdge(
+      _addPattern(
         node,
         _PatternEdge(
           compiled.regex,
@@ -239,46 +211,48 @@ class Radix<T> {
     DuplicatePolicy policy,
     int order,
   ) {
-    final depth = countSegments(path);
-    final chars = countStaticChars(path) - 1;
     final entry = RouteEntry<T>(
       data,
       const [],
       null,
       specExact,
-      depth,
-      chars,
+      countSegments(path),
+      countStaticChars(path) - 1,
       0,
       order,
     );
     final key = caseSensitive ? path : path.toLowerCase();
-    (_exact[key] ??= MethodSlot<T>()).add(method, entry, policy, path, dupShape);
+    (_exact[key] ??= MethodSlot<T>()).add(
+      method,
+      entry,
+      policy,
+      path,
+      dupShape,
+    );
   }
 
-  /// Inserts [edge] into [node.edges] maintaining priority order.
-  /// Within the same priority, [_PatternEdge]s are ordered by rank descending.
-  void _insertEdge(_Node<T> node, _Edge<T> edge) {
-    final es = node.edges ??= [];
-    final p = _edgePri(edge);
-    for (var i = 0; i < es.length; i++) {
-      final ep = _edgePri(es[i]);
-      if (ep > p) {
-        es.insert(i, edge);
-        return;
-      }
-      if (ep == p && edge is _PatternEdge<T> && es[i] is _PatternEdge<T>) {
-        final cur = es[i] as _PatternEdge<T>;
-        final ne = (edge).slot.any, ce = cur.slot.any;
-        if (ne != null &&
-            ce != null &&
+  List<_PatternEdge<T>> _patList(_Node<T> node, int bucket) =>
+      bucket == bucketHigh
+      ? (node.highPats ??= [])
+      : bucket == bucketDeferred
+      ? (node.deferPats ??= [])
+      : (node.loPats ??= []);
+
+  void _addPattern(_Node<T> node, _PatternEdge<T> edge) {
+    final list = _patList(node, edge.bucket);
+    final ne = edge.slot.any;
+    if (ne != null) {
+      for (var i = 0; i < list.length; i++) {
+        final ce = list[i].slot.any;
+        if (ce != null &&
             (ne.rank > ce.rank ||
                 (ne.rank == ce.rank && ne.order < ce.order))) {
-          es.insert(i, edge);
+          list.insert(i, edge);
           return;
         }
       }
     }
-    es.add(edge);
+    list.add(edge);
   }
 
   // ── single best match ─────────────────────────────────────────────────────
@@ -293,6 +267,20 @@ class Radix<T> {
     return _walk(_root, path, method, 1, []);
   }
 
+  RouteMatch<T>? _tryPats(
+    List<_PatternEdge<T>>? pats,
+    String path,
+    String? method,
+  ) {
+    for (final p in pats ?? []) {
+      final m = p.regex.firstMatch(path);
+      if (m == null) continue;
+      final e = p.slot.lookup(method);
+      if (e != null) return _materializePattern(e, p.groupIndexes, m);
+    }
+    return null;
+  }
+
   RouteMatch<T>? _walk(
     _Node<T> node,
     String path,
@@ -303,60 +291,39 @@ class Radix<T> {
     if (cursor >= path.length) {
       final e = node.slot?.lookup(method);
       if (e != null) return e.materialize(captures);
-      for (final edge in node.edges ?? []) {
-        if (edge is _CatchAllEdge<T>) {
-          final entry = edge.slot.lookup(method);
-          if (entry != null) return entry.materialize(captures, remainder: '');
-        } else if (edge is _PatternEdge<T>) {
-          final m = edge.regex.firstMatch(path);
-          if (m == null) continue;
-          final entry = edge.slot.lookup(method);
-          if (entry != null) return _materializePattern(entry, edge.groupIndexes, m);
-        }
-      }
-      return null;
+      return _tryPats(node.highPats, path, method) ??
+          _tryPats(node.loPats, path, method) ??
+          (node.catchAll?.slot
+              .lookup(method)
+              ?.materialize(captures, remainder: '')) ??
+          _tryPats(node.deferPats, path, method);
     }
 
     final segEnd = findSegmentEnd(path, cursor);
     if (segEnd == cursor) return null;
     final next = segEnd < path.length ? segEnd + 1 : path.length;
-    final seg =
-        caseSensitive
-            ? path.substring(cursor, segEnd)
-            : path.substring(cursor, segEnd).toLowerCase();
+    final seg = caseSensitive
+        ? path.substring(cursor, segEnd)
+        : path.substring(cursor, segEnd).toLowerCase();
 
-    // Static child (always highest priority)
     final staticChild = node.statics[seg];
     if (staticChild != null) {
       final m = _walk(staticChild, path, method, next, captures);
       if (m != null) return m;
     }
 
-    // Edges in sorted priority order: high-patterns → param → low-patterns → catch-all → deferred
-    for (final edge in node.edges ?? []) {
-      if (edge is _PatternEdge<T>) {
-        final m = edge.regex.firstMatch(path);
-        if (m == null) continue;
-        final entry = edge.slot.lookup(method);
-        if (entry != null) return _materializePattern(entry, edge.groupIndexes, m);
-      } else if (edge is _ParamEdge<T>) {
-        final m = _walk(
-          edge.child,
-          path,
-          method,
-          next,
-          [...captures, path.substring(cursor, segEnd)],
-        );
-        if (m != null) return m;
-      } else if (edge is _CatchAllEdge<T>) {
-        final entry = edge.slot.lookup(method);
-        if (entry != null) {
-          return entry.materialize(captures, remainder: path.substring(cursor));
-        }
-      }
-    }
-
-    return null;
+    return _tryPats(node.highPats, path, method) ??
+        (node.param == null
+            ? null
+            : _walk(node.param!.child, path, method, next, [
+                ...captures,
+                path.substring(cursor, segEnd),
+              ])) ??
+        _tryPats(node.loPats, path, method) ??
+        (node.catchAll?.slot
+            .lookup(method)
+            ?.materialize(captures, remainder: path.substring(cursor))) ??
+        _tryPats(node.deferPats, path, method);
   }
 
   // ── collect all matches ───────────────────────────────────────────────────
@@ -377,6 +344,30 @@ class Radix<T> {
     return acc.results;
   }
 
+  void _collectPats(
+    List<_PatternEdge<T>>? pats,
+    String path,
+    String? method,
+    MatchAccumulator<T> acc,
+  ) {
+    for (final p in pats ?? []) {
+      final m = p.regex.firstMatch(path);
+      if (m == null) continue;
+      p.slot.collect(method, (entry, mr) {
+        RouteEntry<T>? e = entry;
+        while (e != null) {
+          acc.add(
+            _materializePattern(e, p.groupIndexes, m),
+            e.rank,
+            mr,
+            e.order,
+          );
+          e = e.next;
+        }
+      });
+    }
+  }
+
   void _walkCollect(
     _Node<T> node,
     String path,
@@ -385,39 +376,27 @@ class Radix<T> {
     List<String> captures,
     MatchAccumulator<T> acc,
   ) {
-    // Collect edges at this node (catch-all and pattern edges)
-    for (final edge in node.edges ?? []) {
-      if (edge is _CatchAllEdge<T>) {
-        final remainder = cursor >= path.length ? '' : path.substring(cursor);
-        edge.slot.collect(method, (entry, mr) {
-          RouteEntry<T>? e = entry;
-          while (e != null) {
-            acc.add(
-              e.materialize(captures, remainder: remainder),
-              e.rank,
-              mr,
-              e.order,
-            );
-            e = e.next;
-          }
-        });
-      } else if (edge is _PatternEdge<T>) {
-        final m = edge.regex.firstMatch(path);
-        if (m == null) continue;
-        edge.slot.collect(method, (entry, mr) {
-          RouteEntry<T>? e = entry;
-          while (e != null) {
-            acc.add(
-              _materializePattern(e, edge.groupIndexes, m),
-              e.rank,
-              mr,
-              e.order,
-            );
-            e = e.next;
-          }
-        });
-      }
+    // Catch-all matches at any depth
+    if (node.catchAll != null) {
+      final remainder = cursor >= path.length ? '' : path.substring(cursor);
+      node.catchAll!.slot.collect(method, (entry, mr) {
+        RouteEntry<T>? e = entry;
+        while (e != null) {
+          acc.add(
+            e.materialize(captures, remainder: remainder),
+            e.rank,
+            mr,
+            e.order,
+          );
+          e = e.next;
+        }
+      });
     }
+
+    // Pattern edges at this node
+    _collectPats(node.highPats, path, method, acc);
+    _collectPats(node.loPats, path, method, acc);
+    _collectPats(node.deferPats, path, method, acc);
 
     if (cursor >= path.length) {
       node.slot?.collect(method, (entry, mr) {
@@ -433,25 +412,19 @@ class Radix<T> {
     final segEnd = findSegmentEnd(path, cursor);
     if (segEnd == cursor) return;
     final next = segEnd < path.length ? segEnd + 1 : path.length;
-    final seg =
-        caseSensitive
-            ? path.substring(cursor, segEnd)
-            : path.substring(cursor, segEnd).toLowerCase();
+    final seg = caseSensitive
+        ? path.substring(cursor, segEnd)
+        : path.substring(cursor, segEnd).toLowerCase();
 
     final staticChild = node.statics[seg];
     if (staticChild != null) {
       _walkCollect(staticChild, path, method, next, captures, acc);
     }
-    for (final edge in node.edges ?? []) {
-      if (edge is! _ParamEdge<T>) continue;
-      _walkCollect(
-        edge.child,
-        path,
-        method,
-        next,
-        [...captures, path.substring(cursor, segEnd)],
-        acc,
-      );
+    if (node.param != null) {
+      _walkCollect(node.param!.child, path, method, next, [
+        ...captures,
+        path.substring(cursor, segEnd),
+      ], acc);
     }
   }
 
@@ -586,7 +559,12 @@ class _PatternCompiler<T> {
               : q == plusCode
               ? '(.+(?:/.+)*)'
               : '(.*)';
-          _writeCapture(capture, name, slashPrefixed: true, optional: q != plusCode);
+          _writeCapture(
+            capture,
+            name,
+            slashPrefixed: true,
+            optional: q != plusCode,
+          );
           needsCompiled = true;
           bucket = q == questionCode ? bucketDeferred : bucketRepeat;
           specificity = q == questionCode ? specStruct : specRem;
@@ -646,7 +624,9 @@ class _PatternCompiler<T> {
   void _writeLiteral(String literal) {
     staticChars += countStaticChars(literal);
     _cur.$1.write(RegExp.escape(literal));
-    _cur.$2.write(RegExp.escape(caseSensitive ? literal : literal.toLowerCase()));
+    _cur.$2.write(
+      RegExp.escape(caseSensitive ? literal : literal.toLowerCase()),
+    );
   }
 
   void _writeSegment(int start, int end) {
