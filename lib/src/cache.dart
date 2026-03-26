@@ -1,25 +1,29 @@
-// LRU cache for route match results.
-// ignore_for_file: public_member_api_docs
+import 'model.dart';
 
-/// A fixed-capacity LRU cache backed by an access-ordered [LinkedHashMap].
-class RouteCache<K, V> {
-  RouteCache(this.capacity) : assert(capacity > 0);
+abstract interface class Cache<T> {
+  RouteMatch<T>? get(String key);
+  void put(String key, RouteMatch<T> value);
+  void clear();
+}
+
+class LRUCache<T> implements Cache<T> {
+  LRUCache([this.capacity = 256]) : assert(capacity > 0);
 
   final int capacity;
-  final _map = <K, V>{};
+  late final _cache = <String, RouteMatch<T>>{};
 
-  V? get(K key) {
-    final value = _map.remove(key);
-    if (value == null) return null;
-    _map[key] = value; // re-insert to mark as recently used
-    return value;
+  @override
+  RouteMatch<T>? get(String key) => _cache[key];
+
+  @override
+  void put(String key, RouteMatch<T> value) {
+    if (!_cache.containsKey(key) && _cache.length >= capacity) {
+      _cache.remove(_cache.keys.first);
+    }
+
+    _cache[key] = value;
   }
 
-  void put(K key, V value) {
-    _map.remove(key);
-    if (_map.length >= capacity) _map.remove(_map.keys.first);
-    _map[key] = value;
-  }
-
-  void clear() => _map.clear();
+  @override
+  void clear() => _cache.clear();
 }
