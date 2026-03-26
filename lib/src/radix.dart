@@ -8,15 +8,15 @@ import 'path.dart';
 
 class _Node<T> {
   final Map<String, _Node<T>> statics = {};
-  List<_Edge<T>>? edges; // sorted by priority: high-pattern → param → low-pattern → catch-all → deferred
-  MethodSlot<T>? slot; // routes terminating exactly here
+  List<_Edge<T>>? edges; // sorted: high-pattern → param → low-pattern → catch-all → deferred
+  MethodSlot<T>? slot;
 }
 
 // ── edges ─────────────────────────────────────────────────────────────────────
 
 sealed class _Edge<T> {}
 
-/// `:name` — matches one segment, recurses into child.
+/// `:name` — matches one path segment, recurses into child.
 class _ParamEdge<T> extends _Edge<T> {
   final _Node<T> child = _Node<T>();
 }
@@ -303,7 +303,6 @@ class Radix<T> {
     if (cursor >= path.length) {
       final e = node.slot?.lookup(method);
       if (e != null) return e.materialize(captures);
-      // Catch-all with empty remainder, and deferred patterns
       for (final edge in node.edges ?? []) {
         if (edge is _CatchAllEdge<T>) {
           final entry = edge.slot.lookup(method);
@@ -333,11 +332,9 @@ class Radix<T> {
       if (m != null) return m;
     }
 
-    // Edges in priority order: high-patterns → param → low-patterns → catch-all
-    // Deferred patterns are skipped here and retried after catch-all.
+    // Edges in sorted priority order: high-patterns → param → low-patterns → catch-all → deferred
     for (final edge in node.edges ?? []) {
       if (edge is _PatternEdge<T>) {
-        if (edge.bucket == bucketDeferred) continue;
         final m = edge.regex.firstMatch(path);
         if (m == null) continue;
         final entry = edge.slot.lookup(method);
@@ -357,15 +354,6 @@ class Radix<T> {
           return entry.materialize(captures, remainder: path.substring(cursor));
         }
       }
-    }
-
-    // Deferred patterns last (optional — lowest priority)
-    for (final edge in node.edges ?? []) {
-      if (edge is! _PatternEdge<T> || edge.bucket != bucketDeferred) continue;
-      final m = edge.regex.firstMatch(path);
-      if (m == null) continue;
-      final entry = edge.slot.lookup(method);
-      if (entry != null) return _materializePattern(entry, edge.groupIndexes, m);
     }
 
     return null;
@@ -531,7 +519,9 @@ class _Compiled<T> {
 }
 
 class _PatternCompiler<T> {
-  _PatternCompiler(this.pattern, this.data, this.caseSensitive, this.order);
+  _PatternCompiler(this.pattern, this.data, this.caseSensitive, this.order) {
+    _cur = (regex, shape);
+  }
 
   final String pattern;
   final T data;
@@ -539,21 +529,24 @@ class _PatternCompiler<T> {
   final int order;
 
   final regex = StringBuffer('^'), shape = StringBuffer('^');
+  late (StringBuffer, StringBuffer) _cur;
   final names = <String>[], groupIndexes = <int>[];
   var groupCount = 0, unnamedCount = 0, staticChars = 0;
-  var needsCompiled = false;
-  var bucket = bucketHigh;
-  var specificity = specDyn;
-  var constraintScore = 0;
+  var needsCompiled = false, bucket = bucketHigh;
+  var specificity = specDyn, constraintScore = 0;
+
+  void _write(String v) {
+    _cur.$1.write(v);
+    _cur.$2.write(v);
+  }
 
   _Compiled<T>? compile() {
     if (_containsStructuredBrace(pattern)) {
       needsCompiled = true;
       specificity = specStruct;
       if (constraintScore < 1) constraintScore = 1;
-      writeGrouped(0, pattern.length, false, regex, shape);
-      regex.write(r'$');
-      shape.write(r'$');
+      writeGrouped(0, pattern.length, false);
+      _write(r'$');
       return _build();
     }
     for (
@@ -566,8 +559,6 @@ class _PatternCompiler<T> {
 
       if (first == colonCode && validParamSlice(pattern, cursor + 1, segEnd)) {
         _writeCapture(
-          regex,
-          shape,
           '([^/]+)',
           pattern.substring(cursor + 1, segEnd),
           slashPrefixed: true,
@@ -576,13 +567,7 @@ class _PatternCompiler<T> {
         continue;
       }
       if (segEnd - cursor == 1 && first == asteriskCode) {
-        _writeCapture(
-          regex,
-          shape,
-          '([^/]+)',
-          '${unnamedCount++}',
-          slashPrefixed: true,
-        );
+        _writeCapture('([^/]+)', '${unnamedCount++}', slashPrefixed: true);
         needsCompiled = true;
         bucket = bucketLate;
         constraintScore = 1;
@@ -601,14 +586,7 @@ class _PatternCompiler<T> {
               : q == plusCode
               ? '(.+(?:/.+)*)'
               : '(.*)';
-          _writeCapture(
-            regex,
-            shape,
-            capture,
-            name,
-            slashPrefixed: true,
-            optional: q != plusCode,
-          );
+          _writeCapture(capture, name, slashPrefixed: true, optional: q != plusCode);
           needsCompiled = true;
           bucket = q == questionCode ? bucketDeferred : bucketRepeat;
           specificity = q == questionCode ? specStruct : specRem;
@@ -617,13 +595,11 @@ class _PatternCompiler<T> {
           continue;
         }
       }
-      regex.write('/');
-      shape.write('/');
+      _write('/');
       _writeSegment(cursor, segEnd);
       cursor = segEnd + 1;
     }
-    regex.write(r'$');
-    shape.write(r'$');
+    _write(r'$');
     if (!needsCompiled) return null;
     return _build();
   }
@@ -646,8 +622,6 @@ class _PatternCompiler<T> {
   );
 
   void _writeCapture(
-    StringBuffer outR,
-    StringBuffer outS,
     String cap,
     String name, {
     int extraGroups = 0,
@@ -655,23 +629,13 @@ class _PatternCompiler<T> {
     bool optional = false,
   }) {
     if (optional) {
-      outR
-        ..write('(?:')
-        ..write(slashPrefixed ? '/' : '')
-        ..write(cap)
-        ..write(')?');
-      outS
-        ..write('(?:')
-        ..write(slashPrefixed ? '/' : '')
-        ..write(cap)
-        ..write(')?');
+      _write('(?:');
+      if (slashPrefixed) _write('/');
+      _write(cap);
+      _write(')?');
     } else {
-      if (slashPrefixed) {
-        outR.write('/');
-        outS.write('/');
-      }
-      outR.write(cap);
-      outS.write(cap);
+      if (slashPrefixed) _write('/');
+      _write(cap);
     }
     names.add(name);
     groupCount++;
@@ -679,10 +643,10 @@ class _PatternCompiler<T> {
     groupCount += extraGroups;
   }
 
-  void _writeLiteral(String literal, StringBuffer outR, StringBuffer outS) {
+  void _writeLiteral(String literal) {
     staticChars += countStaticChars(literal);
-    outR.write(RegExp.escape(literal));
-    outS.write(RegExp.escape(caseSensitive ? literal : literal.toLowerCase()));
+    _cur.$1.write(RegExp.escape(literal));
+    _cur.$2.write(RegExp.escape(caseSensitive ? literal : literal.toLowerCase()));
   }
 
   void _writeSegment(int start, int end) {
@@ -690,7 +654,7 @@ class _PatternCompiler<T> {
     while (cursor < end) {
       final c = pattern.codeUnitAt(cursor);
       if (c == asteriskCode) {
-        _writeCapture(regex, shape, '([^/]*)', '${unnamedCount++}');
+        _writeCapture('([^/]*)', '${unnamedCount++}');
         needsCompiled = true;
         if (constraintScore < 1) constraintScore = 1;
         if (hasLiteral || ++capCount > 1) specificity = specStruct;
@@ -699,7 +663,7 @@ class _PatternCompiler<T> {
         continue;
       }
       if (c == colonCode) {
-        cursor = _writeNamedCapture(cursor, end, lastWasParam, regex, shape);
+        cursor = _writeNamedCapture(cursor, end, lastWasParam);
         needsCompiled = true;
         if (hasLiteral || ++capCount > 1) specificity = specStruct;
         lastWasParam = true;
@@ -711,20 +675,14 @@ class _PatternCompiler<T> {
         if (cc == colonCode || cc == asteriskCode) break;
         cursor++;
       }
-      _writeLiteral(pattern.substring(litStart, cursor), regex, shape);
+      _writeLiteral(pattern.substring(litStart, cursor));
       hasLiteral = true;
       if (capCount > 0) specificity = specStruct;
       lastWasParam = false;
     }
   }
 
-  bool writeGrouped(
-    int start,
-    int end,
-    bool lastWasParam,
-    StringBuffer outR,
-    StringBuffer outS,
-  ) {
+  bool writeGrouped(int start, int end, bool lastWasParam) {
     var cursor = start;
     while (cursor < end) {
       final c = pattern.codeUnitAt(cursor);
@@ -733,28 +691,31 @@ class _PatternCompiler<T> {
         final optional =
             gEnd + 1 < pattern.length &&
             pattern.codeUnitAt(gEnd + 1) == questionCode;
-        final bR = optional ? StringBuffer() : outR;
-        final bS = optional ? StringBuffer() : outS;
-        lastWasParam = writeGrouped(cursor + 1, gEnd, lastWasParam, bR, bS);
         if (optional) {
+          final saved = _cur;
+          _cur = (StringBuffer(), StringBuffer());
+          lastWasParam = writeGrouped(cursor + 1, gEnd, lastWasParam);
+          final tmpR = _cur.$1, tmpS = _cur.$2;
+          _cur = saved;
           bucket = bucketDeferred;
           if (constraintScore < 1) constraintScore = 1;
-          outR
+          saved.$1
             ..write('(?:')
-            ..write(bR)
+            ..write(tmpR)
             ..write(')?');
-          outS
+          saved.$2
             ..write('(?:')
-            ..write(bS)
+            ..write(tmpS)
             ..write(')?');
+        } else {
+          lastWasParam = writeGrouped(cursor + 1, gEnd, lastWasParam);
         }
         cursor = gEnd + (optional ? 2 : 1);
         needsCompiled = true;
         continue;
       }
       if (c == slashCode) {
-        outR.write('/');
-        outS.write('/');
+        _write('/');
         cursor++;
         lastWasParam = false;
         continue;
@@ -766,7 +727,7 @@ class _PatternCompiler<T> {
             'Unsupported segment syntax in route: $pattern',
           );
         }
-        _writeCapture(outR, outS, '([^/]*)', '${unnamedCount++}');
+        _writeCapture('([^/]*)', '${unnamedCount++}');
         if (bucket < bucketLate) bucket = bucketLate;
         if (constraintScore < 1) constraintScore = 1;
         cursor++;
@@ -774,7 +735,7 @@ class _PatternCompiler<T> {
         continue;
       }
       if (c == colonCode) {
-        cursor = _writeNamedCapture(cursor, end, lastWasParam, outR, outS);
+        cursor = _writeNamedCapture(cursor, end, lastWasParam);
         lastWasParam = true;
         continue;
       }
@@ -790,19 +751,13 @@ class _PatternCompiler<T> {
         }
         cursor++;
       }
-      _writeLiteral(pattern.substring(litStart, cursor), outR, outS);
+      _writeLiteral(pattern.substring(litStart, cursor));
       lastWasParam = false;
     }
     return lastWasParam;
   }
 
-  int _writeNamedCapture(
-    int cursor,
-    int end,
-    bool lastWasParam,
-    StringBuffer outR,
-    StringBuffer outS,
-  ) {
+  int _writeNamedCapture(int cursor, int end, bool lastWasParam) {
     if (lastWasParam) {
       throw FormatException('Unsupported segment syntax in route: $pattern');
     }
@@ -819,16 +774,10 @@ class _PatternCompiler<T> {
       final regexEnd = _findRegexEnd(pattern, nameEnd, end);
       final body = pattern.substring(nameEnd + 1, regexEnd);
       if (constraintScore < 2) constraintScore = 2;
-      _writeCapture(
-        outR,
-        outS,
-        '($body)',
-        name,
-        extraGroups: _countCapturingGroups(body),
-      );
+      _writeCapture('($body)', name, extraGroups: _countCapturingGroups(body));
       return regexEnd + 1;
     }
-    _writeCapture(outR, outS, '([^/]+)', name);
+    _writeCapture('([^/]+)', name);
     return nameEnd;
   }
 }
