@@ -4,19 +4,25 @@ import 'operations.dart';
 
 /// A lightweight, expressive path router.
 class Router<T> {
+  /// Creates a router with optional case sensitivity and match caching.
   Router({this.caseSensitive = false, this.cache});
 
+  /// Whether static path matching treats letter case as significant.
   final bool caseSensitive;
+
+  /// Optional cache used to memoize successful lookups.
   final Cache<T>? cache;
 
   final _root = RouterNode<T>();
   final _staticRoutes = <String, RouterNode<T>>{};
 
+  /// Registers a route pattern and its associated data.
   void add(String path, T data, {String? method}) {
     addRoute(_root, _staticRoutes, caseSensitive, _m(method), path, data);
     cache?.clear();
   }
 
+  /// Returns the best match for [path], or `null` when none exists.
   RouteMatch<T>? find(String path, {String? method}) {
     final m = _m(method);
     final p = _p(path);
@@ -30,9 +36,11 @@ class Router<T> {
     return result;
   }
 
+  /// Returns all matches for [path] in broad-to-specific order.
   List<RouteMatch<T>> findAll(String path, {String? method}) =>
       findAllRoutes(_root, caseSensitive, _m(method), _p(path));
 
+  /// Removes all routes stored under the exact method and path pattern.
   bool remove(String method, String path) {
     final removed = removeRoute(
       _root,

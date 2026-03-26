@@ -143,14 +143,16 @@ List<RouteData<T>>? _lookupTree<T>(
     // optional tail: /foo matches /foo/:id? or /foo/**
     if (node.param?.methods != null) {
       final match = node.param!.methods![method] ?? node.param!.methods![''];
-      if (match != null && match.first.paramsMap?.last.optional == true)
+      if (match != null && match.first.paramsMap?.last.optional == true) {
         return match;
+      }
     }
     if (node.wildcard?.methods != null) {
       final match =
           node.wildcard!.methods![method] ?? node.wildcard!.methods![''];
-      if (match != null && match.first.paramsMap?.last.optional == true)
+      if (match != null && match.first.paramsMap?.last.optional == true) {
         return match;
+      }
     }
     return null;
   }
@@ -289,8 +291,9 @@ bool removeRoute<T>(
   if (expandGroupDelimiters(path) case final groupExpanded?) {
     var removed = false;
     for (final p in groupExpanded) {
-      if (removeRoute(root, staticRoutes, caseSensitive, method, p))
+      if (removeRoute(root, staticRoutes, caseSensitive, method, p)) {
         removed = true;
+      }
     }
     return removed;
   }
@@ -301,8 +304,9 @@ bool removeRoute<T>(
   if (expandModifiers(segments) case final modExpanded?) {
     var removed = false;
     for (final p in modExpanded) {
-      if (removeRoute(root, staticRoutes, caseSensitive, method, p))
+      if (removeRoute(root, staticRoutes, caseSensitive, method, p)) {
         removed = true;
+      }
     }
     return removed;
   }
@@ -525,8 +529,9 @@ List<String>? expandGroupDelimiters(String path) {
 
   if (!hasMod) return ['$pre$body$suf'];
   if (mod == '?') return ['$pre$body$suf', '$pre$suf'];
-  if (body.contains('/'))
+  if (body.contains('/')) {
     throw FormatException('Unsupported group repetition across segments');
+  }
   return ['$pre(?:$body)$mod$suf'];
 }
 
