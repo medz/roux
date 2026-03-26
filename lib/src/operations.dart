@@ -389,7 +389,7 @@ final _modifierRx = RegExp(r'^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$');
   while (cursor < segment.length) {
     final code = segment.codeUnitAt(cursor);
 
-    if (code == colonCode) {
+    if (code == 58 /* : */ ) {
       final (next, name, body) = _readParamToken(segment, cursor);
       if (body == null) {
         regex.write('(?<$name>${r'[^/]+'})');
@@ -419,7 +419,7 @@ final _modifierRx = RegExp(r'^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$');
       continue;
     }
 
-    if (code == asteriskCode) {
+    if (code == 42 /* * */ ) {
       final name = toUnnamedGroupKey(nextUnnamed++);
       regex.write('(?<$name>[^/]*)');
       captureNames.add(name);
@@ -430,7 +430,7 @@ final _modifierRx = RegExp(r'^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$');
     final start = cursor++;
     while (cursor < segment.length) {
       final c = segment.codeUnitAt(cursor);
-      if (c == colonCode || c == asteriskCode) break;
+      if (c == 58 /* : */ || c == 42 /* * */ ) break;
       cursor++;
     }
     final literal = decodeEscaped(segment.substring(start, cursor));
@@ -573,7 +573,7 @@ List<String>? expandGroupDelimiters(String path) {
       depth++;
     } else if (code == 41 && depth > 0) {
       depth--;
-    } else if (code == openBraceCode && depth == 0) {
+    } else if (code == 123 /* { */ && depth == 0) {
       start = i;
       break;
     }
@@ -590,7 +590,7 @@ List<String>? expandGroupDelimiters(String path) {
       depth++;
     } else if (code == 41 && depth > 0) {
       depth--;
-    } else if (code == closeBraceCode && depth == 0) {
+    } else if (code == 125 /* } */ && depth == 0) {
       end = i;
       break;
     }
@@ -599,9 +599,9 @@ List<String>? expandGroupDelimiters(String path) {
 
   final hasMod =
       end + 1 < path.length &&
-      (path.codeUnitAt(end + 1) == questionCode ||
-          path.codeUnitAt(end + 1) == plusCode ||
-          path.codeUnitAt(end + 1) == asteriskCode);
+      (path.codeUnitAt(end + 1) == 63 /* ? */ ||
+          path.codeUnitAt(end + 1) == 43 /* + */ ||
+          path.codeUnitAt(end + 1) == 42 /* * */ );
   final mod = hasMod ? path[end + 1] : null;
   final pre = path.substring(0, start);
   final body = path.substring(start + 1, end);
@@ -651,7 +651,7 @@ bool hasSegmentWildcard(String segment) {
       depth++;
     } else if (code == 41 && depth > 0) {
       depth--;
-    } else if (code == asteriskCode && depth == 0) {
+    } else if (code == 42 /* * */ && depth == 0) {
       return true;
     }
   }

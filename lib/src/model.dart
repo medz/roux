@@ -1,12 +1,5 @@
 // ignore_for_file: public_member_api_docs
 
-const int colonCode = 58,
-    asteriskCode = 42,
-    openBraceCode = 123,
-    closeBraceCode = 125,
-    questionCode = 63,
-    plusCode = 43;
-
 const String unnamedGroupPrefix = r'$';
 
 class RouteMatch<T> {
