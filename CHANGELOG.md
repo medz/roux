@@ -1,3 +1,142 @@
+## 1.0.0
+
+### Breaking Changes
+
+- Simplify the public router API around `add`, `find`, `findAll`, and `remove`.
+- Remove constructor `routes`, `addAll`, `match`, and `matchAll`.
+- Remove `DuplicatePolicy` and appended duplicate-route retention. Registering the same method/path shape now replaces the previous route in that slot.
+- Remove configurable `decodePath` and `normalizePath`. Path normalization is now always applied during registration and lookup, while percent-encoded bytes are matched literally and are not URI-decoded.
+- Change the default matching mode to case-insensitive. Use `Router(caseSensitive: true)` for strict matching.
+- Make `RouteMatch.params` non-nullable. Routes without params now return an empty map instead of `null`.
+- Narrow `findAll(...)` to the selected method bucket. Exact-method matches no longer include method-agnostic entries in the same result list.
+
+### Migration Guide
+
+#### API Renames
+
+From 0.5.0:
+
+```dart
+final router = Router<String>(
+  routes: {'/users/:id': 'user'},
+);
+
+final match = router.match('/users/42', method: 'GET');
+final matches = router.matchAll('/users/42', method: 'GET');
+```
+
+To 1.0.0:
+
+```dart
+final router = Router<String>();
+router.add('/users/:id', 'user', method: 'GET');
+
+final match = router.find('/users/42', method: 'GET');
+final matches = router.findAll('/users/42', method: 'GET');
+```
+
+- Replace `match(...)` with `find(...)`.
+- Replace `matchAll(...)` with `findAll(...)`.
+- Replace constructor `routes:` with repeated `add(...)` calls.
+- Replace `addAll(...)` with repeated `add(...)` calls.
+
+#### Duplicate Routes
+
+0.5.0 exposed `DuplicatePolicy` and could retain multiple handlers in the same
+normalized route slot.
+
+1.0.0 removes that configuration entirely. If you register the same method/path
+shape again, the later route replaces the previous one in that slot.
+
+If you relied on appended duplicates such as middleware-like stacking in one
+slot, move those handlers into distinct route patterns or compose them outside
+the router.
+
+#### Path Processing
+
+0.5.0:
+
+- `decodePath` and `normalizePath` were configurable.
+- `match('/a//b')` could fail when normalization was disabled.
+- `decodePath: true` could turn `%2F` into `/` before matching.
+
+1.0.0:
+
+- Path normalization is always on for registration and lookup.
+- Leading slash, trailing slash, repeated `/`, `.` and `..` are normalized.
+- Percent-encoded bytes are matched literally and are never URI-decoded.
+
+Examples:
+
+```dart
+final router = Router<String>();
+router.add('users/:id', 'user');
+router.add('/caf%C3%A9', 'cafe');
+
+router.find('/users/42');   // matches
+router.find('/users/./42'); // matches
+router.find('/caf%C3%A9');  // matches
+router.find('/café');       // does not match
+```
+
+#### Case Sensitivity
+
+0.5.0 defaulted to `caseSensitive: true`.
+
+1.0.0 defaults to `caseSensitive: false`.
+
+To preserve 0.5.0 behavior, construct the router explicitly:
+
+```dart
+final router = Router<String>(caseSensitive: true);
+```
+
+#### RouteMatch.params
+
+0.5.0:
+
+```dart
+if (match?.params == null) {
+  // no params
+}
+```
+
+1.0.0:
+
+```dart
+if (match != null && match.params.isEmpty) {
+  // no params
+}
+```
+
+`params` is now always a mutable `Map<String, String>`.
+
+#### `findAll(...)` Method Behavior
+
+0.5.0 `matchAll(path, method: 'GET')` could collect both:
+
+- method-agnostic matches
+- exact `GET` matches
+
+1.0.0 `findAll(path, method: 'GET')` returns only the selected method bucket.
+
+If you relied on combined `ANY + exact-method` collection, you now need to
+query both buckets explicitly in application code.
+
+### Features
+
+- Add `Cache<T>` and `LRUCache<T>` for optional lookup memoization.
+- Support unnamed regex groups such as `/path/(\\d+)` and `/path/(\\d+)/(\\w+)`.
+- Normalize missing leading slashes and trailing slashes during both registration and lookup.
+- Normalize repeated `/`, `.` and `..` segments during both registration and lookup.
+- Match literal percent-encoded static paths without URI decoding, such as `/caf%C3%A9`.
+
+### Improvements
+
+- Rewrite the router core around a smaller node model and direct route operations, replacing the previous `RouteSet` / `PatternEngine` / `TrieEngine` split.
+- Reduce library size substantially while keeping the current pathname syntax surface.
+- Rewrite the test suite and README to reflect the current API and matching behavior.
+
 ## 0.5.0
 
 ### Breaking Changes
