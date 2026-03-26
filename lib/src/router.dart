@@ -24,7 +24,7 @@ class Router<T> {
       _staticRoutes,
       caseSensitive,
       _m(method),
-      canonicalizeRoutePath(path),
+      normalizePath(path),
       data,
     );
     cache?.clear();
@@ -55,7 +55,7 @@ class Router<T> {
       _staticRoutes,
       caseSensitive,
       _m(method),
-      canonicalizeRoutePath(path),
+      normalizePath(path),
     );
     if (removed) cache?.clear();
     return removed;

@@ -63,6 +63,15 @@ void main() {
       expect(router.find('/users/team/../profile')?.data, 'profile');
       expect(router.find('/users/../profile')?.data, 'root-profile');
     });
+
+    test('route registration also normalizes dot segments', () {
+      final router = Router<String>();
+      router.add('/users/./profile', 'profile');
+      router.add('/users/../root', 'root');
+
+      expect(router.find('/users/profile')?.data, 'profile');
+      expect(router.find('/root')?.data, 'root');
+    });
   });
 
   group('params and patterns', () {
