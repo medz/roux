@@ -1,6 +1,6 @@
 // ignore_for_file: public_member_api_docs
 
-const String unnamedGroupPrefix = r'$';
+const String unnamedGroupPrefix = '__roux_unnamed_';
 
 class RouteMatch<T> {
   final T data;
