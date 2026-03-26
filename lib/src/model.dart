@@ -4,8 +4,8 @@ const String unnamedGroupPrefix = '__roux_unnamed_';
 
 class RouteMatch<T> {
   final T data;
-  final Map<String, String>? params;
-  RouteMatch(this.data, [this.params]);
+  final Map<String, String> params;
+  RouteMatch(this.data, this.params);
 }
 
 class RouterNode<T> {
@@ -46,7 +46,7 @@ class RouteData<T> {
 
   RouteMatch<T> materialize(List<String> segments) {
     final map = paramsMap;
-    if (map == null || map.isEmpty) return RouteMatch(data);
+    if (map == null || map.isEmpty) return RouteMatch(data, {});
     final params = <String, String>{};
     for (final spec in map) {
       final segment = spec.index < 0
@@ -68,7 +68,7 @@ class RouteData<T> {
         }
       }
     }
-    return RouteMatch(data, params.isEmpty ? null : params);
+    return RouteMatch(data, params);
   }
 }
 

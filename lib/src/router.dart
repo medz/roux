@@ -19,14 +19,8 @@ class Router<T> {
 
   /// Registers a route pattern and its associated data.
   void add(String path, T data, {String? method}) {
-    addRoute(
-      _root,
-      _staticRoutes,
-      caseSensitive,
-      _m(method),
-      normalizePath(path),
-      data,
-    );
+    // dart format off
+    addRoute(_root, _staticRoutes, caseSensitive, _m(method), normalizePath(path), data); // dart format on
     cache?.clear();
   }
 
@@ -50,13 +44,8 @@ class Router<T> {
 
   /// Removes all routes stored under the exact method and path pattern.
   bool remove(String method, String path) {
-    final removed = removeRoute(
-      _root,
-      _staticRoutes,
-      caseSensitive,
-      _m(method),
-      normalizePath(path),
-    );
+    // dart format off
+    final removed = removeRoute(_root, _staticRoutes, caseSensitive, _m(method), normalizePath(path)); // dart format on
     if (removed) cache?.clear();
     return removed;
   }

@@ -3,14 +3,8 @@
 import 'model.dart';
 import 'path.dart';
 
-void addRoute<T>(
-  RouterNode<T> root,
-  Map<String, RouterNode<T>> staticRoutes,
-  bool caseSensitive,
-  String method,
-  String path,
-  T data,
-) {
+// dart format off
+void addRoute<T>(RouterNode<T> root, Map<String, RouterNode<T>> staticRoutes, bool caseSensitive, String method, String path, T data) {// dart format on
   if (expandGroupDelimiters(path) case final groupExpanded?) {
     for (final p in groupExpanded) {
       addRoute(root, staticRoutes, caseSensitive, method, p, data);
@@ -63,11 +57,8 @@ void addRoute<T>(
           segment.contains('(') ||
           hasSegmentWildcard(segment) ||
           !_simpleParamRx.hasMatch(segment)) {
-        final (pattern, nextUnnamed) = compileSegmentPattern(
-          segment,
-          caseSensitive,
-          unnamedIndex,
-        );
+        // dart format off
+        final (pattern, nextUnnamed) = compileSegmentPattern(segment, caseSensitive, unnamedIndex); // dart format on
         unnamedIndex = nextUnnamed;
         paramsRegexp.length = i + 1;
         paramsRegexp[i] = pattern;
@@ -110,13 +101,8 @@ void addRoute<T>(
   }
 }
 
-RouteMatch<T>? findRoute<T>(
-  RouterNode<T> root,
-  Map<String, RouterNode<T>> staticRoutes,
-  bool caseSensitive,
-  String method,
-  String path,
-) {
+// dart format off
+RouteMatch<T>? findRoute<T>(RouterNode<T> root, Map<String, RouterNode<T>> staticRoutes, bool caseSensitive, String method, String path) {// dart format on
   final staticNode = staticRoutes[caseSensitive ? path : path.toLowerCase()];
   if (staticNode?.methods != null) {
     final match = staticNode!.methods![method] ?? staticNode.methods![''];
@@ -128,13 +114,8 @@ RouteMatch<T>? findRoute<T>(
   return match?.materialize(segments);
 }
 
-List<RouteData<T>>? _lookupTree<T>(
-  RouterNode<T> node,
-  String method,
-  List<String> segments,
-  int index,
-  bool caseSensitive,
-) {
+// dart format off
+List<RouteData<T>>? _lookupTree<T>(RouterNode<T> node, String method, List<String> segments, int index, bool caseSensitive) {// dart format on
   if (index == segments.length) {
     if (node.methods != null) {
       final match = node.methods![method] ?? node.methods![''];
@@ -161,28 +142,17 @@ List<RouteData<T>>? _lookupTree<T>(
   final segment = caseSensitive ? rawSegment : rawSegment.toLowerCase();
 
   // 1. Static
-  final staticChild = node.statics?[segment];
-  if (staticChild != null) {
-    final match = _lookupTree(
-      staticChild,
-      method,
-      segments,
-      index + 1,
-      caseSensitive,
-    );
-    if (match != null) return match;
+  if (node.statics?[segment] case final staticChild?) {
+    if (_lookupTree(staticChild, method, segments, index + 1, caseSensitive)
+        case final match?) {
+      return match;
+    }
   }
 
   // 2. Param
   if (node.param != null) {
-    final match = _lookupTree(
-      node.param!,
-      method,
-      segments,
-      index + 1,
-      caseSensitive,
-    );
-    if (match != null) {
+    if (_lookupTree(node.param!, method, segments, index + 1, caseSensitive)
+        case final match?) {
       if (node.param!.hasRegexParam) {
         final exact =
             match.firstWhereOrNull(

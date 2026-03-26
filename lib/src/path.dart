@@ -8,8 +8,7 @@ String normalizePath(String path) {
   final segments = <String>[];
   for (final segment in path.split('/')) {
     switch (segment) {
-      case '':
-      case '.':
+      case '' || '.':
         continue;
       case '..':
         if (segments.isNotEmpty) segments.removeLast();

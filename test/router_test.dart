@@ -89,7 +89,7 @@ void main() {
       final router = Router<String>();
       router.add('/users/:id', 'user');
 
-      final params = router.find('/users/42')!.params!;
+      final params = router.find('/users/42')!.params;
       params['extra'] = 'ok';
 
       expect(params, {'id': '42', 'extra': 'ok'});
@@ -136,7 +136,7 @@ void main() {
 
       expect(router.find('/users/42')?.params, {'id': '42'});
       expect(router.find('/users')?.data, 'user');
-      expect(router.find('/users')?.params, isNull);
+      expect(router.find('/users')?.params, isEmpty);
     });
 
     test('supports repeated params with plus and star', () {
@@ -146,7 +146,7 @@ void main() {
 
       expect(router.find('/files'), isNull);
       expect(router.find('/files/a/b')?.params, {'path': 'a/b'});
-      expect(router.find('/assets')?.params, isNull);
+      expect(router.find('/assets')?.params, isEmpty);
       expect(router.find('/assets/a/b')?.params, {'rest': 'a/b'});
     });
 
@@ -195,7 +195,7 @@ void main() {
       router.add('/users{/:id}?', 'user');
       router.add('/blog/:id(\\d+){-:title}?', 'blog');
 
-      expect(router.find('/users')?.params, isNull);
+      expect(router.find('/users')?.params, isEmpty);
       expect(router.find('/users/42')?.params, {'id': '42'});
       expect(router.find('/blog/123')?.params, {'id': '123'});
       expect(router.find('/blog/123-post')?.params, {
@@ -274,7 +274,7 @@ void main() {
       expect(matches.map((m) => m.data), ['wildcard', 'param', 'static']);
       expect(matches[0].params, {'_': 'all'});
       expect(matches[1].params, {'id': 'all'});
-      expect(matches[2].params, isNull);
+      expect(matches[2].params, isEmpty);
     });
 
     test('findAll includes optional tail and exact route', () {
