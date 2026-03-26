@@ -180,26 +180,16 @@ List<RouteData<T>>? _lookupTree<T>(RouterNode<T> node, String method, List<Strin
   return null;
 }
 
-List<RouteMatch<T>> findAllRoutes<T>(
-  RouterNode<T> root,
-  bool caseSensitive,
-  String method,
-  String path,
-) {
+// dart format off
+List<RouteMatch<T>> findAllRoutes<T>(RouterNode<T> root, bool caseSensitive, String method, String path) {// dart format on
   final segments = splitPath(path);
   final matches = <RouteData<T>>[];
   _findAll(root, method, segments, 0, matches, caseSensitive);
   return matches.map((m) => m.materialize(segments)).toList();
 }
 
-void _findAll<T>(
-  RouterNode<T> node,
-  String method,
-  List<String> segments,
-  int index,
-  List<RouteData<T>> matches,
-  bool caseSensitive,
-) {
+// dart format off
+void _findAll<T>(RouterNode<T> node, String method, List<String> segments, int index, List<RouteData<T>> matches, bool caseSensitive) {// dart format on
   // 1. Wildcard
   if (node.wildcard?.methods != null) {
     final match =
@@ -231,8 +221,7 @@ void _findAll<T>(
     final segment = caseSensitive
         ? segments[index]
         : segments[index].toLowerCase();
-    final staticChild = node.statics?[segment];
-    if (staticChild != null) {
+    if (node.statics?[segment] case final staticChild?) {
       _findAll(
         staticChild,
         method,
@@ -251,13 +240,8 @@ void _findAll<T>(
   }
 }
 
-bool removeRoute<T>(
-  RouterNode<T> root,
-  Map<String, RouterNode<T>> staticRoutes,
-  bool caseSensitive,
-  String method,
-  String path,
-) {
+// dart format off
+bool removeRoute<T>(RouterNode<T> root, Map<String, RouterNode<T>> staticRoutes, bool caseSensitive, String method, String path) {// dart format on
   if (expandGroupDelimiters(path) case final groupExpanded?) {
     var removed = false;
     for (final p in groupExpanded) {
@@ -288,13 +272,8 @@ bool removeRoute<T>(
   return removed;
 }
 
-bool _remove<T>(
-  RouterNode<T> node,
-  String method,
-  List<String> segments,
-  int index,
-  bool caseSensitive,
-) {
+// dart format off
+bool _remove<T>(RouterNode<T> node, String method, List<String> segments, int index, bool caseSensitive) {// dart format on
   if (index == segments.length) {
     final methods = node.methods;
     if (methods == null || !methods.containsKey(method)) return false;
@@ -346,11 +325,8 @@ bool _isParamSegment(String segment) =>
 final _simpleParamRx = RegExp(r'^:[\w-]+$');
 final _modifierRx = RegExp(r'^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$');
 
-(SegmentPattern, int) compileSegmentPattern(
-  String segment,
-  bool caseSensitive,
-  int unnamedStart,
-) {
+// dart format off
+(SegmentPattern, int) compileSegmentPattern(String segment, bool caseSensitive, int unnamedStart) {// dart format on
   final regex = StringBuffer('^');
   final captureNames = <String>[];
   var nextUnnamed = unnamedStart;
@@ -457,10 +433,8 @@ int _findRegexEnd(String s, int start, int end) {
   throw FormatException('Unclosed regex in route: $s');
 }
 
-(String, List<String>, int) _rewriteUnnamedRegexGroups(
-  String pattern,
-  int unnamedStart,
-) {
+// dart format off
+(String, List<String>, int) _rewriteUnnamedRegexGroups(String pattern, int unnamedStart) {// dart format on
   final regex = StringBuffer();
   final captureNames = <String>[];
   var nextUnnamed = unnamedStart;
