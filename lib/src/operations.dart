@@ -190,7 +190,8 @@ List<RouteMatch<T>> findAllRoutes<T>(RouterNode<T> root, bool caseSensitive, Str
 
 // dart format off
 List<RouteData<T>> _resolveMatchedRoutes<T>(bool includeAny, String method, Map<String, List<RouteData<T>>> methods) {// dart format on
-  return includeAny ? [...?methods[''], ...?methods[method]] : methods[method] ?? methods[''] ?? const [];
+  if (includeAny) return [...?methods[''], ...?methods[method]];
+  return methods[method] ?? methods[''] ?? const [];
 }
 
 // dart format off
