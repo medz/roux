@@ -62,7 +62,7 @@ router.remove('GET', '/posts/:id');
 - `Router({bool caseSensitive = false, Cache<T>? cache})`
 - `void add(String path, T data, {String? method})`
 - `RouteMatch<T>? find(String path, {String? method})`
-- `List<RouteMatch<T>> findAll(String path, {String? method})`
+- `List<RouteMatch<T>> findAll(String path, {String? method, bool includeAny = false})`
 - `bool remove(String method, String path)`
 
 ### `RouteMatch`
@@ -155,7 +155,7 @@ print(router.find('/users/1', method: 'GET')?.data);  // get
 print(router.find('/users/1', method: 'POST')?.data); // any
 ```
 
-`findAll` returns only the selected method bucket:
+`findAll` prefers exact method matches and falls back to method-agnostic matches:
 
 ```dart
 final router = Router<String>();
@@ -164,6 +164,19 @@ router.add('/api/:id', 'get', method: 'GET');
 
 print(router.findAll('/api/1', method: 'GET').map((m) => m.data));
 // (get)
+print(router.findAll('/api/1', method: 'POST').map((m) => m.data));
+// (any)
+```
+
+Set `includeAny: true` to include method-agnostic matches before exact matches:
+
+```dart
+final router = Router<String>();
+router.add('/api/:id', 'any');
+router.add('/api/:id', 'get', method: 'GET');
+
+print(router.findAll('/api/1', method: 'GET', includeAny: true).map((m) => m.data));
+// (any, get)
 ```
 
 ## Cache
