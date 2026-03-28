@@ -1,3 +1,11 @@
+## 1.0.1
+
+### Fixed
+
+- Restore `findAll(...)` fallback to method-agnostic matches when the requested method bucket is missing.
+- Add `includeAny: true` to `findAll(...)` so method-agnostic matches can be included before exact-method matches.
+- Avoid duplicate method-agnostic entries when `includeAny` is used without a concrete method.
+
 ## 1.0.0
 
 ### Breaking Changes
