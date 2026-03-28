@@ -269,6 +269,15 @@ void main() {
         ['any'],
       );
     });
+
+    test('findAll does not duplicate any-method matches without a method', () {
+      final router = Router<String>();
+      router.add('/api/:id', 'any');
+
+      expect(router.findAll('/api/1', includeAny: true).map((m) => m.data), [
+        'any',
+      ]);
+    });
   });
 
   group('match priority', () {
