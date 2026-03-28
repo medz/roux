@@ -238,7 +238,7 @@ void main() {
       expect(router.find('/ping', method: 'GET')?.data, 'pong');
     });
 
-    test('findAll returns the selected method bucket only', () {
+    test('findAll prefers exact method and falls back to any-method', () {
       final router = Router<String>();
       router.add('/api/:id', 'any');
       router.add('/api/:id', 'get', method: 'GET');
@@ -249,6 +249,25 @@ void main() {
       expect(router.findAll('/api/1', method: 'POST').map((m) => m.data), [
         'any',
       ]);
+    });
+
+    test('findAll can include any-method matches before exact matches', () {
+      final router = Router<String>();
+      router.add('/api/:id', 'any');
+      router.add('/api/:id', 'get', method: 'GET');
+
+      expect(
+        router
+            .findAll('/api/1', method: 'GET', includeAny: true)
+            .map((m) => m.data),
+        ['any', 'get'],
+      );
+      expect(
+        router
+            .findAll('/api/1', method: 'POST', includeAny: true)
+            .map((m) => m.data),
+        ['any'],
+      );
     });
   });
 
