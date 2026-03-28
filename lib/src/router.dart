@@ -39,8 +39,9 @@ class Router<T> {
   }
 
   /// Returns all matches for [path] in broad-to-specific order.
-  List<RouteMatch<T>> findAll(String path, {String? method}) =>
-      findAllRoutes(_root, caseSensitive, _m(method), normalizePath(path));
+  // dart format off
+  List<RouteMatch<T>> findAll(String path, {String? method, bool includeAny = false}) =>
+      findAllRoutes(_root, caseSensitive, _m(method), normalizePath(path), includeAny); // dart format on
 
   /// Removes all routes stored under the exact method and path pattern.
   bool remove(String method, String path) {

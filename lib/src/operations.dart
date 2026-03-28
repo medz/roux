@@ -181,36 +181,36 @@ List<RouteData<T>>? _lookupTree<T>(RouterNode<T> node, String method, List<Strin
 }
 
 // dart format off
-List<RouteMatch<T>> findAllRoutes<T>(RouterNode<T> root, bool caseSensitive, String method, String path) {// dart format on
+List<RouteMatch<T>> findAllRoutes<T>(RouterNode<T> root, bool caseSensitive, String method, String path, bool includeAny) {// dart format on
   final segments = splitPath(path);
   final matches = <RouteData<T>>[];
-  _findAll(root, method, segments, 0, matches, caseSensitive);
+  _findAll(root, method, segments, 0, matches, caseSensitive, includeAny);
   return matches.map((m) => m.materialize(segments)).toList();
 }
 
 // dart format off
-void _findAll<T>(RouterNode<T> node, String method, List<String> segments, int index, List<RouteData<T>> matches, bool caseSensitive) {// dart format on
+List<RouteData<T>> _resolveMatchedRoutes<T>(bool includeAny, String method, Map<String, List<RouteData<T>>> methods) {// dart format on
+  return [...?methods[method], if (includeAny) ...?methods['']];
+}
+
+// dart format off
+void _findAll<T>(RouterNode<T> node, String method, List<String> segments, int index, List<RouteData<T>> matches, bool caseSensitive, bool includeAny) {// dart format on
   // 1. Wildcard
   if (node.wildcard?.methods != null) {
-    final match =
-        node.wildcard!.methods![method] ?? node.wildcard!.methods![''];
-    if (match != null) matches.addAll(match);
+    // dart format off
+    final match = _resolveMatchedRoutes(includeAny, method, node.wildcard!.methods!); // dart format on
+    if (match.isNotEmpty) matches.addAll(match);
   }
 
   // 2. Param
   if (node.param != null) {
     if (index < segments.length) {
-      _findAll(
-        node.param!,
-        method,
-        segments,
-        index + 1,
-        matches,
-        caseSensitive,
-      );
+      // dart format off
+      _findAll(node.param!, method, segments, index + 1, matches, caseSensitive, includeAny); // dart format on
     } else if (node.param!.methods != null) {
-      final match = node.param!.methods![method] ?? node.param!.methods![''];
-      if (match != null && match.first.paramsMap?.last.optional == true) {
+      // dart format off
+      final match = _resolveMatchedRoutes(includeAny, method, node.param!.methods!); // dart format on
+      if (match.isNotEmpty && match.first.paramsMap?.last.optional == true) {
         matches.addAll(match);
       }
     }
@@ -222,21 +222,16 @@ void _findAll<T>(RouterNode<T> node, String method, List<String> segments, int i
         ? segments[index]
         : segments[index].toLowerCase();
     if (node.statics?[segment] case final staticChild?) {
-      _findAll(
-        staticChild,
-        method,
-        segments,
-        index + 1,
-        matches,
-        caseSensitive,
-      );
+      // dart format off
+      _findAll(staticChild, method, segments, index + 1, matches, caseSensitive, includeAny); // dart format on
     }
   }
 
   // 4. End of path
   if (index == segments.length && node.methods != null) {
-    final match = node.methods![method] ?? node.methods![''];
-    if (match != null) matches.addAll(match);
+    // dart format off
+    final match = _resolveMatchedRoutes(includeAny, method, node.methods!); // dart format on
+    if (match.isNotEmpty) matches.addAll(match);
   }
 }
 
