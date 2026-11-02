@@ -2,6 +2,117 @@ import 'package:roux/roux.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('regex prefixes stay searchable as the common prefix shortens', () {
+    final router = Router<int>();
+    const prefixes = ['abcd-a', 'abcd-b', 'azzz-c', 'qb', 'abc'];
+    for (var i = 0; i < prefixes.length; i++) {
+      router.add(
+        '/r/:id(${prefixes[i]}'
+        r'\d+)',
+        i,
+      );
+      for (var j = 0; j <= i; j++) {
+        final id = '${prefixes[j].toUpperCase()}42';
+        final match = router.find('/r/$id');
+        expect(match?.data, j);
+        expect(match?.params['id'], id);
+      }
+    }
+    expect(router.find('/r/wrong42'), isNull);
+  });
+
+  test('literal selectors round-trip short, long and Unicode text', () {
+    for (final sensitive in [true, false]) {
+      final router = Router<String>(caseSensitive: sensitive);
+      const keys = [
+        'a',
+        'A',
+        'a\x00',
+        '\x00a',
+        'K',
+        'k',
+        'İ',
+        'i\u0307',
+        'ABcd',
+        'long-service-name',
+      ];
+      final byKey = <String, List<String>>{};
+      for (final key in keys) {
+        router.add('/$key/item/:id', key);
+        (byKey[sensitive ? key : key.toLowerCase()] ??= []).add(key);
+      }
+      router.add('/:parent/item/:id', 'fallback');
+      for (final key in keys) {
+        final expected = byKey[sensitive ? key : key.toLowerCase()]!;
+        final path = '/$key/item/é';
+        expect(router.find(path)?.data, expected.first);
+        expect(router.find(path)?.params, {'id': 'é'});
+        expect(router.findAll(path).map((m) => m.data), [
+          'fallback',
+          ...expected,
+        ]);
+      }
+      expect(router.remove('', '/ABcd/item/:other'), isTrue);
+      expect(router.find('/ABcd/item/x')?.data, 'fallback');
+    }
+  });
+
+  test('literal rows keep nullable payloads, method order and duplicates', () {
+    final router = Router<Object?>();
+    final payload = ['data'];
+    router.add('/rows/a', null);
+    for (var i = 0; i < 12; i++) {
+      router.add('/rows/a', i, method: ' x-$i ');
+    }
+    router.add('/rows/a', payload, method: 'X-9');
+    expect(router.find('/rows/a', method: 'OTHER')!.data, isNull);
+    expect(router.find('/ROWS/./a', method: ' x-9 ')!.data, 9);
+    expect(
+      router
+          .findAll('/rows/a', method: 'x-9', includeAny: true)
+          .map((m) => m.data),
+      [null, 9, same(payload)],
+    );
+    for (var i = 11; i >= 0; i--) {
+      expect(router.remove('x-$i', 'rows//a/'), isTrue);
+    }
+    expect(router.remove('', '/rows/a'), isTrue);
+    router.add('/rows/a', payload, method: 'CUSTOM');
+    expect(router.find('/rows/a', method: 'custom')!.data, same(payload));
+  });
+
+  test(
+    'shared suffixes preserve precedence through removal and new shapes',
+    () {
+      final router = Router<int>();
+      for (final id in ['red', 'green', 'blue']) {
+        router.add('/org/$id/u/:User/FILES/:File', 1, method: 'READ');
+      }
+      router.add('/org/blue/u/:User/FILES/:File', 2, method: 'READ');
+      const query = '/org/blue/u/Alice/files/README';
+      expect(router.remove('READ', '/org/blue/unrelated/:x'), isFalse);
+      final all = router.findAll(query, method: 'read', includeAny: true);
+      expect(all.map((m) => m.data), [1, 2]);
+      expect(all[0].params, {'User': 'Alice', 'File': 'README'});
+      all[0].params.clear();
+      expect(all[1].params.keys, ['User', 'File']);
+      expect(router.find('/org/red/u/x/files/y', method: 'READ')!.data, 1);
+      expect(router.remove('read', '/org/green/u/:other/files/:name'), isTrue);
+      router.add('/org/blue/u/Alice/files/README', 3);
+      expect(router.find(query, method: 'read')!.data, 3);
+      router.add('/org/blue/u/:who/files/:which', 4, method: 'READ');
+      router.add('/:head/**:rest', 0);
+      expect(
+        router
+            .findAll(query, method: 'read', includeAny: true)
+            .map((m) => m.data),
+        [0, 1, 2, 4, 3],
+      );
+      expect(router.remove('READ', '/org/blue/u/:x/files/:y'), isTrue);
+      expect(router.find('/org/green/u/A/files/B', method: 'READ')!.data, 0);
+    },
+  );
+
   group('basic add and find', () {
     test('returns null when no routes are registered', () {
       expect(Router<String>().find('/users/42'), isNull);

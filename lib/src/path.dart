@@ -5,7 +5,8 @@ List<String> normalizedSegments(String path) {
   if (path.isEmpty || path == '/') return <String>[];
   final segments = path.split('/');
   var used = 0;
-  for (final segment in segments) {
+  for (var i = 0; i < segments.length; i++) {
+    final segment = segments[i];
     final length = segment.length;
     if (length == 0) continue;
     if (length <= 2 &&

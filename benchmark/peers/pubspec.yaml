@@ -1,0 +1,12 @@
+name: roux_peer_benchmark
+publish_to: none
+environment:
+  sdk: ^3.10.0
+dependencies:
+  roux:
+    path: ../..
+  relic_core: 1.2.0
+  shelf: 1.4.3
+  shelf_router: 1.1.5
+dev_dependencies:
+  lints: ^6.0.0
