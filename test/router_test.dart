@@ -257,7 +257,12 @@ void main() {
 
   group('params and patterns', () {
     test('preserves capture positions across literal runs', () {
-      final router = Router<int>()..add('/a/:x/b/c/d/:y/**:tail', 1);
+      final router = Router<int>()
+        ..add('/a/:x/b/c/d/:y/**:tail', 1)
+        ..add('/one/long/literal/prefix/**:tail', 2);
+      expect(router.find('/one/long/literal/prefix/x/y')?.params, {
+        'tail': 'x/y',
+      });
       expect(router.find('/a/one/b/c/d/two/three/four')?.params, {
         'x': 'one',
         'y': 'two',

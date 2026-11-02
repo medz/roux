@@ -172,39 +172,31 @@ class RouteBucket<T> {
   }
 
   RouteMatch<T>? match(List<String> segments, bool optionalTail) {
+    List<RouteData<T>>? ties;
     final groups = _groups;
     if (groups != null) {
-      final index = routes.first.constraintDepth - 1, width = _width!;
-      if (index >= segments.length) return null;
-      final text = segments[index];
+      final i = routes.first.constraintDepth - 1, width = _width!;
+      if (i >= segments.length) return null;
+      final text = segments[i];
       if (text.length < width) return null;
       final key = _groupKey(text, text.length);
-      if (key == -1) return _best(routes, segments, optionalTail);
-      final first = groups[key];
-      if (first == null) return null;
-      final ties = _ties?[key];
-      if (ties == null) {
-        return first.match(segments, optionalTail: optionalTail);
+      if (key != -1) {
+        final first = groups[key];
+        if (first == null) return null;
+        ties = _ties?[key];
+        if (ties == null) {
+          return first.match(segments, optionalTail: optionalTail);
+        }
       }
-      return _best(ties, segments, optionalTail, sameDepth: true);
     }
-    return _best(routes, segments, optionalTail);
-  }
-
-  RouteMatch<T>? _best(
-    List<RouteData<T>> candidates,
-    List<String> segments,
-    bool optionalTail, {
-    bool sameDepth = false,
-  }) {
     RouteMatch<T>? best;
     var bestDepth = -1;
-    for (final route in candidates) {
+    for (final route in ties ?? routes) {
       final depth = route.constraintDepth;
       if (depth <= bestDepth) continue;
       final found = route.match(segments, optionalTail: optionalTail);
       if (found == null) continue;
-      if (sameDepth || route.params.isEmpty || depth == segments.length) {
+      if (ties != null || route.plan == null || depth == segments.length) {
         return found;
       }
       best = found;
@@ -238,8 +230,9 @@ class RouteData<T> extends RouteEntry<RouteData<T>> {
   RouteData<T> get entry => this;
   RouteData(super.key, this.data);
   final T data;
-  // Integers skip literal segments between capture keys.
-  List<Object> params = const [];
+  // A single capture uses its key directly. Longer plans store the gaps between keys.
+  Object? plan;
+  int captureStart = 0;
   RouteBucket<T>? alternatives;
   int constraintDepth = 0;
   SegmentPattern? lastConstraint;
@@ -252,13 +245,16 @@ extension RouteMatching<T> on RouteData<T> {
     bool allowPartial = false,
     bool optionalTail = false,
   }) {
+    final item = plan, items = item is List<Object> ? item : null;
     if (optionalTail) {
-      final tail = params.last;
+      final tail = items?.last ?? item;
       if (tail is! Wildcard || !tail.optional) return null;
     }
     final captures = Captures();
-    var index = 0;
-    for (final key in params) {
+    var index = captureStart;
+    final count = items?.length ?? (item == null ? 0 : 1);
+    for (var n = 0; n < count; n++) {
+      final key = items == null ? item : items[n];
       if (key is int) {
         index += key;
         continue;

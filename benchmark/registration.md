@@ -2,7 +2,7 @@
 
 Measured 2026-11-03 on macOS 27.2 arm64 with Dart 3.13.7, Relic Core 1.2.0 and shelf_router 1.1.5 with Shelf 1.4.3. Every multiplier divides the peer’s time or memory by Roux’s. A value of 2× means Roux used half as much. A value below 1× means the peer won.
 
-Of 94 peer comparisons, 24 reached 10×, 70 reached parity but fell short of 10×, and 0 fell below parity. Roux exceeded the release median in 0 of 157 timing and memory cells. The separate high-resolution Node wildcard registration probe measured 833.5 ns/route versus 797.1 in 2.0.0 (+4.57%).
+Of 94 peer comparisons, 24 reached 10×, 70 reached parity but fell short of 10×, and 0 fell below parity. Roux exceeded the release median in 0 of 157 timing and memory cells. The separate high-resolution Node wildcard registration probe measured 678.5 ns/route versus 776.6 in 2.0.0 (-12.63%).
 
 ## Registration time (ns per route)
 
@@ -10,22 +10,22 @@ All peer configurations use the same candidate AOT executable for a given fixtur
 
 | Table | Roux | Relic | Relic NoCache | shelf_router |
 | --- | ---: | ---: | ---: | ---: |
-| Static | 77.2 | 527.9 (6.84×) | 435.3 (5.64×) | 1,458.1 (18.89×) |
-| Two parameters | 87.9 | 907.5 (10.32×) | 765.2 (8.71×) | 3,202.6 (36.43×) |
-| Four methods | 80.4 | 231.4 (2.88×) | 371.1 (4.62×) | 940.0 (11.69×) |
-| Mixed structures | 359.2 | 911.8 (2.54×) | 780.4 (2.17×) | 1,973.8 (5.49×) |
-| Distinct first segments | 104.4 | 674.1 (6.46×) | 599.5 (5.74×) | 2,125.3 (20.36×) |
-| Deep static | 188.9 | 1,363.1 (7.22×) | 1,174.1 (6.22×) | 2,917.6 (15.45×) |
-| Long opaque parameter-table keys | 161.9 | 1,137.9 (7.03×) | 907.6 (5.61×) | 3,870.3 (23.91×) |
+| Static | 74.1 | 525.3 (7.09×) | 436.0 (5.88×) | 1,456.9 (19.66×) |
+| Two parameters | 89.9 | 912.9 (10.15×) | 791.8 (8.81×) | 3,239.2 (36.03×) |
+| Four methods | 78.6 | 239.7 (3.05×) | 377.3 (4.80×) | 938.9 (11.95×) |
+| Mixed structures | 350.7 | 914.7 (2.61×) | 786.9 (2.24×) | 1,989.3 (5.67×) |
+| Distinct first segments | 104.3 | 682.5 (6.54×) | 599.2 (5.74×) | 2,156.4 (20.67×) |
+| Deep static | 183.6 | 1,383.5 (7.54×) | 1,184.1 (6.45×) | 2,933.9 (15.98×) |
+| Long opaque parameter-table keys | 161.9 | 1,144.1 (7.07×) | 921.5 (5.69×) | 3,872.9 (23.92×) |
 
 Late registration adds one differently shaped POST route to an existing two-parameter table. The single-add probe reports medians of 35 additions in each of eleven fresh processes. The seven-process batch cross-check times one addition on each of 48 independent routers at size 128, or eight at size 8,192. It uses a distinct path per router. Table construction and verification are outside both timers. The single-add rows count toward the score. All timings are ns per added route.
 
 | Probe / existing routes | Checkpoint e47c912 | Roux | Relic | Relic NoCache | shelf_router | Roux wins vs NoCache |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Single / 128 | 583.0 | 375.0 | 625.0 (1.67×) | 542.0 (1.45×) | 1,167.0 (3.11×) | 10/11 |
-| Single / 8,192 | 709.0 | 459.0 | 1,000.0 (2.18×) | 709.0 (1.54×) | 1,750.0 (3.81×) | 11/11 |
-| Batch / 128 | 579.0 | 405.4 | 702.3 (1.73×) | 616.3 (1.52×) | 1,272.6 (3.14×) | 7/7 |
-| Batch / 8,192 | 588.5 | 401.0 | 1,505.3 (3.75×) | 1,171.9 (2.92×) | 3,046.9 (7.60×) | 7/7 |
+| Single / 128 | 625.0 | 375.0 | 666.0 (1.78×) | 583.0 (1.55×) | 1,167.0 (3.11×) | 10/11 |
+| Single / 8,192 | 750.0 | 458.0 | 1,000.0 (2.18×) | 708.0 (1.55×) | 1,750.0 (3.82×) | 11/11 |
+| Batch / 128 | 565.1 | 364.6 | 704.9 (1.93×) | 619.8 (1.70×) | 1,279.5 (3.51×) | 7/7 |
+| Batch / 8,192 | 588.6 | 369.8 | 1,500.0 (4.06×) | 1,177.1 (3.18×) | 3,187.5 (8.62×) | 7/7 |
 
 ## Retained router heap (bytes per route)
 
@@ -36,7 +36,7 @@ Median of three Dart VM retained-size measurements after forced GC at 8,192 regi
 | Static | 56.0 | 232.1 (4.14×) | 264.0 (4.71×) | 632.0 (11.28×) |
 | Two parameters | 56.1 | 1,128.1 (20.10×) | 1,224.0 (21.81×) | 1,240.0 (22.09×) |
 | Four methods | 26.1 | 58.1 (2.23×) | 66.0 (2.53×) | 298.0 (11.44×) |
-| Mixed structures | 406.0 | 754.1 (1.86×) | 826.0 (2.03×) | 954.0 (2.35×) |
+| Mixed structures | 378.0 | 754.1 (1.99×) | 826.0 (2.19×) | 954.0 (2.52×) |
 | Distinct first segments | 56.1 | 680.0 (12.12×) | 744.0 (13.26×) | 1,144.0 (20.38×) |
 | Deep static | 104.0 | 1,322.6 (12.71×) | 1,482.7 (14.25×) | 2,010.8 (19.33×) |
 | Long opaque parameter-table keys | 72.2 | 1,128.1 (15.63×) | 1,240.1 (17.18×) | 1,304.1 (18.07×) |
@@ -55,15 +55,15 @@ Each fresh AOT process constructs 32,768 routes, including incremental input gen
 
 | Table | Roux | Relic | Relic NoCache | shelf_router |
 | --- | ---: | ---: | ---: | ---: |
-| Static | 19.23 | 59.62 (3.10×) | 46.25 (2.40×) | 68.09 (3.54×) |
-| Two parameters | 23.47 | 83.50 (3.56×) | 82.80 (3.53×) | 86.61 (3.69×) |
-| Four methods | 21.98 | 31.45 (1.43×) | 24.61 (1.12×) | 54.88 (2.50×) |
-| Mixed structures | 42.73 | 78.75 (1.84×) | 69.89 (1.64×) | 77.69 (1.82×) |
-| Distinct first segments | 23.83 | 78.05 (3.28×) | 59.91 (2.51×) | 84.05 (3.53×) |
-| Deep static | 21.09 | 96.73 (4.59×) | 89.06 (4.22×) | 104.58 (4.96×) |
-| Long opaque parameter-table keys | 24.41 | 88.77 (3.64×) | 77.86 (3.19×) | 87.89 (3.60×) |
+| Static | 19.23 | 59.52 (3.09×) | 46.23 (2.40×) | 68.03 (3.54×) |
+| Two parameters | 23.42 | 83.52 (3.57×) | 82.75 (3.53×) | 85.94 (3.67×) |
+| Four methods | 21.97 | 31.44 (1.43×) | 24.58 (1.12×) | 55.45 (2.52×) |
+| Mixed structures | 40.20 | 78.70 (1.96×) | 69.94 (1.74×) | 77.69 (1.93×) |
+| Distinct first segments | 23.78 | 78.02 (3.28×) | 59.91 (2.52×) | 84.03 (3.53×) |
+| Deep static | 21.05 | 96.72 (4.60×) | 88.98 (4.23×) | 104.55 (4.97×) |
+| Long opaque parameter-table keys | 24.39 | 88.75 (3.64×) | 77.84 (3.19×) | 87.84 (3.60×) |
 
-The zero-route process control measured Roux 2.0.0 12.92 MiB, Roux research 13.05 MiB, Relic 13.05 MiB, Relic NoCache 13.06 MiB, shelf_router 13.09 MiB. It is excluded from the workload count.
+The zero-route process control measured Roux 2.0.0 12.94 MiB, Roux research 13.02 MiB, Relic 13.02 MiB, Relic NoCache 13.05 MiB, shelf_router 13.08 MiB. It is excluded from the workload count.
 
 ## Pure lookup (ns per request)
 
@@ -71,12 +71,12 @@ The shuffled workload has 256 static and 256 two-parameter GET routes. The endpo
 
 | Workload | Roux | Relic | Relic NoCache |
 | --- | ---: | ---: | ---: |
-| static | 38.0 | 145.3 (3.82×) | 397.5 (10.46×) |
-| params-4k | 196.6 | 315.4 (1.60×) | 721.2 (3.67×) |
-| params-32k | 199.6 | 4,368.1 (21.88×) | 728.0 (3.65×) |
-| miss-4k | 138.1 | 206.8 (1.50×) | 599.3 (4.34×) |
-| miss-32k | 141.5 | 4,199.5 (29.68×) | 607.8 (4.30×) |
-| Nested regex | 166.6 | 384.3 (2.31×) | 624.7 (3.75×) |
+| static | 38.0 | 145.7 (3.83×) | 398.7 (10.49×) |
+| params-4k | 196.6 | 319.9 (1.63×) | 721.0 (3.67×) |
+| params-32k | 199.9 | 4,414.1 (22.08×) | 726.8 (3.64×) |
+| miss-4k | 138.1 | 207.1 (1.50×) | 599.2 (4.34×) |
+| miss-32k | 141.0 | 4,202.6 (29.81×) | 606.3 (4.30×) |
+| Nested regex | 170.8 | 402.8 (2.36×) | 627.7 (3.68×) |
 
 ## Shelf HTTP dispatch (ns per request)
 
@@ -84,10 +84,10 @@ Both sides dispatch the same pregenerated Shelf requests and construct equivalen
 
 | Workload | Roux + Shelf | shelf_router |
 | --- | ---: | ---: |
-| static | 317.0 | 2,318.4 (7.31×) |
-| params-4k | 463.7 | 3,273.0 (7.06×) |
-| miss-4k | 404.3 | 864.5 (2.14×) |
-| Nested regex | 419.1 | 2,509.7 (5.99×) |
+| static | 317.1 | 2,295.4 (7.24×) |
+| params-4k | 465.3 | 3,250.8 (6.99×) |
+| miss-4k | 404.3 | 865.0 (2.14×) |
+| Nested regex | 426.1 | 2,531.6 (5.94×) |
 
 ## 10× target
 
@@ -101,7 +101,7 @@ Each cell represents one workload, metric and peer configuration. Cells receive 
 
 The smallest peer-to-Roux ratio was 1.12× against Relic NoCache on Peak RSS / Four methods.
 
-At the four-method peak RSS of 24.61 MiB for Relic NoCache, a 10× result would require Roux to stay within 2.46 MiB. This Roux AOT executable measured 13.05 MiB with zero registrations.
+At the four-method peak RSS of 24.58 MiB for Relic NoCache, a 10× result would require Roux to stay within 2.46 MiB. This Roux AOT executable measured 13.02 MiB with zero registrations.
 
 ## Regression gate against Roux 2.0.0
 
@@ -109,7 +109,7 @@ The release snapshot is aec52fa. Native AOT timings use five initial process pai
 
 | Suite / case | Pairs | 2.0.0 | Research | Paired delta | Slower pairs |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| lookup / regex32 | 11 | 164.1 | 157.6 | -6.6 | 0 |
+| lookup / regex32 | 11 | 164.6 | 156.6 | -7.9 | 0 |
 | js-registration / wildcard | 5 | 732.4 | 732.4 | +0.0 | 0 |
 
 The release gate covers 157 timing and memory cells, including the parameter-table RSS sweep from 4,096 to 131,072 routes. All pooled medians were at or below the release.
@@ -122,20 +122,20 @@ The Node clock resolves to 244.1 ns per route in the 4,096-route registration pr
 
 | Node wildcard registrations | 2.0.0 | Checkpoint | Roux | Change vs 2.0.0 |
 | --- | ---: | ---: | ---: | ---: |
-| 16,384 | 915.5 | 671.4 | 732.4 | -20.00% |
-| 32,768 | 946.0 | 671.4 | 671.4 | -29.03% |
+| 16,384 | 915.5 | 732.4 | 671.4 | -26.66% |
+| 32,768 | 976.6 | 640.9 | 640.9 | -34.37% |
 
 A separate seven-process run at 4,096 routes uses Node’s performance.now through dart2js’s window.performance clock adapter. The router and Dart benchmark sources are identical. This diagnostic does not replace the original Node readings.
 
 | High-resolution Node registration | 2.0.0 | Checkpoint | Roux | Change vs 2.0.0 |
 | --- | ---: | ---: | ---: | ---: |
-| static | 824.7 | 129.4 | 129.2 | -84.33% |
-| params | 1,655.8 | 157.5 | 159.9 | -90.34% |
-| wildcard | 797.1 | 781.0 | 833.5 | +4.57% |
-| nested | 5,016.6 | 4,045.2 | 4,092.0 | -18.43% |
-| indexed | 2,163.1 | 1,872.8 | 1,903.1 | -12.02% |
-| methods | 714.8 | 116.0 | 119.1 | -83.34% |
-| optional | 2,157.5 | 1,815.2 | 1,800.3 | -16.56% |
+| static | 817.4 | 129.2 | 124.5 | -84.77% |
+| params | 1,608.2 | 159.2 | 157.0 | -90.24% |
+| wildcard | 776.6 | 819.6 | 678.5 | -12.63% |
+| nested | 5,010.7 | 4,084.2 | 3,817.9 | -23.81% |
+| indexed | 2,173.6 | 1,910.6 | 1,706.1 | -21.51% |
+| methods | 710.0 | 115.7 | 118.9 | -83.25% |
+| optional | 2,144.8 | 1,776.4 | 1,723.9 | -19.62% |
 
 ## Checkpoint comparison
 
@@ -143,56 +143,45 @@ Same-machine measurements against the pre-change commit e47c912. Timings are in 
 
 | Workload | Checkpoint | Roux | Change |
 | --- | ---: | ---: | ---: |
-| peer-reg-static / add | 73.1 | 77.2 | +5.61% |
-| peer-reg-params / add | 89.5 | 87.9 | -1.79% |
-| peer-reg-methods / add | 78.5 | 80.4 | +2.42% |
-| peer-rss-params / peak | 23.4 | 23.5 | +0.20% |
-| peer-reg-mixed / add | 445.3 | 359.2 | -19.34% |
-| peer-reg-heads / add | 103.5 | 104.4 | +0.87% |
-| peer-reg-deep / add | 176.6 | 188.9 | +6.96% |
-| peer-reg-opaque / add | 161.0 | 161.9 | +0.56% |
-| checkpoint-public / regex32 | 170.7 | 157.6 | -7.67% |
-| checkpoint-public / hot /nested/Report-42 | 165.5 | 181.5 | +9.67% |
+| peer-reg-static / add | 75.9 | 74.1 | -2.37% |
+| peer-reg-params / add | 90.2 | 89.9 | -0.33% |
+| peer-reg-methods / add | 77.7 | 78.6 | +1.16% |
+| peer-rss-params / peak | 23.5 | 23.4 | -0.33% |
+| peer-reg-mixed / add | 446.1 | 350.7 | -21.39% |
+| peer-reg-heads / add | 108.0 | 104.3 | -3.43% |
+| peer-reg-deep / add | 178.1 | 183.6 | +3.09% |
+| peer-reg-opaque / add | 160.8 | 161.9 | +0.68% |
+| checkpoint-public / regex32 | 172.9 | 156.9 | -9.25% |
+| checkpoint-public / hot /nested/Report-42 | 167.6 | 180.1 | +7.46% |
 | peer / params | 56.1 | 56.1 | -0.02% |
-| peer / mixed | 406.0 | 406.0 | -0.00% |
+| peer / mixed | 406.0 | 378.0 | -6.90% |
 
-58 of these 95 checkpoint medians increased. The following list includes every increase of at least 5%. Smaller changes and the complete raw samples are in results/summary.json and results/memory.jsonl. The 5% cutoff is used only to shorten this list. The release gate above counts every increase.
+45 of these 95 checkpoint medians increased. The following list includes every increase of at least 5%. Smaller changes and the complete raw samples are in results/summary.json and results/memory.jsonl. The 5% cutoff is used only to shorten this list. The release gate above counts every increase.
 
 | Candidate at least 5% above checkpoint | Checkpoint | Roux | Change |
 | --- | ---: | ---: | ---: |
-| peer-reg-static / add | 73.1 | 77.2 | +5.61% |
-| peer-reg-deep / add | 176.6 | 188.9 | +6.96% |
-| checkpoint-public / params | 130.9 | 137.8 | +5.27% |
-| checkpoint-public / regex | 108.1 | 118.6 | +9.71% |
-| checkpoint-public / hot /nested/Report-42 | 165.5 | 181.5 | +9.67% |
-| checkpoint-hot / param | 79.0 | 83.4 | +5.57% |
-| checkpoint-hot / regex | 93.7 | 99.5 | +6.19% |
-| checkpoint-hot / embedded | 130.8 | 143.7 | +9.86% |
-| checkpoint-hot / two-regex | 216.4 | 234.6 | +8.41% |
-| checkpoint-extra / root | 16.9 | 19.5 | +15.38% |
-| checkpoint-extra / empty | 16.1 | 18.5 | +14.91% |
-| checkpoint-cold / params | 184.1 | 200.1 | +8.69% |
-| checkpoint-cold / nested | 296.6 | 314.2 | +5.93% |
-| checkpoint-cold / fallback | 414.2 | 436.4 | +5.36% |
-| checkpoint-cold / duplicate-all | 599.7 | 647.0 | +7.89% |
-| checkpoint-remove / ascending | 63.3 | 87.6 | +38.39% |
-| checkpoint-remove / descending | 68.8 | 96.2 | +39.83% |
-| checkpoint-remove / alternating | 68.0 | 92.3 | +35.74% |
-| checkpoint-remove / random | 79.2 | 103.4 | +30.56% |
-| checkpoint-remove / churn | 134.7 | 172.7 | +28.21% |
-| checkpoint-tails / tail-1 | 71.3 | 79.0 | +10.80% |
-| checkpoint-peer-lookups / params-4k | 184.6 | 195.8 | +6.07% |
-| checkpoint-peer-lookups / miss-4k | 126.6 | 138.3 | +9.24% |
-| checkpoint-peer-lookups / miss-32k | 130.3 | 140.3 | +7.67% |
-| checkpoint-dispatch / params-4k | 442.1 | 465.1 | +5.20% |
-| checkpoint-dispatch / miss-4k | 385.3 | 404.9 | +5.09% |
-| checkpoint-reg-wildcard / wildcard | 357.7 | 380.5 | +6.37% |
+| checkpoint-public / params | 132.6 | 140.0 | +5.58% |
+| checkpoint-public / hot /nested/Report-42 | 167.6 | 180.1 | +7.46% |
+| checkpoint-hot / param | 79.8 | 87.5 | +9.65% |
+| checkpoint-hot / regex | 93.8 | 99.2 | +5.76% |
+| checkpoint-hot / embedded | 131.9 | 140.9 | +6.82% |
+| checkpoint-hot / two-regex | 217.5 | 232.6 | +6.94% |
+| checkpoint-hot / rotating | 81.0 | 85.9 | +6.05% |
+| checkpoint-extra / root | 16.8 | 21.4 | +27.38% |
+| checkpoint-extra / empty | 16.4 | 20.3 | +23.78% |
+| checkpoint-cold / params | 185.5 | 199.1 | +7.33% |
+| checkpoint-cold / nested | 290.0 | 316.9 | +9.28% |
+| checkpoint-cold / duplicate-all | 601.6 | 641.4 | +6.62% |
+| checkpoint-tails / tail-1 | 73.0 | 81.4 | +11.51% |
+| checkpoint-peer-lookups / params-4k | 184.8 | 196.9 | +6.55% |
+| checkpoint-peer-lookups / miss-4k | 128.1 | 138.8 | +8.35% |
+| checkpoint-peer-lookups / miss-32k | 129.6 | 140.5 | +8.41% |
 
 ## Implementation size
 
 Literal routes hold payloads directly. Parameter routes with a common shape share their capture names and keep one handler row per differing segment. When a new shape overlaps, the trie expands only that row.
 
-The candidate contains 1,527 physical Dart source lines under lib/. The checkpoint has 1,530 (-3 lines in the candidate) and the release has 814. The shared branch uses the existing single-child store and allocates a sibling map only when it needs a second concrete child. Registration and removal reuse the literal prefix they already decoded. Wildcards and constraints share the same capture-position plan. The regex index hashes only the variable portion of a common prefix, retaining registration order for collisions and checking the complete regex before accepting a result.
+The candidate contains 1,529 physical Dart source lines under lib/. The checkpoint has 1,530 (-1 lines in the candidate) and the release has 814. The shared branch uses the existing single-child store and allocates a sibling map only when it needs a second concrete child. Registration and removal reuse the literal prefix they already decoded. A route with one capture stores its key and position directly. Routes with multiple captures store the gaps between keys. Row maps compact when deletions bring them down to a quarter of their earlier size. The regex index hashes only the variable portion of a common prefix, retaining registration order for collisions and checking the complete regex before accepting a result.
 
 ## Reproduction
 

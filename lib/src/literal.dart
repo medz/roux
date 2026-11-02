@@ -34,7 +34,7 @@ class _Methods {
 class Bindings<T> {
   var _rows = <String, Object>{};
   final _names = <String>[];
-  int _deletions = 0;
+  int _peak = 0;
   bool get isEmpty => _rows.isEmpty;
   bool contains(String key) => _rows.containsKey(key);
   T _value(Object item) => (identical(item, _nil) ? null : item) as T;
@@ -89,10 +89,12 @@ class Bindings<T> {
   }
 
   Object? _drop(String key) {
+    final size = _rows.length;
+    if (size > _peak) _peak = size;
     final row = _rows.remove(key);
-    if (++_deletions > _rows.length) {
+    if (_rows.length * 4 <= _peak) {
       _rows = Map.of(_rows);
-      _deletions = 0;
+      _peak = _rows.length;
     }
     return row;
   }
@@ -165,8 +167,6 @@ class Bindings<T> {
 class LiteralRoutes<T> extends Bindings<T> {
   int _heads = 0, _depths = 0;
   bool hasHead(int c) => c >= 128 || _heads & (1 << (c & 31)) != 0;
-  @pragma('vm:prefer-inline')
-  bool possible(String path) => path.length > 1 && hasHead(path.codeUnitAt(1));
   void addLiteral(String key, String method, T data, int depth) {
     final h = key.codeUnitAt(1) & 31;
     _heads |= 1 << h;
@@ -201,7 +201,7 @@ class LiteralRoutes<T> extends Bindings<T> {
     List<RouteMatch<T>> matches,
   ) {
     var key = raw;
-    if (!possible(raw) || !contains(raw)) {
+    if (raw.length <= 1 || !hasHead(raw.codeUnitAt(1)) || !contains(raw)) {
       final normalized = normalizedKey(raw, parts, sensitive);
       if (normalized == null) return;
       key = normalized;

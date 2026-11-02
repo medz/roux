@@ -354,14 +354,20 @@ void _insert<T>(
       route.constraintDepth = i + 1;
       unnamedIndex = next;
     }
-    final plan = params ??= [];
-    if (i > nextCapture) plan.add(i - nextCapture);
-    plan.add(capture);
+    final first = route.plan;
+    if (first == null) {
+      route.plan = capture;
+      route.captureStart = i;
+    } else {
+      final plan = params ??= [first];
+      if (i > nextCapture) plan.add(i - nextCapture);
+      plan.add(capture);
+    }
     nextCapture = i + 1;
     if (rest) break;
   }
 
-  if (params != null) route.params = params.toList(growable: false);
+  if (params != null) route.plan = params.toList(growable: false);
   final methods = node.methods ??= route;
   final first = methods[method] ?? methods.addSibling(route);
   if (!identical(first, route)) {
