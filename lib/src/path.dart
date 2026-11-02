@@ -1,31 +1,27 @@
 // ignore_for_file: public_member_api_docs
 
-String normalizePath(String path) {
-  if (path.isEmpty) return '/';
-  if (path.codeUnitAt(0) != 47 /* / */ ) path = '/$path';
-  if (path.length == 1) return path;
-
-  final segments = <String>[];
-  for (final segment in path.split('/')) {
-    switch (segment) {
-      case '' || '.':
+List<String> normalizedSegments(String path) {
+  // One concrete list type lets AOT specialize the traversal, including at the root.
+  if (path.isEmpty || path == '/') return <String>[];
+  final segments = path.split('/');
+  var used = 0;
+  for (final segment in segments) {
+    if (segment.isEmpty) continue;
+    if (segment.codeUnitAt(0) == 46 /* . */ ) {
+      if (segment == '.') continue;
+      if (segment == '..') {
+        if (used > 0) used--;
         continue;
-      case '..':
-        if (segments.isNotEmpty) segments.removeLast();
-        continue;
-      default:
-        segments.add(segment);
+      }
     }
+    segments[used++] = segment;
   }
-
-  return segments.isEmpty ? '/' : '/${segments.join('/')}';
+  return segments..length = used;
 }
 
 /// Splits a path into segments, dropping the leading slash and any trailing empty segment.
 List<String> splitPath(String path) {
-  if (path == '/') return const [];
-  final segments = path.split('/').sublist(1);
-  return segments.isNotEmpty && segments.last.isEmpty
-      ? segments.sublist(0, segments.length - 1)
-      : segments;
+  final segments = path.split('/')..removeAt(0);
+  if (segments.isNotEmpty && segments.last.isEmpty) segments.removeLast();
+  return segments;
 }

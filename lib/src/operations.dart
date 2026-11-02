@@ -2,270 +2,163 @@
 
 import 'model.dart';
 import 'path.dart';
+import 'segment_program.dart';
+
+String normalizeMethod(String? method) => method?.trim().toUpperCase() ?? '';
+
+Iterable<List<String>> _patterns(String path, {bool expandedPath = false}) {
+  if (!expandedPath && path.contains('{')) {
+    path = '/${normalizedSegments(path).join('/')}';
+    expandedPath = true;
+  }
+  var expanded = expandGroupDelimiters(path);
+  if (expanded == null) {
+    path = encodeEscapes(path);
+    final segments = expandedPath ? splitPath(path) : normalizedSegments(path);
+    expanded = expandModifiers(segments);
+    if (expanded == null) return [segments];
+  }
+  return expanded.expand((next) => _patterns(next, expandedPath: true));
+}
 
 // dart format off
-void addRoute<T>(RouterNode<T> root, Map<String, RouterNode<T>> staticRoutes, bool caseSensitive, String method, String path, T data) {// dart format on
-  if (expandGroupDelimiters(path) case final groupExpanded?) {
-    for (final p in groupExpanded) {
-      addRoute(root, staticRoutes, caseSensitive, method, p, data);
-    }
-    return;
-  }
+void addRoute<T>(RouterNode<T> root, bool caseSensitive, String method, String path, T data) {// dart format on
+  for (final segments in _patterns(path)) {
+    var node = root;
+    var unnamedIndex = 0;
+    final params = <ParamSpec>[];
+    var constraintDepth = 0;
+    SegmentPattern? lastConstraint;
 
-  path = encodeEscapes(path);
-  final segments = splitPath(path);
+    for (var i = 0; i < segments.length; i++) {
+      final segment = segments[i];
 
-  if (expandModifiers(segments) case final modExpanded?) {
-    for (final p in modExpanded) {
-      addRoute(root, staticRoutes, caseSensitive, method, p, data);
-    }
-    return;
-  }
-
-  var node = root;
-  var unnamedIndex = 0;
-  final paramsMap = <ParamSpec>[];
-  final paramsRegexp = <SegmentPattern?>[];
-
-  for (var i = 0; i < segments.length; i++) {
-    var segment = segments[i];
-
-    // Wildcard **
-    if (segment.startsWith('**')) {
-      node.wildcard ??= RouterNode<T>();
-      node = node.wildcard!;
-      final name = segment.length == 2 ? '_' : segment.substring(3);
-      final optional = segment.length == 2;
-      if (name != '_' && !validParamSlice(name, 0, name.length)) {
-        throw FormatException('Invalid wildcard param name: $path');
-      }
-      paramsMap.add(ParamSpec(-(i + 1), name, optional));
-      break;
-    }
-
-    // Param
-    if (segment == '*' ||
-        segment.contains(':') ||
-        segment.contains('(') ||
-        hasSegmentWildcard(segment)) {
-      node = node.param ??= RouterNode<T>();
-
-      if (segment == '*') {
-        paramsMap.add(ParamSpec(i, '$unnamedIndex', true));
-        unnamedIndex++;
-      } else if (segment.contains(':', 1) ||
-          segment.contains('(') ||
-          hasSegmentWildcard(segment) ||
-          !_simpleParamRx.hasMatch(segment)) {
-        // dart format off
-        final (pattern, nextUnnamed) = compileSegmentPattern(segment, caseSensitive, unnamedIndex); // dart format on
-        unnamedIndex = nextUnnamed;
-        paramsRegexp.length = i + 1;
-        paramsRegexp[i] = pattern;
-        node.hasRegexParam = true;
-        paramsMap.add(ParamSpec(i, pattern, false));
-      } else {
-        final name = segment.substring(1);
-        if (!validParamSlice(name, 0, name.length)) {
-          throw FormatException('Invalid param name: $path');
+      if (segment.startsWith('**')) {
+        node = node.wildcard ??= RouterNode<T>();
+        final optional = segment.length == 2;
+        final name = optional ? '_' : segment.substring(3);
+        if (_name.matchAsPrefix(name)?.end != name.length) {
+          throw FormatException('Invalid wildcard param name: $path');
         }
-        paramsMap.add(ParamSpec(i, name, false));
+        params.add(ParamSpec(i, name, optional, rest: true));
+        break;
       }
-      continue;
+
+      if (_isParamSegment(segment)) {
+        node = node.param ??= RouterNode<T>();
+
+        if (segment == '*') {
+          params.add(ParamSpec(i, '$unnamedIndex', true));
+          unnamedIndex++;
+        } else if (!_simpleParamRx.hasMatch(segment)) {
+          // dart format off
+        final (pattern, nextUnnamed) = compileSegmentPattern(segment, caseSensitive, unnamedIndex); // dart format on
+          unnamedIndex = nextUnnamed;
+          constraintDepth = i + 1;
+          lastConstraint = pattern;
+          params.add(ParamSpec(i, pattern, false));
+        } else {
+          params.add(ParamSpec(i, segment.substring(1), false));
+        }
+        continue;
+      }
+
+      final key = _staticKey(segment, caseSensitive);
+      final children = node.statics ??= RouteIndex(key);
+      node = children.putIfAbsent(key, RouterNode<T>.new);
     }
 
-    // Static
-    if (segment == r'\*') {
-      segment = '*';
-    } else if (segment == r'\*\*') {
-      segment = '**';
-    }
-    segment = decodeEscaped(segment);
-    final key = caseSensitive ? segment : segment.toLowerCase();
-    node.statics ??= {};
-    node = node.statics!.putIfAbsent(key, RouterNode<T>.new);
-  }
-
-  final hasParams = paramsMap.isNotEmpty;
-  final route = RouteData<T>(
-    data: data,
-    paramsRegexp: paramsRegexp,
-    paramsMap: hasParams ? paramsMap : null,
-  );
-
-  node.methods ??= {};
-  (node.methods![method] ??= []).add(route);
-
-  if (!hasParams) {
-    staticRoutes['/${segments.join('/')}'] = node;
+    final route = RouteData(data, params, constraintDepth, lastConstraint);
+    final methods = node.methods ??= RouteIndex(method);
+    methods.putIfAbsent(method, RouteBucket<T>.new).add(route);
   }
 }
 
 // dart format off
-RouteMatch<T>? findRoute<T>(RouterNode<T> root, Map<String, RouterNode<T>> staticRoutes, bool caseSensitive, String method, String path) {// dart format on
-  final staticNode = staticRoutes[caseSensitive ? path : path.toLowerCase()];
-  if (staticNode?.methods != null) {
-    final match = staticNode!.methods![method] ?? staticNode.methods![''];
-    if (match != null) return match.first.materialize(const []);
+RouteMatch<T>? findRoute<T>(RouterNode<T>? node, bool caseSensitive, String method, List<String> segments, [int index = 0]) {// dart format on
+  while (node != null && index < segments.length) {
+    final child = node.staticChild(segments[index++], caseSensitive);
+    final param = node.param;
+    if (node.wildcard != null || (child != null && param != null)) {
+      return findRoute(child, caseSensitive, method, segments, index) ??
+          findRoute(param, caseSensitive, method, segments, index) ??
+          _selectRoute(node.wildcard, method, segments);
+    }
+    node = child ?? param;
   }
-
-  final segments = splitPath(path);
-  final match = _lookupTree(root, method, segments, 0, caseSensitive)?.first;
-  return match?.materialize(segments);
+  if (node == null) return null;
+  return _selectRoute(node, method, segments) ??
+      _selectRoute(node.param, method, segments, optionalTail: true) ??
+      _selectRoute(node.wildcard, method, segments, optionalTail: true);
 }
 
 // dart format off
-List<RouteData<T>>? _lookupTree<T>(RouterNode<T> node, String method, List<String> segments, int index, bool caseSensitive) {// dart format on
-  if (index == segments.length) {
-    if (node.methods != null) {
-      final match = node.methods![method] ?? node.methods![''];
-      if (match != null) return match;
-    }
-    // optional tail: /foo matches /foo/:id? or /foo/**
-    if (node.param?.methods != null) {
-      final match = node.param!.methods![method] ?? node.param!.methods![''];
-      if (match != null && match.first.paramsMap?.last.optional == true) {
+RouteMatch<T>? _selectRoute<T>(RouterNode<T>? node, String method, List<String> segments, {bool optionalTail = false}) {// dart format on
+  final methods = node?.methods;
+  final bucket =
+      methods?[method] ?? methods?[normalizeMethod(method)] ?? methods?[''];
+  if (bucket == null) return null;
+  final routes = bucket.candidates(segments);
+  if (routes.length == 1) {
+    return routes.first.match(segments, optionalTail: optionalTail);
+  }
+  RouteMatch<T>? best;
+  var bestDepth = -1;
+  for (final route in routes) {
+    // Only a deeper constraint can beat an earlier match.
+    if (route.constraintDepth <= bestDepth) continue;
+    if (route.match(segments, optionalTail: optionalTail) case final match?) {
+      if (route.params.isEmpty || route.constraintDepth == segments.length) {
         return match;
       }
-    }
-    if (node.wildcard?.methods != null) {
-      final match =
-          node.wildcard!.methods![method] ?? node.wildcard!.methods![''];
-      if (match != null && match.first.paramsMap?.last.optional == true) {
-        return match;
-      }
-    }
-    return null;
-  }
-
-  final rawSegment = segments[index];
-  final segment = caseSensitive ? rawSegment : rawSegment.toLowerCase();
-
-  // 1. Static
-  if (node.statics?[segment] case final staticChild?) {
-    if (_lookupTree(staticChild, method, segments, index + 1, caseSensitive)
-        case final match?) {
-      return match;
+      best = match;
+      bestDepth = route.constraintDepth;
     }
   }
-
-  // 2. Param
-  if (node.param != null) {
-    if (_lookupTree(node.param!, method, segments, index + 1, caseSensitive)
-        case final match?) {
-      if (node.param!.hasRegexParam) {
-        final exact =
-            match.firstWhereOrNull(
-              (m) =>
-                  index < m.paramsRegexp.length &&
-                  m.paramsRegexp[index] != null &&
-                  m.paramsRegexp[index]!.regex.hasMatch(rawSegment),
-            ) ??
-            match.firstWhereOrNull(
-              (m) =>
-                  index >= m.paramsRegexp.length ||
-                  m.paramsRegexp[index] == null,
-            );
-        return exact != null ? [exact] : null;
-      }
-      return match;
-    }
-  }
-
-  // 3. Wildcard
-  if (node.wildcard?.methods != null) {
-    return node.wildcard!.methods![method] ?? node.wildcard!.methods![''];
-  }
-
-  return null;
+  return best;
 }
 
 // dart format off
 List<RouteMatch<T>> findAllRoutes<T>(RouterNode<T> root, bool caseSensitive, String method, String path, bool includeAny) {// dart format on
-  final segments = splitPath(path);
-  final matches = <RouteData<T>>[];
-  _findAll(root, method, segments, 0, matches, caseSensitive, includeAny);
-  return matches.map((m) => m.materialize(segments)).toList();
-}
+  final segments = normalizedSegments(path);
+  final matches = <RouteMatch<T>>[];
 
-// dart format off
-List<RouteData<T>> _resolveMatchedRoutes<T>(bool includeAny, String method, Map<String, List<RouteData<T>>> methods) {// dart format on
-  if (includeAny && method.isNotEmpty) {
-    return [...?methods[''], ...?methods[method]];
-  }
-  return methods[method] ?? methods[''] ?? const [];
-}
-
-// dart format off
-void _findAll<T>(RouterNode<T> node, String method, List<String> segments, int index, List<RouteData<T>> matches, bool caseSensitive, bool includeAny) {// dart format on
-  // 1. Wildcard
-  if (node.wildcard?.methods != null) {
-    // dart format off
-    final match = _resolveMatchedRoutes(includeAny, method, node.wildcard!.methods!); // dart format on
-    if (match.isNotEmpty) matches.addAll(match);
-  }
-
-  // 2. Param
-  if (node.param != null) {
-    if (index < segments.length) {
-      // dart format off
-      _findAll(node.param!, method, segments, index + 1, matches, caseSensitive, includeAny); // dart format on
-    } else if (node.param!.methods != null) {
-      // dart format off
-      final match = _resolveMatchedRoutes(includeAny, method, node.param!.methods!); // dart format on
-      if (match.isNotEmpty && match.first.paramsMap?.last.optional == true) {
-        matches.addAll(match);
+  void collect(RouterNode<T>? child, {bool optionalTail = false}) {
+    final methods = child?.methods;
+    if (methods == null) return;
+    final routes = includeAny && method.isNotEmpty
+        ? [...?methods['']?.routes, ...?methods[method]?.routes]
+        : (methods[method] ?? methods[''])?.routes;
+    if (routes == null) return;
+    for (final route in routes) {
+      if (route.match(segments, allowPartial: true, optionalTail: optionalTail)
+          case final match?) {
+        matches.add(match);
       }
     }
   }
 
-  // 3. Static
-  if (index < segments.length) {
-    final segment = caseSensitive
-        ? segments[index]
-        : segments[index].toLowerCase();
-    if (node.statics?[segment] case final staticChild?) {
-      // dart format off
-      _findAll(staticChild, method, segments, index + 1, matches, caseSensitive, includeAny); // dart format on
+  void visit(RouterNode<T>? node, int index) {
+    if (node == null) return;
+    collect(node.wildcard);
+    if (index == segments.length) {
+      collect(node.param, optionalTail: true);
+      collect(node);
+      return;
     }
+    visit(node.param, index + 1);
+    visit(node.staticChild(segments[index], caseSensitive), index + 1);
   }
 
-  // 4. End of path
-  if (index == segments.length && node.methods != null) {
-    // dart format off
-    final match = _resolveMatchedRoutes(includeAny, method, node.methods!); // dart format on
-    if (match.isNotEmpty) matches.addAll(match);
-  }
+  visit(root, 0);
+  return matches;
 }
 
 // dart format off
-bool removeRoute<T>(RouterNode<T> root, Map<String, RouterNode<T>> staticRoutes, bool caseSensitive, String method, String path) {// dart format on
-  if (expandGroupDelimiters(path) case final groupExpanded?) {
-    var removed = false;
-    for (final p in groupExpanded) {
-      if (removeRoute(root, staticRoutes, caseSensitive, method, p)) {
-        removed = true;
-      }
-    }
-    return removed;
-  }
-
-  path = encodeEscapes(path);
-  final segments = splitPath(path);
-
-  if (expandModifiers(segments) case final modExpanded?) {
-    var removed = false;
-    for (final p in modExpanded) {
-      if (removeRoute(root, staticRoutes, caseSensitive, method, p)) {
-        removed = true;
-      }
-    }
-    return removed;
-  }
-
-  final removed = _remove(root, method, segments, 0, caseSensitive);
-  if (removed) {
-    staticRoutes.remove(caseSensitive ? path : path.toLowerCase());
+bool removeRoute<T>(RouterNode<T> root, bool caseSensitive, String method, String path) {// dart format on
+  var removed = false;
+  for (final segments in _patterns(path)) {
+    if (_remove(root, method, segments, 0, caseSensitive)) removed = true;
   }
   return removed;
 }
@@ -274,100 +167,109 @@ bool removeRoute<T>(RouterNode<T> root, Map<String, RouterNode<T>> staticRoutes,
 bool _remove<T>(RouterNode<T> node, String method, List<String> segments, int index, bool caseSensitive) {// dart format on
   if (index == segments.length) {
     final methods = node.methods;
-    if (methods == null || !methods.containsKey(method)) return false;
-    methods.remove(method);
+    if (methods == null || methods.remove(method) == null) return false;
     if (methods.isEmpty) node.methods = null;
     return true;
   }
 
   final segment = segments[index];
-
-  // Wildcard
-  if (segment.startsWith('**')) {
-    final child = node.wildcard;
-    if (child == null) return false;
-    final removed = _remove(child, method, segments, index + 1, caseSensitive);
-    if (child.isEmpty) node.wildcard = null;
-    return removed;
-  }
-
-  // Param
-  if (_isParamSegment(segment)) {
-    final child = node.param;
-    if (child == null) return false;
-    final removed = _remove(child, method, segments, index + 1, caseSensitive);
-    if (child.isEmpty) node.param = null;
-    return removed;
-  }
-
-  // Static
-  var key = decodeEscaped(segment);
-  if (!caseSensitive) key = key.toLowerCase();
-  final child = node.statics?[key];
+  final wildcard = segment.startsWith('**');
+  final key = wildcard || _isParamSegment(segment)
+      ? null
+      : _staticKey(segment, caseSensitive);
+  final child = switch (key) {
+    final value? => node.statics?[value],
+    null => wildcard ? node.wildcard : node.param,
+  };
   if (child == null) return false;
   final removed = _remove(child, method, segments, index + 1, caseSensitive);
-  if (child.isEmpty) {
+  if (!child.isEmpty) return removed;
+  if (key != null) {
     node.statics!.remove(key);
     if (node.statics!.isEmpty) node.statics = null;
+  } else if (wildcard) {
+    node.wildcard = null;
+  } else {
+    node.param = null;
   }
 
   return removed;
 }
 
+String _staticKey(String segment, bool sensitive) {
+  final value = segment == r'\*' || segment == r'\*\*'
+      ? segment.replaceAll(r'\', '')
+      : decodeEscaped(segment);
+  return sensitive ? value : value.toLowerCase();
+}
+
 bool _isParamSegment(String segment) =>
-    segment == '*' ||
     segment.contains(':') ||
     segment.contains('(') ||
-    hasSegmentWildcard(segment);
+    (segment.contains('*') &&
+        _syntax.allMatches(segment).any((m) => m[0] == '*'));
 
-final _simpleParamRx = RegExp(r'^:[\w-]+$');
+final _syntax = RegExp(r'\\[\s\S]|[(){}*]');
+final _regexSyntax = RegExp(
+  r'\\[\s\S]?|\[(?:\\[\s\S]|[^\]\\])*(?:\]|\\?$)|[()]',
+);
+final _literalPrefix = RegExp(r'^[a-zA-Z0-9_-]+(?=$|\\|\[|\()');
+final _name = RegExp(r'[A-Za-z_][\w-]*');
+final _simpleParamRx = RegExp('^:${_name.pattern}\$');
 final _modifierRx = RegExp(r'^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$');
 
 // dart format off
-(SegmentPattern, int) compileSegmentPattern(String segment, bool caseSensitive, int unnamedStart) {// dart format on
-  final regex = StringBuffer('^');
-  final captureNames = <String>[];
-  var nextUnnamed = unnamedStart;
+(SegmentPattern, int) compileSegmentPattern(String segment, bool caseSensitive, int unnamedIndex) {// dart format on
+  final regex = StringBuffer();
+  final captures = <(String, int)>[];
+  String nextName() => '$unnamedGroupPrefix${unnamedIndex++}';
   var cursor = 0;
+  var tokens = 0;
+  var plainParams = 0;
+  var head = '';
+  String? separator;
 
   while (cursor < segment.length) {
+    tokens++;
     final code = segment.codeUnitAt(cursor);
 
-    if (code == 58 /* : */ ) {
-      final (next, name, body) = _readParamToken(segment, cursor);
-      if (body == null) {
-        regex.write('(?<$name>${r'[^/]+'})');
+    if (code == 58 /* : */ || code == 40 /* ( */ || code == 42 /* * */ ) {
+      final named = code == 58;
+      final String name;
+      if (named) {
+        final m = _name.matchAsPrefix(segment, cursor + 1);
+        if (m == null) throw FormatException('Invalid param name: $segment');
+        name = m[0]!;
+        cursor = m.end;
       } else {
-        final (rewrittenBody, innerCaptureNames, nextIndex) =
-            _rewriteUnnamedRegexGroups(body, nextUnnamed);
-        regex.write('(?<$name>$rewrittenBody)');
-        captureNames.addAll(innerCaptureNames);
-        nextUnnamed = nextIndex;
+        name = nextName();
       }
-      captureNames.add(name);
-      cursor = next;
-      continue;
-    }
-
-    if (code == 40 /* ( */ ) {
-      final end = _findRegexEnd(segment, cursor, segment.length);
-      final name = toUnnamedGroupKey(nextUnnamed++);
-      final body = segment.substring(cursor + 1, end);
-      final (rewrittenBody, innerCaptureNames, nextIndex) =
-          _rewriteUnnamedRegexGroups(body, nextUnnamed);
-      regex.write('(?<$name>$rewrittenBody)');
-      captureNames.add(name);
-      captureNames.addAll(innerCaptureNames);
-      nextUnnamed = nextIndex;
-      cursor = end + 1;
-      continue;
-    }
-
-    if (code == 42 /* * */ ) {
-      final name = toUnnamedGroupKey(nextUnnamed++);
-      regex.write('(?<$name>[^/]*)');
-      captureNames.add(name);
-      cursor++;
+      final outer = (name, captures.length + 1);
+      final inner = <(String, int)>[];
+      var body = r'[^/]+';
+      if (code == 42) {
+        body = r'[^/]*';
+        cursor++;
+      } else if (segment.startsWith('(', cursor)) {
+        final end = _findRegexEnd(segment, cursor);
+        final raw = segment.substring(cursor + 1, end);
+        body = !raw.contains('(')
+            ? raw
+            : raw.replaceAllMapped(_regexSyntax, (m) {
+                if (m[0] != '(' || raw.startsWith('?', m.end)) return m[0]!;
+                final key = nextName();
+                inner.add((key, outer.$2 + inner.length + 1));
+                return '(?<$key>';
+              });
+        cursor = end + 1;
+      } else {
+        plainParams++;
+      }
+      regex.write('(?<$name>$body)');
+      if (tokens == 1) head = body;
+      if (!named) captures.add(outer);
+      captures.addAll(inner);
+      if (named) captures.add(outer);
       continue;
     }
 
@@ -378,113 +280,56 @@ final _modifierRx = RegExp(r'^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$');
       cursor++;
     }
     final literal = decodeEscaped(segment.substring(start, cursor));
+    if (tokens == 1) head = literal;
+    if (tokens == 2 &&
+        (caseSensitive || literal.toLowerCase() == literal.toUpperCase())) {
+      separator = literal;
+    }
     regex.write(RegExp.escape(literal));
   }
 
-  regex.write(r'$');
+  // User-defined named groups can shift the generated capture positions.
+  final useNames = segment.contains('(?<');
+  final groups = [
+    for (final (name, index) in captures)
+      (
+        key: normalizeUnnamedGroupKey(name),
+        index: tokens == 1 && index == 1
+            ? 0
+            : useNames
+            ? null
+            : index,
+        name: name,
+      ),
+  ];
+  final source = regex.toString();
+  final split = tokens == 3 && plainParams == 2 ? separator : null;
+  final matcher = RegExp('^$source\$', caseSensitive: caseSensitive);
+  final program = split == null
+      ? SegmentProgram.compile(source, caseSensitive, groups)
+      : null;
+  final prefix =
+      program?.prefix ??
+      (head.contains('|') ? '' : _literalPrefix.stringMatch(head) ?? '');
   return (
     SegmentPattern(
-      RegExp(regex.toString(), caseSensitive: caseSensitive),
-      captureNames,
+      matcher,
+      groups,
+      prefix: prefix,
+      separator: split,
+      program: program,
     ),
-    nextUnnamed,
+    unnamedIndex,
   );
 }
 
-(int, String, String?) _readParamToken(String segment, int start) {
-  var nameEnd = start + 1;
-  while (nameEnd < segment.length &&
-      isParamCode(segment.codeUnitAt(nameEnd), nameEnd == start + 1)) {
-    nameEnd++;
-  }
-  final name = segment.substring(start + 1, nameEnd);
-  if (!validParamSlice(name, 0, name.length)) {
-    throw FormatException('Invalid param name: $segment');
-  }
-  if (nameEnd < segment.length && segment.codeUnitAt(nameEnd) == 40 /* ( */ ) {
-    final regexEnd = _findRegexEnd(segment, nameEnd, segment.length);
-    return (regexEnd + 1, name, segment.substring(nameEnd + 1, regexEnd));
-  }
-  return (nameEnd, name, null);
-}
-
-int _findRegexEnd(String s, int start, int end) {
+int _findRegexEnd(String s, int start) {
   var depth = 0;
-  var escaped = false;
-  var inClass = false;
-  for (var i = start; i < end; i++) {
-    final code = s.codeUnitAt(i);
-    if (escaped) {
-      escaped = false;
-    } else if (code == 92) {
-      escaped = true;
-    } else if (inClass) {
-      if (code == 93) inClass = false;
-    } else if (code == 91) {
-      inClass = true;
-    } else if (code == 40) {
-      depth++;
-    } else if (code == 41 && --depth == 0) {
-      return i;
-    }
+  for (final m in _regexSyntax.allMatches(s, start)) {
+    if (m[0] == '(') depth++;
+    if (m[0] == ')' && --depth == 0) return m.start;
   }
   throw FormatException('Unclosed regex in route: $s');
-}
-
-// dart format off
-(String, List<String>, int) _rewriteUnnamedRegexGroups(String pattern, int unnamedStart) {// dart format on
-  final regex = StringBuffer();
-  final captureNames = <String>[];
-  var nextUnnamed = unnamedStart;
-  var escaped = false;
-  var inClass = false;
-
-  for (var i = 0; i < pattern.length; i++) {
-    final code = pattern.codeUnitAt(i);
-
-    if (escaped) {
-      regex.write(pattern[i]);
-      escaped = false;
-      continue;
-    }
-
-    if (code == 92 /* \ */ ) {
-      regex.write(pattern[i]);
-      escaped = true;
-      continue;
-    }
-
-    if (inClass) {
-      regex.write(pattern[i]);
-      if (code == 93 /* ] */ ) {
-        inClass = false;
-      }
-      continue;
-    }
-
-    if (code == 91 /* [ */ ) {
-      regex.write(pattern[i]);
-      inClass = true;
-      continue;
-    }
-
-    if (code == 40 /* ( */ ) {
-      final nextCode = i + 1 < pattern.length ? pattern.codeUnitAt(i + 1) : -1;
-      if (nextCode == 63 /* ? */ ) {
-        regex.write(pattern[i]);
-        continue;
-      }
-
-      final name = toUnnamedGroupKey(nextUnnamed++);
-      regex.write('(?<$name>');
-      captureNames.add(name);
-      continue;
-    }
-
-    regex.write(pattern[i]);
-  }
-
-  return (regex.toString(), captureNames, nextUnnamed);
 }
 
 String encodeEscapes(String path) {
@@ -497,54 +342,38 @@ String encodeEscapes(String path) {
       .replaceAll(r'\}', '\uFFFDE');
 }
 
-String decodeEscaped(String segment) => segment
-    .replaceAll('\uFFFDA', ':')
-    .replaceAll('\uFFFDB', '(')
-    .replaceAll('\uFFFDC', ')')
-    .replaceAll('\uFFFDD', '{')
-    .replaceAll('\uFFFDE', '}');
+String decodeEscaped(String segment) => !segment.contains('\uFFFD')
+    ? segment
+    : segment
+          .replaceAll('\uFFFDA', ':')
+          .replaceAll('\uFFFDB', '(')
+          .replaceAll('\uFFFDC', ')')
+          .replaceAll('\uFFFDD', '{')
+          .replaceAll('\uFFFDE', '}');
 
 List<String>? expandGroupDelimiters(String path) {
+  if (!path.contains('{')) return null;
   var start = -1;
+  var end = -1;
   var depth = 0;
-  for (var i = 0; i < path.length; i++) {
-    final code = path.codeUnitAt(i);
-    if (code == 92) {
-      i++;
-    } else if (code == 40) {
+  for (final m in _syntax.allMatches(path)) {
+    final token = m[0];
+    if (token == '(') {
       depth++;
-    } else if (code == 41 && depth > 0) {
+    } else if (token == ')' && depth > 0) {
       depth--;
-    } else if (code == 123 /* { */ && depth == 0) {
-      start = i;
+    } else if (token == '{' && depth == 0 && start < 0) {
+      start = m.start;
+    } else if (token == '}' && depth == 0 && start >= 0) {
+      end = m.start;
       break;
     }
   }
   if (start < 0) return null;
-
-  var end = -1;
-  depth = 0;
-  for (var i = start + 1; i < path.length; i++) {
-    final code = path.codeUnitAt(i);
-    if (code == 92) {
-      i++;
-    } else if (code == 40) {
-      depth++;
-    } else if (code == 41 && depth > 0) {
-      depth--;
-    } else if (code == 125 /* } */ && depth == 0) {
-      end = i;
-      break;
-    }
-  }
   if (end < 0) throw FormatException('Unclosed group in route: $path');
 
-  final hasMod =
-      end + 1 < path.length &&
-      (path.codeUnitAt(end + 1) == 63 /* ? */ ||
-          path.codeUnitAt(end + 1) == 43 /* + */ ||
-          path.codeUnitAt(end + 1) == 42 /* * */ );
-  final mod = hasMod ? path[end + 1] : null;
+  final mod = end + 1 < path.length ? path[end + 1] : '';
+  final hasMod = mod == '?' || mod == '+' || mod == '*';
   final pre = path.substring(0, start);
   final body = path.substring(start + 1, end);
   final suf = path.substring(end + (hasMod ? 2 : 1));
@@ -559,54 +388,22 @@ List<String>? expandGroupDelimiters(String path) {
 
 List<String>? expandModifiers(List<String> segments) {
   for (var i = 0; i < segments.length; i++) {
-    final m = _modifierRx.firstMatch(segments[i]);
+    final segment = segments[i];
+    if (segment.isEmpty) continue;
+    final last = segment.codeUnitAt(segment.length - 1);
+    if (last != 63 && last != 43 && last != 42) continue; // ?, +, *
+    final m = _modifierRx.firstMatch(segment);
     if (m == null) continue;
     final base = m.group(1)!;
     final mod = m.group(2)!;
-    final pre = segments.sublist(0, i);
-    final suf = segments.sublist(i + 1);
-    if (mod == '?') {
-      return [
-        '/${[...pre, base, ...suf].join('/')}',
-        '/${[...pre, ...suf].join('/')}',
-      ];
-    }
-    final name = RegExp(r':([\w-]+)').firstMatch(base)?.group(1) ?? '_';
-    final wc = '/${[...pre, '**:$name', ...suf].join('/')}';
-    return mod == '+'
-        ? [wc]
-        : [
-            wc,
-            '/${[...pre, ...suf].join('/')}',
-          ];
+    final parts = segments.toList();
+    parts[i] = mod == '?'
+        ? base
+        : '**:${RegExp(r':([\w-]+)').firstMatch(base)?[1] ?? '_'}';
+    final path = '/${parts.join('/')}';
+    if (mod == '+') return [path];
+    parts.removeAt(i);
+    return [path, '/${parts.join('/')}'];
   }
   return null;
-}
-
-bool hasSegmentWildcard(String segment) {
-  var depth = 0;
-  for (var i = 0; i < segment.length; i++) {
-    final code = segment.codeUnitAt(i);
-    if (code == 92) {
-      i++;
-    } else if (code == 40) {
-      depth++;
-    } else if (code == 41 && depth > 0) {
-      depth--;
-    } else if (code == 42 /* * */ && depth == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
-String toUnnamedGroupKey(int index) => '$unnamedGroupPrefix$index';
-
-extension<T> on List<T> {
-  T? firstWhereOrNull(bool Function(T) test) {
-    for (final e in this) {
-      if (test(e)) return e;
-    }
-    return null;
-  }
 }
