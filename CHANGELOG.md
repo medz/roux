@@ -1,3 +1,16 @@
+## Unreleased
+
+- **Breaking** Remove `Router(cache:)`, the `Router.cache` getter, `Cache<T>`, and
+  `LRUCache<T>`. Drop the `cache:` argument when constructing a router. Each
+  successful lookup returns a fresh match with its own mutable params map.
+- `find` validates every constrained segment before choosing a route and can
+  fall back to a less specific branch. Both lookup methods honor optional
+  single-segment tails when a required parameter shares the same route shape.
+- Compile character runs and nested capture boundaries during registration.
+  Use Dart's regular expression engine when a match needs backtracking or
+  Unicode character-class handling.
+- Remove escaped literal-star routes using the same key used to register them.
+
 ## 1.0.1
 
 ### Fixed

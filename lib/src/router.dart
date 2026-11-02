@@ -1,55 +1,31 @@
-import 'cache.dart';
 import 'model.dart';
 import 'operations.dart';
 import 'path.dart';
 
 /// A lightweight, expressive path router.
 class Router<T> {
-  /// Creates a router with optional case sensitivity and match caching.
-  Router({this.caseSensitive = false, this.cache});
+  /// Creates a router with optional case sensitivity.
+  Router({this.caseSensitive = false});
 
   /// Whether static path matching treats letter case as significant.
   final bool caseSensitive;
 
-  /// Optional cache used to memoize successful lookups.
-  final Cache<T>? cache;
-
   final _root = RouterNode<T>();
-  final _staticRoutes = <String, RouterNode<T>>{};
 
   /// Registers a route pattern and its associated data.
-  void add(String path, T data, {String? method}) {
-    // dart format off
-    addRoute(_root, _staticRoutes, caseSensitive, _m(method), normalizePath(path), data); // dart format on
-    cache?.clear();
-  }
+  void add(String path, T data, {String? method}) =>
+      addRoute(_root, caseSensitive, normalizeMethod(method), path, data);
 
   /// Returns the best match for [path], or `null` when none exists.
-  RouteMatch<T>? find(String path, {String? method}) {
-    final m = _m(method);
-    final p = normalizePath(path);
-    final key = m.isEmpty ? p : '$m\x00$p';
-    if (cache?.get(key) case final RouteMatch<T> value) {
-      return value;
-    }
-
-    final result = findRoute(_root, _staticRoutes, caseSensitive, m, p);
-    if (result != null) cache?.put(key, result);
-    return result;
-  }
+  RouteMatch<T>? find(String path, {String? method}) =>
+      findRoute(_root, caseSensitive, method ?? '', normalizedSegments(path));
 
   /// Returns all matches for [path] in broad-to-specific order.
   // dart format off
   List<RouteMatch<T>> findAll(String path, {String? method, bool includeAny = false}) =>
-      findAllRoutes(_root, caseSensitive, _m(method), normalizePath(path), includeAny); // dart format on
+      findAllRoutes(_root, caseSensitive, normalizeMethod(method), path, includeAny); // dart format on
 
   /// Removes all routes stored under the exact method and path pattern.
-  bool remove(String method, String path) {
-    // dart format off
-    final removed = removeRoute(_root, _staticRoutes, caseSensitive, _m(method), normalizePath(path)); // dart format on
-    if (removed) cache?.clear();
-    return removed;
-  }
-
-  static String _m(String? method) => method?.trim().toUpperCase() ?? '';
+  bool remove(String method, String path) =>
+      removeRoute(_root, caseSensitive, normalizeMethod(method), path);
 }

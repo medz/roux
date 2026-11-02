@@ -43,10 +43,7 @@ void main() {
 ## API
 
 ```dart
-final router = Router<String>(
-  caseSensitive: false,
-  cache: LRUCache<String>(),
-);
+final router = Router<String>();
 
 router.add('/posts', 'posts');
 router.add('/posts/:id', 'post', method: 'GET');
@@ -59,7 +56,7 @@ router.remove('GET', '/posts/:id');
 
 ### `Router`
 
-- `Router({bool caseSensitive = false, Cache<T>? cache})`
+- `Router({bool caseSensitive = false})`
 - `void add(String path, T data, {String? method})`
 - `RouteMatch<T>? find(String path, {String? method})`
 - `List<RouteMatch<T>> findAll(String path, {String? method, bool includeAny = false})`
@@ -178,22 +175,6 @@ router.add('/api/:id', 'get', method: 'GET');
 print(router.findAll('/api/1', method: 'GET', includeAny: true).map((m) => m.data));
 // (any, get)
 ```
-
-## Cache
-
-You can provide any `Cache<T>` implementation, or use `LRUCache<T>`.
-
-```dart
-final router = Router<String>(cache: LRUCache(256));
-router.add('/users/:id', 'user');
-
-final first = router.find('/users/42');
-final second = router.find('/users/42');
-
-print(identical(first, second)); // true
-```
-
-The cache is cleared after `add(...)` and `remove(...)`.
 
 ## Validation and Escapes
 
