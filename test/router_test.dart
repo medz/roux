@@ -2,6 +2,62 @@ import 'package:roux/roux.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'removing real siblings leaves the shared branch and its other rows live',
+    () {
+      final router = Router<String>();
+      for (final key in ['One', 'Two', 'Three']) {
+        router.add('/API/$key/users/:id/orders/:order', key, method: 'GET');
+      }
+      for (final name in ['audit', 'history', 'export']) {
+        router.add('/api/two/$name/:item', name, method: 'POST');
+      }
+      for (final name in ['history', 'audit', 'export']) {
+        expect(router.find('/api/two/$name/X', method: 'post')?.params, {
+          'item': 'X',
+        });
+        expect(router.remove('POST', '/api/two/$name/:other'), isTrue);
+        expect(router.remove('POST', '/api/two/$name/:other'), isFalse);
+        expect(
+          router.find('/api/two/users/A/orders/B', method: 'get')?.data,
+          'Two',
+        );
+        expect(
+          router.find('/api/one/users/C/orders/D', method: 'get')?.data,
+          'One',
+        );
+      }
+    },
+  );
+
+  test('canonical named segments keep the same grammar as expanded paths', () {
+    final router = Router<String>();
+    router.add('/items/:item-id/part/:v_2', 'first');
+    router.add('items//:item-id/./part/:v_2/', 'second');
+    final matches = router.findAll('/ITEMS/42/part/A');
+    expect(matches.map((m) => m.data), ['first', 'second']);
+    expect(matches.first.params, {'item-id': '42', 'v_2': 'A'});
+    expect(router.remove('', 'items/tmp/../:x/part/:y/'), isTrue);
+    expect(router.find('/items/42/part/A'), isNull);
+    expect(() => router.add('/items/:9bad', 'invalid'), throwsFormatException);
+    router.add(r'/literal/\:id/:name?', 'escaped');
+    expect(router.find('/literal/:id')?.params, isEmpty);
+    expect(router.find('/literal/:id/X')?.params, {'name': 'X'});
+  });
+
+  test('an escaped first segment remains visible to both lookup paths', () {
+    final router = Router<int>()
+      ..add(r'/\*/:id', 1)
+      ..add(r'/\:key/:id', 2);
+    expect(router.find('/*/A')?.params, {'id': 'A'});
+    expect(router.find('/:key/B')?.data, 2);
+    expect(router.findAll('/*/A').single.data, 1);
+    expect(router.remove('', r'/\*/:other'), isTrue);
+    expect(router.find('/*/A'), isNull);
+    expect(router.remove('', r'/\:key/:other'), isTrue);
+    expect(router.find('/:key/B'), isNull);
+  });
+
   test('regex prefixes stay searchable as the common prefix shortens', () {
     final router = Router<int>();
     const prefixes = ['abcd-a', 'abcd-b', 'azzz-c', 'qb', 'abc'];

@@ -1,8 +1,7 @@
 // ignore_for_file: public_member_api_docs
 
-import 'dart:typed_data';
-
 import 'model.dart';
+import 'path.dart';
 
 final _nil = Object();
 
@@ -22,30 +21,20 @@ class _Methods {
     3 => d,
     _ => more?[method],
   };
-  void put(int slot, String method, Object? value) {
-    switch (slot) {
-      case 0:
-        a = value;
-      case 1:
-        b = value;
-      case 2:
-        c = value;
-      case 3:
-        d = value;
-      default:
-        if (value == null) {
-          more?.remove(method);
-        } else {
-          (more ??= {})[method] = value;
-        }
-    }
-  }
+  void put(int slot, String method, Object? value) => switch (slot) {
+    0 => a = value,
+    1 => b = value,
+    2 => c = value,
+    3 => d = value,
+    _ when value == null => more?.remove(method),
+    _ => (more ??= {})[method] = value,
+  };
 }
 
 class Bindings<T> {
   var _rows = <String, Object>{};
   final _names = <String>[];
-  int _peak = 0;
+  int _deletions = 0;
   bool get isEmpty => _rows.isEmpty;
   bool contains(String key) => _rows.containsKey(key);
   T _value(Object item) => (identical(item, _nil) ? null : item) as T;
@@ -60,7 +49,6 @@ class Bindings<T> {
 
   void add(String key, String method, T data) {
     final old = _rows[key];
-    if (old == null && _rows.length >= _peak) _peak = _rows.length + 1;
     if (_names.isEmpty) _names.add(method);
     if (method == _names.first && old is! _Methods) {
       _rows[key] = _append(old, data);
@@ -102,9 +90,9 @@ class Bindings<T> {
 
   Object? _drop(String key) {
     final row = _rows.remove(key);
-    if (_rows.length * 4 <= _peak) {
+    if (++_deletions > _rows.length) {
       _rows = Map.of(_rows);
-      _peak = _rows.length;
+      _deletions = 0;
     }
     return row;
   }
@@ -115,21 +103,16 @@ class Bindings<T> {
   Object? findCell(String key, String method) {
     final row = _rows[key];
     if (row == null) return null;
-    Object? cell;
     if (row is! _Methods) {
       final name = _names.first;
-      if (name != '' && name != method && name != normalizeMethod(method)) {
-        return null;
-      }
-      cell = row;
-    } else {
-      cell = _cell(row, method);
-      if (cell == null) {
-        final norm = normalizeMethod(method);
-        cell = (norm == method ? null : _cell(row, norm)) ?? _cell(row, '');
-      }
+      return name.isEmpty || name == method || name == normalizeMethod(method)
+          ? row
+          : null;
     }
-    return cell;
+    final exact = _cell(row, method);
+    if (exact != null) return exact;
+    final norm = normalizeMethod(method);
+    return (norm != method ? _cell(row, norm) : null) ?? _cell(row, '');
   }
 
   T value(Object cell) =>
@@ -180,25 +163,22 @@ class Bindings<T> {
 }
 
 class LiteralRoutes<T> extends Bindings<T> {
-  late final _shapes = Uint32List(32);
-  int _heads = 0;
+  int _heads = 0, _depths = 0;
+  bool hasHead(int c) => c >= 128 || _heads & (1 << (c & 31)) != 0;
   @pragma('vm:prefer-inline')
-  bool possible(String path) =>
-      path.length > 1 &&
-      (path.codeUnitAt(1) >= 128 ||
-          _heads & (1 << (path.codeUnitAt(1) & 31)) != 0);
+  bool possible(String path) => path.length > 1 && hasHead(path.codeUnitAt(1));
   void addLiteral(String key, String method, T data, int depth) {
     final h = key.codeUnitAt(1) & 31;
     _heads |= 1 << h;
-    _shapes[h] |= 1 << (depth & 31);
+    _depths |= 1 << (depth & 31);
     add(key, method, data);
   }
 
   @pragma('vm:prefer-inline')
   String? normalizedKey(String raw, List<String> parts, bool sensitive) {
-    if (parts.isEmpty) return null;
-    final head = parts.first.codeUnitAt(0);
-    if (head < 128 && _shapes[head & 31] & (1 << (parts.length & 31)) == 0) {
+    if (parts.isEmpty ||
+        !hasHead(parts.first.codeUnitAt(0)) ||
+        _depths & (1 << (parts.length & 31)) == 0) {
       return null;
     }
     var len = 0;
@@ -208,7 +188,8 @@ class LiteralRoutes<T> extends Bindings<T> {
     final key = raw.length == len && raw.startsWith('/')
         ? raw
         : '/${parts.join('/')}';
-    return sensitive ? key : key.toLowerCase();
+    final normalized = literalCase(key, sensitive);
+    return normalized == raw ? null : normalized;
   }
 
   void collectLiterals(
@@ -222,7 +203,7 @@ class LiteralRoutes<T> extends Bindings<T> {
     var key = raw;
     if (!possible(raw) || !contains(raw)) {
       final normalized = normalizedKey(raw, parts, sensitive);
-      if (normalized == null || normalized == raw) return;
+      if (normalized == null) return;
       key = normalized;
     }
     allValues(
@@ -233,38 +214,3 @@ class LiteralRoutes<T> extends Bindings<T> {
     );
   }
 }
-
-// A nonnegative result is the depth of an already canonical literal registration.
-int literalDepth(String path) {
-  if (path.isEmpty || path.codeUnitAt(0) != 47) return -1;
-  if (path.length == 1) return 0;
-  var depth = 1, start = 1;
-  for (var i = 1; i < path.length; i++) {
-    final c = path.codeUnitAt(i);
-    if (isPatternUnit(c)) {
-      return -1;
-    }
-    if (c == 47) {
-      if (i == start || i + 1 == path.length) return -1;
-      start = i + 1;
-      depth++;
-    } else if (c == 46 && i == start) {
-      if (i + 1 == path.length ||
-          path.codeUnitAt(i + 1) == 47 ||
-          path.codeUnitAt(i + 1) == 46 &&
-              (i + 2 == path.length || path.codeUnitAt(i + 2) == 47)) {
-        return -1;
-      }
-    }
-  }
-  return depth;
-}
-
-// A backslash and the internal escape marker also require the pattern parser.
-bool isPatternUnit(int unit) =>
-    unit == 58 ||
-    unit == 42 ||
-    unit == 40 ||
-    unit == 123 ||
-    unit == 92 ||
-    unit == 0xfffd;

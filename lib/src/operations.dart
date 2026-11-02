@@ -17,9 +17,8 @@ class SharedShape<T> extends RouterNode<T> {
     : names = [
         for (final p in parts)
           p.startsWith(':') ? normalizeUnnamedGroupKey(p.substring(1)) : null,
-      ],
-      literals = [for (final p in parts) sensitive ? p : p.toLowerCase()];
-  final List<String> parts, literals;
+      ];
+  final List<String> parts;
   final List<String?> names;
   final bool sensitive;
   final rows = Bindings<T>();
@@ -28,31 +27,27 @@ class SharedShape<T> extends RouterNode<T> {
 
   bool add(List<String> next, String method, T data) {
     if (next.length != parts.length) return false;
-    var changed = pivot;
-    for (var i = 0; i < parts.length; i++) {
-      if (next[i] == parts[i] || i == pivot && _plainSegment(next[i])) continue;
-      if (changed >= 0 || names[i] != null || !_plainSegment(next[i])) {
-        return false;
-      }
+    var changed = -1;
+    for (var i = 0; i < next.length; i++) {
+      final text = next[i];
+      if (text == parts[i]) continue;
+      if (names[i] != null || !isPlainSegment(text)) return false;
+      if (_sameLiteral(text, parts[i])) continue;
+      if (changed >= 0) return false;
       changed = i;
     }
-    if (changed != pivot) _setPivot(changed);
-    final selector = pivot < 0 ? '' : next[pivot];
-    rows.add(sensitive ? selector : selector.toLowerCase(), method, data);
+    if (changed >= 0) {
+      pivot = changed;
+      before = pivot == 0 ? '/' : '/${next.take(pivot).join('/')}/';
+      after = pivot + 1 == parts.length
+          ? ''
+          : '/${next.skip(pivot + 1).join('/')}';
+      rows.rekey('', literalCase(parts[pivot], sensitive));
+    }
+    final key = changed < 0 ? '' : next[changed];
+    rows.add(literalCase(key, sensitive), method, data);
     return true;
   }
-
-  void _setPivot(int index) {
-    pivot = index;
-    before = pivot == 0 ? '/' : '/${parts.take(pivot).join('/')}/';
-    after = pivot + 1 == parts.length
-        ? ''
-        : '/${parts.skip(pivot + 1).join('/')}';
-    rows.rekey('', literals[pivot]);
-  }
-
-  @override
-  bool get isEmpty => rows.isEmpty;
 
   bool addRaw(String path, String method, T data) {
     if (pivot < 0 || !path.startsWith(before) || !path.endsWith(after)) {
@@ -61,10 +56,13 @@ class SharedShape<T> extends RouterNode<T> {
     final end = path.length - after.length;
     if (end <= before.length) return false;
     final key = path.substring(before.length, end);
-    if (!_plainSegment(key)) return false;
-    rows.add(sensitive ? key : key.toLowerCase(), method, data);
+    if (!isPlainSegment(key)) return false;
+    rows.add(literalCase(key, sensitive), method, data);
     return true;
   }
+
+  bool _sameLiteral(String a, String b) =>
+      a == b || !sensitive && a.toLowerCase() == b.toLowerCase();
 
   String? selector(List<String> actual, {bool removal = false}) {
     if (actual.length != parts.length) return null;
@@ -75,17 +73,16 @@ class SharedShape<T> extends RouterNode<T> {
             (_literalKey(val, sensitive) != null || val.startsWith('**'))) {
           return null;
         }
-      } else if (i != pivot &&
-          val != literals[i] &&
-          (sensitive || val.toLowerCase() != literals[i])) {
+      } else if (i != pivot && !_sameLiteral(val, parts[i])) {
         return null;
       }
     }
-    return pivot < 0
-        ? ''
-        : sensitive
-        ? actual[pivot]
-        : actual[pivot].toLowerCase();
+    return pivot < 0 ? '' : literalCase(actual[pivot], sensitive);
+  }
+
+  String? remove(List<String> parts, String method) {
+    final key = selector(parts, removal: true);
+    return key != null && rows.remove(key, method) ? key : null;
   }
 
   Map<String, String> params(List<String> actual) {
@@ -100,11 +97,7 @@ class SharedShape<T> extends RouterNode<T> {
   // Attach the shared suffix to the trie. A conflicting literal splits only its own row.
   void mount(RouteRoot<T> root) {
     if (pivot < 0) {
-      rows.take(
-        '',
-        (method, data) =>
-            _insert(root, sensitive, method, parts.join('/'), parts, data, 0),
-      );
+      split(root, '');
       return;
     }
     RouterNode<T> node = root;
@@ -112,7 +105,7 @@ class SharedShape<T> extends RouterNode<T> {
       if (names[i] != null) {
         node = node.param = RouterNode<T>();
       } else {
-        final child = RouterNode<T>(literals[i]);
+        final child = RouterNode<T>(literalCase(parts[i], sensitive));
         node.statics = child;
         node = child;
       }
@@ -121,11 +114,10 @@ class SharedShape<T> extends RouterNode<T> {
   }
 
   void split(RouterNode<T> root, String key) {
-    final route = List.of(parts)..[pivot] = key;
-    final path = route.join('/');
+    final route = pivot < 0 ? parts : (List.of(parts)..[pivot] = key);
     rows.take(
       key,
-      (method, data) => _insert(root, sensitive, method, path, route, data, 0),
+      (method, data) => _insert(root, sensitive, method, null, route, data),
     );
   }
 
@@ -157,41 +149,35 @@ class _SharedChildren<T> extends RouteEntry<RouterNode<T>> {
   _SharedChildren(this.shape, [this.literal, this.row]) : super(null);
   final SharedShape<T> shape;
   final String? literal, row;
+  RouteEntry<RouterNode<T>>? _written;
   @override
   RouterNode<T>? operator [](String name) =>
-      super[name] ??
-      ((literal == null || name == literal) && shape.rows.contains(row ?? name)
+      _written?[name] ??
+      ((literal == null || literal == name) && shape.rows.contains(row ?? name)
           ? shape
           : null);
   @override
+  RouterNode<T> addSibling(RouterNode<T> value) =>
+      _written?.addSibling(value) ?? (_written = value);
+  @override
   RouteEntry<RouterNode<T>>? without(String name) {
-    final rest = super.without(name);
-    final key = row;
-    return (key == null ? !shape.rows.isEmpty : shape.rows.contains(key))
+    final other = _written = _written?.without(name), id = row;
+    return (id == null ? !shape.rows.isEmpty : shape.rows.contains(id))
         ? this
-        : rest;
+        : other;
   }
 }
 
-bool _plainSegment(String key) {
-  if (key.isEmpty || key == '.' || key == '..') return false;
-  for (var i = 0; i < key.length; i++) {
-    final c = key.codeUnitAt(i);
-    if (c == 47 || isPatternUnit(c)) return false;
-  }
-  return true;
-}
+bool _plainPattern(List<String> parts) =>
+    parts.isNotEmpty &&
+    parts.every((p) => p.startsWith(':') ? isName(p, 1) : isPlainSegment(p));
 
-bool _plainPattern(List<String> parts) {
-  for (final p in parts) {
-    if (!(p.startsWith(':') && _isName(p, 1)) && !_plainSegment(p)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-Iterable<List<String>> _patterns(String path, {bool expandedPath = false}) {
+Iterable<List<String>> _patterns(
+  String path, {
+  bool expandedPath = false,
+  bool canonical = false,
+}) {
+  if (canonical) return [path.substring(1).split('/')];
   Iterable<List<String>> expand(List<String> paths) =>
       paths.expand((next) => _patterns(next, expandedPath: true));
   if (path.contains('{')) {
@@ -246,49 +232,55 @@ Iterable<List<String>> _patterns(String path, {bool expandedPath = false}) {
 // dart format off
 void addRoute<T>(RouteRoot<T> root, bool caseSensitive, String method, String path, T data) {// dart format on
   if (root.shared?.addRaw(path, method, data) ?? false) return;
-  final depth = literalDepth(path);
+  final depth = canonicalDepth(path);
   if (depth > 0) {
     root.literals.addLiteral(
-      caseSensitive ? path : path.toLowerCase(),
+      literalCase(path, caseSensitive),
       method,
       data,
       depth,
     );
     return;
   }
-  for (final segments in _patterns(path)) {
-    var leading = 0;
-    for (; leading < segments.length; leading++) {
-      final k = _literalKey(segments[leading], caseSensitive);
-      if (k == null || k.isEmpty || k == '.' || k == '..') break;
-      segments[leading] = k;
-    }
-    final literalKey = leading == segments.length && leading > 0
-        ? '/${segments.join('/')}'
-        : null;
-    if (literalKey != null) {
-      root.literals.addLiteral(literalKey, method, data, segments.length);
+  final plain = depth < 0;
+  for (final parts in _patterns(path, canonical: plain)) {
+    final share = root.isEmpty && (plain || _plainPattern(parts));
+    final leading = plain ? 0 : _foldLiterals(parts, caseSensitive);
+    if (leading > 0 && leading == parts.length) {
+      root.literals.addLiteral('/${parts.join('/')}', method, data, leading);
       continue;
     }
-    if (leading > 0) root.heads |= 1 << (segments.first.codeUnitAt(0) & 31);
-    final shared = root.shared;
-    if (root.isEmpty) {
-      if (leading < segments.length &&
-          !path.contains(r'\') &&
-          !path.contains('{') &&
-          !path.contains('\uFFFD') &&
-          _plainPattern(segments)) {
-        final shape = shared ?? SharedShape<T>(segments, caseSensitive);
-        if (shape.add(segments, method, data)) {
-          if (shape.pivot >= 0 && root.isEmpty) shape.mount(root);
-          root.shared = shape;
-          continue;
-        }
-      }
-      shared?.mount(root);
+    if (parts.isNotEmpty) {
+      final first = parts.first;
+      final c = first.isEmpty ? 128 : first.codeUnitAt(0);
+      // Escapes, patterns and Unicode can change the first character during matching.
+      root.heads |= c >= 128 || c == 58 || c == 40 || c == 42 || c == 92
+          ? -1
+          : 1 << (c & 31);
     }
+    final shared = root.shared;
+    if (share) {
+      final shape = shared ?? SharedShape<T>(parts, caseSensitive);
+      if (shape.add(parts, method, data)) {
+        if (shape.pivot >= 0) {
+          shape.mount(root);
+          if (shape.pivot == 0) root.heads = -1;
+        }
+        root.shared = shape;
+        continue;
+      }
+    }
+    if (shared != null && root.isEmpty) shared.mount(root);
     root.shared = null;
-    _insert(root, caseSensitive, method, path, segments, data, leading);
+    _insert(
+      root,
+      caseSensitive,
+      method,
+      plain ? null : path,
+      parts,
+      data,
+      leading,
+    );
   }
 }
 
@@ -296,11 +288,13 @@ void _insert<T>(
   RouterNode<T> root,
   bool caseSensitive,
   String method,
-  String path,
+  String? pattern,
   List<String> segments,
-  T data,
-  int leading,
-) {
+  T data, [
+  int leading = 0,
+]) {
+  // A missing source denotes prevalidated literals and named parameters.
+  final plain = pattern == null;
   RouterNode<T> node = root;
   final route = RouteData(method, data);
   List<Object>? params;
@@ -309,18 +303,23 @@ void _insert<T>(
   for (var i = 0; i < segments.length; i++) {
     final segment = segments[i];
 
-    final key = i < leading ? segment : _literalKey(segment, caseSensitive);
+    final key = i < leading
+        ? segment
+        : plain
+        ? (segment.startsWith(':') ? null : literalCase(segment, caseSensitive))
+        : _literalKey(segment, caseSensitive);
     if (key != null) {
       final children = node.statics ??= RouterNode<T>(key);
       var child = children[key];
       if (child is SharedShape<T>) {
-        final shape = child,
-            id = caseSensitive
-                ? segments[shape.pivot]
-                : segments[shape.pivot].toLowerCase();
+        final shape = child, id = (children as _SharedChildren<T>).row ?? key;
         if (i + 1 < shape.parts.length && shape.names[i + 1] == null) {
           child = children.addSibling(RouterNode<T>(key));
-          child.statics = _SharedChildren(shape, shape.literals[i + 1], id);
+          child.statics = _SharedChildren(
+            shape,
+            literalCase(shape.parts[i + 1], caseSensitive),
+            id,
+          );
         } else {
           shape.split(root, id);
           child = children[key];
@@ -337,13 +336,13 @@ void _insert<T>(
     if (rest) {
       final optional = segment == '**';
       final name = optional ? '_' : segment.substring(3);
-      if (!_isName(name)) {
-        throw FormatException('Invalid wildcard param name: $path');
+      if (!isName(name)) {
+        throw FormatException('Invalid wildcard param name: $pattern');
       }
-      capture = Wildcard(i, normalizeUnnamedGroupKey(name), optional, true);
+      capture = Wildcard(normalizeUnnamedGroupKey(name), optional, true);
     } else if (segment == '*') {
-      capture = Wildcard(i, '${unnamedIndex++}', true, false);
-    } else if (segment.startsWith(':') && _isName(segment, 1)) {
+      capture = Wildcard('${unnamedIndex++}', true, false);
+    } else if (plain || segment.startsWith(':') && isName(segment, 1)) {
       capture = normalizeUnnamedGroupKey(segment.substring(1));
     } else {
       final (pattern, next) = compileSegmentPattern(
@@ -356,7 +355,7 @@ void _insert<T>(
       unnamedIndex = next;
     }
     final plan = params ??= [];
-    if (i > nextCapture && capture is! Wildcard) plan.add(i - nextCapture);
+    if (i > nextCapture) plan.add(i - nextCapture);
     plan.add(capture);
     nextCapture = i + 1;
     if (rest) break;
@@ -370,15 +369,14 @@ void _insert<T>(
   }
 }
 
-String? _literalPath(List<String> parts, bool sensitive) {
-  if (parts.isEmpty) return null;
-  final keys = <String>[];
-  for (final part in parts) {
-    final key = _literalKey(part, sensitive);
-    if (key == null || key.isEmpty || key == '.' || key == '..') return null;
-    keys.add(key);
+int _foldLiterals(List<String> parts, bool sensitive) {
+  var i = 0;
+  for (; i < parts.length; i++) {
+    final key = _literalKey(parts[i], sensitive);
+    if (key == null || key.isEmpty || key == '.' || key == '..') break;
+    parts[i] = key;
   }
-  return '/${keys.join('/')}';
+  return i;
 }
 
 @pragma('vm:prefer-inline')
@@ -389,23 +387,14 @@ RouteMatch<T>? lookupRoute<T>(
   String path,
 ) {
   if (path.isEmpty || path == '/') {
-    return _select(root, method, const []) ??
-        _select(root.param, method, const [], optionalTail: true) ??
-        _select(root.wildcard, method, const [], optionalTail: true);
-  }
-  if (root.literals.possible(path)) {
-    final direct = root.literals.literal(path, method);
-    if (direct != null) return direct;
+    return findRoute(root, sensitive, method, const []);
   }
   if (path.length > 1) {
-    final c = path.codeUnitAt(1);
-    if (c < 128 &&
-        root.heads & (1 << (c & 31)) == 0 &&
-        !root.literals.possible(path) &&
-        root.shared == null &&
-        root.param == null &&
-        root.wildcard == null &&
-        root.statics is! _SharedChildren<T> &&
+    final c = path.codeUnitAt(1), bit = 1 << (c & 31);
+    if (root.literals.hasHead(c)) {
+      final hit = root.literals.literal(path, method);
+      if (hit != null) return hit;
+    } else if (root.heads & bit == 0 &&
         path.codeUnitAt(0) == 47 &&
         c != 46 &&
         c != 47 &&
@@ -414,12 +403,10 @@ RouteMatch<T>? lookupRoute<T>(
     }
   }
   final parts = normalizedSegments(path);
-  if (!root.literals.isEmpty) {
-    final other = root.literals.normalizedKey(path, parts, sensitive);
-    if (other != null && other != path) {
-      final hit = root.literals.literal(other, method);
-      if (hit != null) return hit;
-    }
+  final normalized = root.literals.normalizedKey(path, parts, sensitive);
+  if (normalized != null) {
+    final hit = root.literals.literal(normalized, method);
+    if (hit != null) return hit;
   }
   final shape = root.shared;
   if (shape != null) return shape.find(parts, method);
@@ -429,27 +416,26 @@ RouteMatch<T>? lookupRoute<T>(
 // dart format off
 RouteMatch<T>? findRoute<T>(RouterNode<T> node, bool caseSensitive, String method, List<String> segments, [int index = 0]) {// dart format on
   while (index < segments.length) {
-    var child = node.staticChild(segments[index++], caseSensitive);
-    if (child is SharedShape) {
-      final hit = (child as SharedShape<T>).find(segments, method);
-      if (hit != null) return hit;
-      child = null;
-    }
-    final param = node.param, wildcard = node.wildcard;
-    if (child != null && param != null) {
-      final match = findRoute(child, caseSensitive, method, segments, index);
-      if (match != null) return match;
-    }
+    final child = node.staticChild(segments[index], caseSensitive),
+        param = node.param;
     final next = param ?? child;
-    if (next == null) {
-      return wildcard == null ? null : _select(wildcard, method, segments);
+    if (next == null) break;
+    index++;
+    if (child != null && param != null) {
+      final hit = findRoute(child, caseSensitive, method, segments, index);
+      if (hit != null) return hit;
     }
+    final wildcard = node.wildcard;
     if (wildcard != null) {
       return findRoute(next, caseSensitive, method, segments, index) ??
           _select(wildcard, method, segments);
     }
     node = next;
   }
+  if (node.methods == null && node is SharedShape<T>) {
+    return node.find(segments, method);
+  }
+  if (index < segments.length) return _select(node.wildcard, method, segments);
   return _select(node, method, segments) ??
       _select(node.param, method, segments, optionalTail: true) ??
       _select(node.wildcard, method, segments, optionalTail: true);
@@ -459,22 +445,10 @@ RouteMatch<T>? findRoute<T>(RouterNode<T> node, bool caseSensitive, String metho
 RouteMatch<T>? _select<T>(RouterNode<T>? node, String method, List<String> segments, {bool optionalTail = false}) {// dart format on
   final first = node?.methods?.forMethod(method);
   if (first == null) return null;
-  final routes = first.alternatives?.candidates(segments);
-  if (routes == null || routes.length == 1) {
-    return (routes?.first ?? first).match(segments, optionalTail: optionalTail);
-  }
-  RouteMatch<T>? best;
-  var bestDepth = -1;
-  for (final route in routes) {
-    final depth = route.constraintDepth;
-    if (depth <= bestDepth) continue;
-    final found = route.match(segments, optionalTail: optionalTail);
-    if (found == null) continue;
-    if (route.params.isEmpty || depth == segments.length) return found;
-    best = found;
-    bestDepth = depth;
-  }
-  return best;
+  final bucket = first.alternatives;
+  return bucket == null
+      ? first.match(segments, optionalTail: optionalTail)
+      : bucket.match(segments, optionalTail);
 }
 
 // dart format off
@@ -520,12 +494,7 @@ List<RouteMatch<T>> findAllRoutes<T>(RouteRoot<T> root, bool caseSensitive, Stri
     }
   }
 
-  final shared = root.shared;
-  if (shared == null) {
-    visit(root, 0);
-  } else {
-    shared.collect(segments, method, includeAny, matches);
-  }
+  visit(root.shared ?? root, 0);
   if (!root.literals.isEmpty) {
     root.literals.collectLiterals(
       path,
@@ -541,19 +510,15 @@ List<RouteMatch<T>> findAllRoutes<T>(RouteRoot<T> root, bool caseSensitive, Stri
 
 // dart format off
 bool removeRoute<T>(RouteRoot<T> root, bool caseSensitive, String method, String path) {// dart format on
-  final depth = literalDepth(path);
+  final depth = canonicalDepth(path);
   if (depth > 0) {
-    return root.literals.remove(
-      caseSensitive ? path : path.toLowerCase(),
-      method,
-    );
+    return root.literals.remove(literalCase(path, caseSensitive), method);
   }
   var removed = false;
-  for (final segments in _patterns(path)) {
+  for (final segments in _patterns(path, canonical: depth < 0)) {
     final shared = root.shared;
     if (shared != null) {
-      final key = shared.selector(segments, removal: true);
-      if (key != null && shared.rows.remove(key, method)) {
+      if (shared.remove(segments, method) != null) {
         if (shared.rows.isEmpty) {
           root.shared = null;
           root.statics = null;
@@ -563,17 +528,17 @@ bool removeRoute<T>(RouteRoot<T> root, bool caseSensitive, String method, String
         continue;
       }
     }
-    final key = _literalPath(segments, caseSensitive);
-    final hit = key == null
-        ? _remove(root, method, segments, 0, caseSensitive)
-        : root.literals.remove(key, method);
+    final leading = depth < 0 ? 0 : _foldLiterals(segments, caseSensitive);
+    final hit = leading > 0 && leading == segments.length
+        ? root.literals.remove('/${segments.join('/')}', method)
+        : _remove(root, method, segments, 0, caseSensitive, leading);
     if (hit) removed = true;
   }
   return removed;
 }
 
 // dart format off
-bool _remove<T>(RouterNode<T> node, String method, List<String> segments, int index, bool caseSensitive) {// dart format on
+bool _remove<T>(RouterNode<T> node, String method, List<String> segments, int index, bool caseSensitive, int leading) {// dart format on
   if (index == segments.length) {
     final methods = node.methods;
     if (methods?[method] == null) return false;
@@ -582,7 +547,7 @@ bool _remove<T>(RouterNode<T> node, String method, List<String> segments, int in
   }
 
   final segment = segments[index];
-  final key = _literalKey(segment, caseSensitive);
+  final key = index < leading ? segment : _literalKey(segment, caseSensitive);
   final wildcard = key == null && segment.startsWith('**');
   final child = switch (key) {
     final value? => node.statics?[value],
@@ -590,12 +555,19 @@ bool _remove<T>(RouterNode<T> node, String method, List<String> segments, int in
   };
   if (child == null) return false;
   if (child is SharedShape<T>) {
-    final id = child.selector(segments, removal: true);
-    if (id == null || !child.rows.remove(id, method)) return false;
+    final id = child.remove(segments, method);
+    if (id == null) return false;
     if (!child.rows.contains(id)) node.statics = node.statics!.without(key!);
     return true;
   }
-  final removed = _remove(child, method, segments, index + 1, caseSensitive);
+  final removed = _remove(
+    child,
+    method,
+    segments,
+    index + 1,
+    caseSensitive,
+    leading,
+  );
   if (!child.isEmpty) return removed;
   if (key != null) {
     node.statics = node.statics!.without(key);
@@ -622,20 +594,10 @@ String? _literalKey(String segment, bool sensitive) {
   final value = segment == r'\*' || segment == r'\*\*'
       ? segment.replaceAll(r'\', '')
       : decodeEscaped(segment);
-  return sensitive ? value : value.toLowerCase();
+  return literalCase(value, sensitive);
 }
 
-final _name = RegExp(r'[A-Za-z_][\w-]*');
-final _segmentTokens = RegExp(':(${_name.pattern})|[:(*]|([^:*]+)');
-bool _isName(String text, [int start = 0]) {
-  for (var i = start; i < text.length; i++) {
-    final c = text.codeUnitAt(i), lower = c | 32;
-    if (lower >= 97 && lower <= 122 || c == 95) continue;
-    if (i == start || c != 45 && (c < 48 || c > 57)) return false;
-  }
-  return start < text.length;
-}
-
+final _segmentTokens = RegExp(r':([A-Za-z_][\w-]*)|[:(*]|([^:*]+)');
 final _restName = RegExp(r':[\w-]+');
 final _modifierRx = RegExp(r'^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$');
 

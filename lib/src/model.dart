@@ -114,14 +114,15 @@ class RouteBucket<T> {
   RouteBucket(RouteData<T> first) : routes = [first] {
     final pattern = first.lastConstraint;
     final width = pattern?.prefix.length ?? 0;
-    if (width > 0 || pattern?.fixedLength != null) _width = width;
+    if (width > 0 || pattern?.fixedLength != null) _width = _skip = width;
   }
   final List<RouteData<T>> routes;
-  Map<Object, List<RouteData<T>>>? _groups;
+  Map<int, RouteData<T>>? _groups;
+  Map<int, List<RouteData<T>>>? _ties;
   // Zero groups by exact segment length. A positive width groups by literal prefix.
   int? _width;
   // Every candidate verifies its whole regex, so index only the differing prefix units.
-  String _common = '';
+  int _skip = 0;
 
   void add(RouteData<T> route) {
     routes.add(route);
@@ -135,73 +136,99 @@ class RouteBucket<T> {
         (width == 0 ? pattern?.fixedLength == null : prefixWidth == 0)) {
       _width = null;
       _groups = null;
-    } else if (_groups == null ||
-        prefixWidth < width ||
-        (_common.isNotEmpty && !prefix.startsWith(_common))) {
-      final nextWidth = prefixWidth < width ? prefixWidth : width;
-      if (_groups == null && nextWidth > 0) {
-        final first = routes.first.lastConstraint!.prefix, next = prefix;
-        var shared = 0;
-        while (shared < nextWidth &&
-            first.codeUnitAt(shared) == next.codeUnitAt(shared)) {
-          shared++;
-        }
-        _common = first.substring(0, shared);
-      } else if (_common.length > nextWidth || !prefix.startsWith(_common)) {
-        _common = '';
+      _ties = null;
+    } else {
+      final end = prefixWidth < width ? prefixWidth : width,
+          first = routes.first.lastConstraint!.prefix;
+      var skip = 0;
+      while (skip < end &&
+          skip < _skip &&
+          prefix.codeUnitAt(skip) == first.codeUnitAt(skip)) {
+        skip++;
       }
-      _width = nextWidth;
+      if (_groups != null && end == width && skip == _skip) {
+        _index(route);
+        return;
+      }
+      _skip = skip;
+      _width = end;
       _groups = {};
+      _ties = null;
       for (final entry in routes) {
         _index(entry);
       }
-    } else {
-      _index(route);
     }
   }
 
   void _index(RouteData<T> route) {
     final pattern = route.lastConstraint!;
-    final key = _groupKey(pattern.prefix.toLowerCase(), pattern.fixedLength);
-    (_groups![key] ??= []).add(route);
+    final key = _groupKey(pattern.prefix, pattern.fixedLength);
+    final group = _groups!, first = group[key];
+    if (first == null) {
+      group[key] = route;
+    } else {
+      ((_ties ??= {})[key] ??= [first]).add(route);
+    }
   }
 
-  @pragma('vm:prefer-inline')
-  List<RouteData<T>> candidates(List<String> segments) {
+  RouteMatch<T>? match(List<String> segments, bool optionalTail) {
     final groups = _groups;
-    if (groups == null) return routes;
-    final index = routes.first.constraintDepth - 1, width = _width!;
-    final value = index < segments.length ? segments[index] : null;
-    if (value == null || value.length < width) return const [];
-    final key = _groupKey(value, value.length);
-    return groups[key] ??
-        (key is String ? groups[key.toLowerCase()] : null) ??
-        const [];
+    if (groups != null) {
+      final index = routes.first.constraintDepth - 1, width = _width!;
+      if (index >= segments.length) return null;
+      final text = segments[index];
+      if (text.length < width) return null;
+      final key = _groupKey(text, text.length);
+      if (key == -1) return _best(routes, segments, optionalTail);
+      final first = groups[key];
+      if (first == null) return null;
+      final ties = _ties?[key];
+      if (ties == null) {
+        return first.match(segments, optionalTail: optionalTail);
+      }
+      return _best(ties, segments, optionalTail, sameDepth: true);
+    }
+    return _best(routes, segments, optionalTail);
+  }
+
+  RouteMatch<T>? _best(
+    List<RouteData<T>> candidates,
+    List<String> segments,
+    bool optionalTail, {
+    bool sameDepth = false,
+  }) {
+    RouteMatch<T>? best;
+    var bestDepth = -1;
+    for (final route in candidates) {
+      final depth = route.constraintDepth;
+      if (depth <= bestDepth) continue;
+      final found = route.match(segments, optionalTail: optionalTail);
+      if (found == null) continue;
+      if (sameDepth || route.params.isEmpty || depth == segments.length) {
+        return found;
+      }
+      best = found;
+      bestDepth = depth;
+    }
+    return best;
   }
 
   @pragma('vm:prefer-inline')
-  Object _groupKey(String text, int? length) {
+  int _groupKey(String text, int? length) {
     final width = _width!;
     if (width == 0) return length!;
-    final start = _common.length;
-    if (width - start > 4) return text.substring(start, width);
-    // Four ASCII literal units fit in a 28-bit key on both runtimes.
-    var key = 0;
-    for (var i = start; i < width; i++) {
-      var c = text.codeUnitAt(i);
-      if (c >= 128) {
-        text = text.substring(0, width).toLowerCase();
-        if (text.length != width || (c = text.codeUnitAt(i)) >= 128) return -1;
-      }
-      key = (key << 7) | (c | 32);
+    var hash = 0;
+    for (var i = _skip; i < width; i++) {
+      final c = text.codeUnitAt(i);
+      if (c >= 128) return -1;
+      hash = (hash * 31 + (c | 32)) & 0x3fffffff;
     }
-    return key;
+    return hash;
   }
 }
 
 class Wildcard {
-  Wildcard(this.index, this.key, this.optional, this.rest);
-  final int index;
+  Wildcard(this.key, this.optional, this.rest);
   final String key;
   final bool optional, rest;
 }
@@ -237,7 +264,6 @@ extension RouteMatching<T> on RouteData<T> {
         continue;
       }
       final wildcard = key is Wildcard ? key : null;
-      if (wildcard != null) index = wildcard.index;
       final value = index < segments.length ? segments[index] : '';
       if (key is SegmentPattern) {
         if (!key.capture(value, captures) && !allowPartial) return null;
