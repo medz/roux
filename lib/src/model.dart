@@ -2,105 +2,70 @@
 
 import 'segment_program.dart';
 
-const String unnamedGroupPrefix = '__roux_unnamed_';
-
 class RouteMatch<T> {
   final T data;
   final Map<String, String> params;
   RouteMatch(this.data, this.params);
 }
 
-// Most trie nodes have one literal child or one registered HTTP method.
-class RouteIndex<V extends Object> {
-  RouteIndex(this._key);
-  final String _key;
-  V? _value;
-  Map<String, V>? _others;
+// A lone entry needs no map. Siblings are indexed from the first entry.
+class RouteEntry<E extends RouteEntry<E>> {
+  RouteEntry(this.key);
+  final String? key;
+  E? get entry => null;
+  Map<String, E>? _siblings;
 
-  V? operator [](String key) => key == _key ? _value : _others?[key];
+  E? operator [](String name) => name == key ? entry : _siblings?[name];
+  E addSibling(E value) => (_siblings ??= {})[value.key!] = value;
 
-  V putIfAbsent(String key, V Function() create) => key == _key
-      ? _value ??= create()
-      : (_others ??= {}).putIfAbsent(key, create);
-
-  V? remove(String key) {
-    if (key != _key) return _others?.remove(key);
-    final value = _value;
-    _value = null;
-    return value;
+  RouteEntry<E>? without(String name) {
+    final siblings = _siblings;
+    if (name != key) {
+      siblings?.remove(name);
+      if (siblings?.isEmpty ?? false) _siblings = null;
+      if (key != null) return this;
+    }
+    if (siblings == null || siblings.isEmpty) return null;
+    if (siblings.length == 1) return siblings.values.first;
+    // Detach the removed entry without scanning a wide table for a new head.
+    return key == null ? this : (RouteEntry<E>(null).._siblings = siblings);
   }
 
-  bool get isEmpty => _value == null && (_others?.isEmpty ?? true);
+  @pragma('vm:prefer-inline')
+  E? forMethod(String method) =>
+      key == method || (key == '' && _siblings == null)
+      ? entry
+      : _siblings?[method] ?? this[normalizeMethod(method)] ?? this[''];
 }
 
-class RouterNode<T> {
-  RouteIndex<RouterNode<T>>? statics;
-  RouterNode<T>? param;
-  RouterNode<T>? wildcard;
-  RouteIndex<RouteBucket<T>>? methods;
+class RouterNode<T> extends RouteEntry<RouterNode<T>> {
+  RouterNode([super.key = '']);
+  @override
+  RouterNode<T> get entry => this;
+  RouteEntry<RouterNode<T>>? statics;
+  RouterNode<T>? param, wildcard;
+  RouteEntry<RouteData<T>>? methods;
 
-  RouterNode<T>? staticChild(String segment, bool caseSensitive) {
+  RouterNode<T>? staticChild(String segment, bool sensitive) {
     final children = statics;
     if (children == null) return null;
-    return children[segment] ??
-        (caseSensitive ? null : children[segment.toLowerCase()]);
+    final exact = children[segment];
+    if (exact != null || sensitive) return exact;
+    final folded = segment.toLowerCase();
+    return identical(folded, segment) ? null : children[folded];
   }
 
   bool get isEmpty =>
       statics == null && param == null && wildcard == null && methods == null;
 }
 
-class SegmentPattern {
-  const SegmentPattern(
-    this.regex,
-    this.groups, {
-    required this.prefix,
-    this.separator,
-    this.program,
-  });
-
-  final RegExp regex;
-  final List<CaptureGroup> groups;
-  final String prefix;
-  int? get fixedLength => program?.fixedLength;
-  final String? separator;
-  final SegmentProgram? program;
-
-  bool capture(String value, Map<String, String> captures) =>
-      program?.capture(value, captures) ?? _captureFallback(value, captures);
-
-  bool _captureFallback(String value, Map<String, String> captures) {
-    if (groups.length == 1 && groups.first.index == 0) {
-      if (!regex.hasMatch(value)) return false;
-      captures[groups.first.key] = value;
-      return true;
-    }
-    if (separator case final sep?) {
-      final end = value.length - sep.length - 1;
-      if (end < 1) return false;
-      // The first capture is greedy and the second must be nonempty.
-      final cut = value.lastIndexOf(sep, end);
-      if (cut < 1) return false;
-      captures[groups.first.key] = value.substring(0, cut);
-      captures[groups.last.key] = value.substring(cut + sep.length);
-      return true;
-    }
-    final match = regex.firstMatch(value);
-    if (match == null) return false;
-    for (final group in groups) {
-      final part = group.index == 0
-          ? value
-          : group.index == null
-          ? match.namedGroup(group.name)
-          : match[group.index!];
-      if (part != null) captures[group.key] = part;
-    }
-    return true;
-  }
-}
-
 class RouteBucket<T> {
-  final routes = <RouteData<T>>[];
+  RouteBucket(RouteData<T> first) : routes = [first] {
+    final pattern = first.lastConstraint;
+    final width = pattern?.prefix.length ?? 0;
+    if (width > 0 || pattern?.fixedLength != null) _width = width;
+  }
+  final List<RouteData<T>> routes;
   Map<Object, List<RouteData<T>>>? _groups;
   // Zero groups by exact segment length. A positive width groups by literal prefix.
   int? _width;
@@ -109,10 +74,6 @@ class RouteBucket<T> {
     routes.add(route);
     final pattern = route.lastConstraint;
     final prefixWidth = pattern?.prefix.length ?? 0;
-    if (routes.length == 1) {
-      if (prefixWidth > 0 || pattern?.fixedLength != null) _width = prefixWidth;
-      return;
-    }
     final width = _width;
     if (width == null) return;
     // shortcut: scan mixed constraints in registration order, index them if profiles warrant it.
@@ -132,75 +93,95 @@ class RouteBucket<T> {
   }
 
   void _index(RouteData<T> route) {
-    final width = _width!;
     final pattern = route.lastConstraint!;
-    final key = width == 0
-        ? pattern.fixedLength!
-        : pattern.prefix.substring(0, width).toLowerCase();
+    final key = _groupKey(pattern.prefix.toLowerCase(), pattern.fixedLength);
     (_groups![key] ??= []).add(route);
   }
 
+  @pragma('vm:prefer-inline')
   List<RouteData<T>> candidates(List<String> segments) {
     final groups = _groups;
     if (groups == null) return routes;
-    final index = routes.first.constraintDepth - 1;
+    final index = routes.first.constraintDepth - 1, width = _width!;
+    final value = index < segments.length ? segments[index] : null;
+    if (value == null || value.length < width) return const [];
+    final key = _groupKey(value, value.length);
+    return groups[key] ??
+        (key is String ? groups[key.toLowerCase()] : null) ??
+        const [];
+  }
+
+  @pragma('vm:prefer-inline')
+  Object _groupKey(String text, int? length) {
     final width = _width!;
-    if (index >= segments.length || segments[index].length < width) {
-      return const [];
+    if (width == 0) return length!;
+    if (width > 4) return text.substring(0, width);
+    // Four ASCII literal units fit in a 28-bit key on both runtimes.
+    var key = 0;
+    for (var i = 0; i < width; i++) {
+      var c = text.codeUnitAt(i);
+      if (c >= 128) {
+        text = text.substring(0, width).toLowerCase();
+        if (text.length != width || (c = text.codeUnitAt(i)) >= 128) return -1;
+      }
+      key = (key << 7) | (c | 32);
     }
-    final value = segments[index];
-    if (width == 0) return groups[value.length] ?? const [];
-    final key = value.substring(0, width);
-    return groups[key] ?? groups[key.toLowerCase()] ?? const [];
+    return key;
   }
 }
 
-class ParamSpec {
-  ParamSpec(this.index, Object key, this.optional, {this.rest = false})
-    : key = key is String ? normalizeUnnamedGroupKey(key) : key;
-
+class Wildcard {
+  Wildcard(this.index, this.key, this.optional, this.rest);
   final int index;
-  final Object key; // String name or SegmentPattern
-  final bool optional;
-  final bool rest;
+  final String key;
+  final bool optional, rest;
 }
 
-class RouteData<T> {
-  RouteData(this.data, this.params, this.constraintDepth, this.lastConstraint);
-
+class RouteData<T> extends RouteEntry<RouteData<T>> {
+  @override
+  RouteData<T> get entry => this;
+  RouteData(super.key, this.data);
   final T data;
-  final List<ParamSpec> params;
-  final int constraintDepth;
-  final SegmentPattern? lastConstraint;
+  // Integers skip literal segments between capture keys.
+  List<Object> params = const [];
+  RouteBucket<T>? alternatives;
+  int constraintDepth = 0;
+  SegmentPattern? lastConstraint;
+}
 
+extension RouteMatching<T> on RouteData<T> {
+  @pragma('vm:prefer-inline')
   RouteMatch<T>? match(
     List<String> segments, {
     bool allowPartial = false,
     bool optionalTail = false,
   }) {
-    if (optionalTail && !params.last.optional) return null;
+    if (optionalTail) {
+      final tail = params.last;
+      if (tail is! Wildcard || !tail.optional) return null;
+    }
     final captures = <String, String>{};
-    for (final spec in params) {
-      final index = spec.index;
-      final segment = index >= segments.length
-          ? ''
-          : spec.rest && index + 1 < segments.length
-          ? segments.getRange(index, segments.length).join('/')
-          : segments[index];
-      final key = spec.key;
-      if (key is String) {
-        if (spec.optional && !spec.rest && segment.isEmpty) continue;
-        captures[key] = segment;
-      } else if (!(key as SegmentPattern).capture(segment, captures) &&
-          !allowPartial) {
-        return null;
+    var index = 0;
+    for (final key in params) {
+      if (key is int) {
+        index += key;
+        continue;
       }
+      final wildcard = key is Wildcard ? key : null;
+      if (wildcard != null) index = wildcard.index;
+      final value = index < segments.length ? segments[index] : '';
+      if (key is SegmentPattern) {
+        if (!key.capture(value, captures) && !allowPartial) return null;
+      } else if (wildcard == null || wildcard.rest || value.isNotEmpty) {
+        final name = wildcard?.key ?? key as String;
+        captures[name] = wildcard?.rest == true && index + 1 < segments.length
+            ? segments.sublist(index).join('/')
+            : value;
+      }
+      index++;
     }
     return RouteMatch(data, captures);
   }
 }
 
-String normalizeUnnamedGroupKey(String key) =>
-    key.startsWith(unnamedGroupPrefix)
-    ? key.substring(unnamedGroupPrefix.length)
-    : key;
+String normalizeMethod(String? method) => method?.trim().toUpperCase() ?? '';

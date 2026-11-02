@@ -89,6 +89,31 @@ void main() {
   });
 
   group('params and patterns', () {
+    test('preserves capture positions across literal runs', () {
+      final router = Router<int>()..add('/a/:x/b/c/d/:y/**:tail', 1);
+      expect(router.find('/a/one/b/c/d/two/three/four')?.params, {
+        'x': 'one',
+        'y': 'two',
+        'tail': 'three/four',
+      });
+    });
+
+    test(
+      'keeps inner capture numbers across adjacent constrained parameters',
+      () {
+        final router = Router<int>()..add(r'/x/:a(([()])[)])_:b((c)(d)?)', 1);
+        final params = router.find('/x/()_cd')!.params;
+        expect(params.entries.map((e) => (e.key, e.value)), [
+          ('0', '('),
+          ('a', '()'),
+          ('1', 'c'),
+          ('2', 'd'),
+          ('b', 'cd'),
+        ]);
+        expect(router.find('/x/()_c')!.params.containsKey('2'), isFalse);
+      },
+    );
+
     test(
       'captures nested runs in RegExp order, including fallback patterns',
       () {
@@ -287,6 +312,14 @@ void main() {
   });
 
   group('group syntax', () {
+    test('preserves repetition when expanding a group after a parameter', () {
+      final router = Router<int>()..add('/:x{foo}+', 1);
+      expect(router.find('/'), isNull);
+      expect(router.find('/a/b')?.params, {'x': 'a/b'});
+      expect(router.remove('', '/:x{foo}+'), isTrue);
+      expect(router.find('/a/b'), isNull);
+    });
+
     test('supports optional and mandatory groups', () {
       final router = Router<String>();
       router.add('/book{s}?', 'book');
@@ -314,6 +347,26 @@ void main() {
   });
 
   group('method matching', () {
+    test(
+      'preserves registration order in both method buckets after removal',
+      () {
+        final router = Router<int>()
+          ..add('/x/:a', 1, method: 'GET')
+          ..add('/x/:b', 2)
+          ..add('/x/:c', 3, method: 'GET')
+          ..add('/x/:d', 4);
+        List<int> all() => router
+            .findAll('/x/1', method: ' get ', includeAny: true)
+            .map((m) => m.data)
+            .toList();
+        expect(all(), [2, 4, 1, 3]);
+        expect(router.remove('GET', '/x/:id'), isTrue);
+        expect(all(), [2, 4]);
+        router.add('/x/:e', 5, method: 'GET');
+        expect(all(), [2, 4, 5]);
+      },
+    );
+
     test('method-specific routes require the matching method', () {
       final router = Router<String>();
       router.add('/users/:id', 'get-user', method: 'GET');
@@ -507,6 +560,26 @@ void main() {
   });
 
   group('complete find candidates', () {
+    test('keeps indexed prefixes distinct across lengths and letter case', () {
+      for (final prefix in ['', 'x', 'xy', 'long_']) {
+        final router = Router<int>()
+          ..add(
+            '/x/:id(${prefix}ao'
+            r'\d+)',
+            1,
+          )
+          ..add(
+            '/x/:id(${prefix}c1'
+            r'\d+)',
+            2,
+          );
+        final upper = prefix.toUpperCase();
+        expect(router.find('/x/${upper}aO7')?.data, 1);
+        expect(router.find('/x/${upper}C17')?.data, 2);
+        expect(router.find('/x/${prefix}c1nope'), isNull);
+      }
+    });
+
     test(
       'narrows candidates without changing order or rejecting broader routes',
       () {

@@ -6,22 +6,15 @@ List<String> normalizedSegments(String path) {
   final segments = path.split('/');
   var used = 0;
   for (final segment in segments) {
-    if (segment.isEmpty) continue;
-    if (segment.codeUnitAt(0) == 46 /* . */ ) {
-      if (segment == '.') continue;
-      if (segment == '..') {
-        if (used > 0) used--;
-        continue;
-      }
+    final length = segment.length;
+    if (length == 0) continue;
+    if (length <= 2 &&
+        segment.codeUnitAt(0) == 46 &&
+        (length == 1 || segment.codeUnitAt(1) == 46)) {
+      if (length == 2 && used > 0) used--;
+    } else {
+      segments[used++] = segment;
     }
-    segments[used++] = segment;
   }
   return segments..length = used;
-}
-
-/// Splits a path into segments, dropping the leading slash and any trailing empty segment.
-List<String> splitPath(String path) {
-  final segments = path.split('/')..removeAt(0);
-  if (segments.isNotEmpty && segments.last.isEmpty) segments.removeLast();
-  return segments;
 }
