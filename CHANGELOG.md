@@ -1,4 +1,4 @@
-## Unreleased
+## 2.0.0
 
 - **Breaking** Remove `Router(cache:)`, the `Router.cache` getter, `Cache<T>`, and
   `LRUCache<T>`. Drop the `cache:` argument when constructing a router. Each
@@ -9,6 +9,8 @@
 - Compile character runs and nested capture boundaries during registration.
   Use Dart's regular expression engine when a match needs backtracking or
   Unicode character-class handling.
+- Index literal children and HTTP methods at registration and normalize path
+  segments in place.
 - Remove escaped literal-star routes using the same key used to register them.
 
 ## 1.0.1
