@@ -1,3 +1,14 @@
+## 2.0.1
+
+- Reduce registration time and memory use by storing literal routes directly and
+  sharing the fixed segments of parameter routes. Adding a different route
+  expands only the affected branch.
+- Store single captures inline and narrow regex lookup to candidates with
+  matching prefixes. Each candidate still checks the full constraint.
+- Reclaim unused route-table storage after deletions. In the static-route
+  benchmark, removing 8,191 of 8,192 routes left 528 bytes of retained heap,
+  down from 197,296 bytes in 2.0.0. [Benchmark results and reproduction steps](https://github.com/medz/roux/blob/v2.0.1/benchmark/registration.md)
+
 ## 2.0.0
 
 - **Breaking** Remove `Router(cache:)`, the `Router.cache` getter, `Cache<T>`, and
