@@ -198,7 +198,7 @@ for r in roux relic relic-nocache shelf; do /tmp/roux-peer-register "$r" methods
 for r in roux relic relic-nocache roux-shelf shelf; do /tmp/roux-peer-lookup "$r"; done
 ```
 
-The archive contains the release, checkpoint and candidate sources, the peer lockfile, fixtures, drivers and per-process measurements. [Download the study bundle (ZIP)](./roux-competitors-2026-11-03.zip).
+The archive contains the release, checkpoint and candidate sources, the peer lockfile, fixtures, drivers and per-process measurements. [Download the study bundle (ZIP)](https://github.com/medz/roux/raw/85989560b8881f96c1cb8d9ec69d33ff2043eb4f/benchmark/roux-competitors-2026-11-03.zip).
 
 Extract the archive and run the following commands from its directory.
 
