@@ -861,9 +861,14 @@ void main() {
       expect(router.find('/users/abc')?.params, {'name': 'abc'});
     });
 
-    test('retains priority of the deepest matching constrained segment', () {
+    test('deeper constraints win after a prefix collision', () {
       final router = Router<String>();
       router.add(r'/catalog/:locale(en)/:id', 'locale');
+      router.add(r'/catalog/:locale(en)/:id', 'another locale');
+      expect(router.find('/catalog/en/en')?.data, 'locale');
+
+      router.add(r'/catalog/:locale/:id(en)', 'deeper literal');
+      expect(router.find('/catalog/en/en')?.data, 'deeper literal');
       router.add(r'/catalog/:locale/:id(\d+)', 'id');
 
       expect(router.find('/catalog/en/42')?.data, 'id');
