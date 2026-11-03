@@ -1,10 +1,24 @@
 // ignore_for_file: public_member_api_docs
 
+import 'dart:math' show min;
 import 'dart:typed_data';
 
-typedef CaptureGroup = ({String key, String name, int? index});
+const String unnamedGroupPrefix = '__roux_unnamed_';
+String normalizeUnnamedGroupKey(String key) =>
+    key.startsWith(unnamedGroupPrefix)
+    ? key.substring(unnamedGroupPrefix.length)
+    : key;
+
+class CaptureGroup {
+  CaptureGroup(this.name, this.index) : key = normalizeUnnamedGroupKey(name);
+  final String key;
+  final String name;
+  int? index;
+  int start = 0;
+  int end = 0;
+}
+
 typedef _Run = ({Object atom, int min, int? max});
-typedef _Span = ({int start, int end});
 
 final _alphabet = String.fromCharCodes(List.generate(128, (i) => i));
 final _token = RegExp(
@@ -15,12 +29,24 @@ final _token = RegExp(
 );
 
 Uint8List _charSet(String atom, bool sensitive) {
-  final chars = Uint8List(128);
+  final chars = Uint8List(16);
   final regexp = RegExp('(?:$atom)+', caseSensitive: sensitive);
   for (final m in regexp.allMatches(_alphabet)) {
-    chars.fillRange(m.start, m.end, 1);
+    for (var c = m.start; c < m.end; c++) {
+      chars[c >> 3] |= 1 << (c & 7);
+    }
   }
   return chars;
+}
+
+bool _allows(Uint8List bits, int code) =>
+    bits[code >> 3] & (1 << (code & 7)) != 0;
+
+bool _overlaps(Uint8List left, Object right) {
+  if (right is String) return _allows(left, right.codeUnitAt(0));
+  return (right as Uint8List).indexed.any(
+    (byte) => (left[byte.$1] & byte.$2) != 0,
+  );
 }
 
 final _classes = {
@@ -28,42 +54,56 @@ final _classes = {
     atom: _charSet(atom, true),
 };
 
-class SegmentProgram {
-  SegmentProgram._(this._runs, this._spans, this.fixedLength);
-  final List<_Run> _runs;
-  final List<(String, _Span)> _spans;
-  String get prefix => switch (_runs.firstOrNull?.atom) {
-    final String text => text,
-    _ => '',
-  };
-  final int? fixedLength;
-  late final _needsOffsets = _spans.any(
-    (s) => s.$2.start != 0 || s.$2.end != _runs.length,
-  );
+final _literalPrefix = RegExp(r'^[a-zA-Z0-9_-]+(?=$|\\|\[|\()');
 
-  static SegmentProgram? compile(
+class SegmentPattern {
+  SegmentPattern(
     String source,
+    String head,
     bool sensitive,
     List<CaptureGroup> captures,
-  ) {
+    this.separator,
+  ) : groups = captures.toList(growable: false),
+      regex = RegExp('^$source\$', caseSensitive: sensitive) {
+    if (separator == null) _compile(source, sensitive);
+    final atom = _runs?.firstOrNull?.atom;
+    prefix = atom is String
+        ? atom
+        : _runs == null && !head.contains('|')
+        ? _literalPrefix.stringMatch(head) ?? ''
+        : '';
+  }
+
+  final RegExp regex;
+  final List<CaptureGroup> groups;
+  final String? separator;
+  late final String prefix;
+  int? fixedLength;
+  List<_Run>? _runs;
+  late final _needsOffsets = groups.any(
+    (g) => g.start != 0 || g.end != _runs!.length,
+  );
+
+  void _compile(String source, bool sensitive) {
     final runs = <_Run>[];
-    final stack = <(String?, int)>[];
-    final bounds = <String, _Span>{};
+    final stack = <CaptureGroup?>[];
+    final byName = {for (final group in groups) group.name: group};
     int? fixedLength = 0;
-    String? previousVariable;
+    Uint8List? previousVariable;
     var cursor = 0;
     for (final token in _token.allMatches(source)) {
-      if (token.start != cursor) return null;
+      if (token.start != cursor) return;
       cursor = token.end;
       final text = token[2];
       final atom = token[3];
       if (atom == null && text == null) {
         if (token[0] == ')') {
-          if (stack.isEmpty) return null;
-          final (name, start) = stack.removeLast();
-          if (name != null) bounds[name] = (start: start, end: runs.length);
+          if (stack.isEmpty) return;
+          stack.removeLast()?.end = runs.length;
         } else {
-          stack.add((token[1], runs.length));
+          final group = byName[token[1]];
+          group?.start = runs.length;
+          stack.add(group);
         }
         continue;
       }
@@ -77,62 +117,91 @@ class SegmentProgram {
         '?' => 1,
         _ => token[6] == null ? min : int.tryParse(token[6]!),
       };
-      // A greedy run can commit when the next mandatory atom cannot consume its characters.
-      if (previousVariable != null) {
-        final next = text == null ? atom! : text[0];
-        final overlap = RegExp(
-          '(?=$previousVariable)$next',
-          caseSensitive: sensitive,
-        );
-        if (min == 0 || overlap.hasMatch(_alphabet)) return null;
-      }
-      previousVariable = min == max ? null : atom;
       final step = text ?? _classes[atom] ?? _charSet(atom!, sensitive);
+      // A greedy run is safe when the next mandatory atom accepts disjoint characters.
+      if (previousVariable != null &&
+          (min == 0 || _overlaps(previousVariable, step))) {
+        return;
+      }
+      previousVariable = min == max ? null : step as Uint8List;
       if (fixedLength != null) {
         fixedLength = min == max ? fixedLength + min : null;
       }
       runs.add((atom: step, min: min, max: max));
     }
-    if (cursor != source.length || stack.isNotEmpty) return null;
-    final spans = [
-      for (final group in captures) (group.key, bounds[group.name]!),
-    ];
-    return SegmentProgram._(runs, spans, fixedLength);
+    if (cursor != source.length || stack.isNotEmpty) return;
+    _runs = runs.toList(growable: false);
+    this.fixedLength = fixedLength;
   }
 
-  bool? capture(String value, Map<String, String> captures) {
-    final ends = _needsOffsets ? List<int>.filled(_runs.length + 1, 0) : null;
+  bool capture(String value, Map<String, String> captures) {
+    final runs = _runs;
+    if (runs != null) {
+      final match = _captureRuns(runs, value, captures);
+      if (match != null) return match;
+    }
+    if (groups.length == 1 && groups.first.index == 0) {
+      if (!regex.hasMatch(value)) return false;
+      captures[groups.first.key] = value;
+      return true;
+    }
+    if (separator case final sep?) {
+      final end = value.length - sep.length - 1;
+      if (end < 1) return false;
+      // The first capture is greedy and the second must be nonempty.
+      final cut = value.lastIndexOf(sep, end);
+      if (cut < 1) return false;
+      captures[groups.first.key] = value.substring(0, cut);
+      captures[groups.last.key] = value.substring(cut + sep.length);
+      return true;
+    }
+    final match = regex.firstMatch(value);
+    if (match == null) return false;
+    for (final group in groups) {
+      final part = group.index == 0
+          ? value
+          : group.index == null
+          ? match.namedGroup(group.name)
+          : match[group.index!];
+      if (part != null) captures[group.key] = part;
+    }
+    return true;
+  }
+
+  bool? _captureRuns(
+    List<_Run> runs,
+    String value,
+    Map<String, String> captures,
+  ) {
+    final ends = _needsOffsets ? List<int>.filled(runs.length + 1, 0) : null;
     var pos = 0;
-    for (var i = 0; i < _runs.length; i++) {
-      final run = _runs[i];
+    for (var i = 0; i < runs.length; i++) {
+      final run = runs[i];
       final atom = run.atom;
       if (atom is String) {
         if (!value.startsWith(atom, pos)) return null;
         pos += atom.length;
-        ends?[i + 1] = pos;
-        continue;
+      } else {
+        final start = pos;
+        final chars = atom as Uint8List;
+        final limit =
+            start + min(value.length - start, run.max ?? value.length);
+        while (pos < limit) {
+          final c = value.codeUnitAt(pos);
+          // Non-ASCII case folding and character classes use Dart's RegExp.
+          if (c >= 128) return null;
+          if (!_allows(chars, c)) break;
+          pos++;
+        }
+        if (pos - start < run.min) return false;
       }
-      final start = pos;
-      final chars = atom as Uint8List;
-      final max = run.max;
-      final limit = max == null || start + max > value.length
-          ? value.length
-          : start + max;
-      while (pos < limit) {
-        final c = value.codeUnitAt(pos);
-        // Non-ASCII case folding and character classes use Dart's RegExp.
-        if (c >= chars.length) return null;
-        if (chars[c] == 0) break;
-        pos++;
-      }
-      if (pos - start < run.min) return false;
       ends?[i + 1] = pos;
     }
     if (pos != value.length) return false;
-    for (final (key, span) in _spans) {
-      captures[key] = ends == null
+    for (final group in groups) {
+      captures[group.key] = ends == null
           ? value
-          : value.substring(ends[span.start], ends[span.end]);
+          : value.substring(ends[group.start], ends[group.end]);
     }
     return true;
   }

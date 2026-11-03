@@ -16,7 +16,9 @@ jobs:
         uses: dart-lang/setup-dart@v1
 
       - name: Install Dependencies
-        run: dart pub get
+        run: |
+          dart pub get
+          dart pub get --directory=benchmark/peers --enforce-lockfile
 
       - name: Format
         run: dart format --output=none --set-exit-if-changed .
@@ -26,3 +28,9 @@ jobs:
 
       - name: Test
         run: dart test
+
+      - name: Check Shelf benchmark workloads
+        working-directory: benchmark/peers
+        run: |
+          dart run registration.dart shelf mixed 4
+          ! dart run registration.dart shelf wildcard 0 rss 2>/dev/null

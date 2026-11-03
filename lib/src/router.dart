@@ -1,6 +1,5 @@
 import 'model.dart';
 import 'operations.dart';
-import 'path.dart';
 
 /// A lightweight, expressive path router.
 class Router<T> {
@@ -10,7 +9,7 @@ class Router<T> {
   /// Whether static path matching treats letter case as significant.
   final bool caseSensitive;
 
-  final _root = RouterNode<T>();
+  final _root = RouteRoot<T>();
 
   /// Registers a route pattern and its associated data.
   void add(String path, T data, {String? method}) =>
@@ -18,7 +17,7 @@ class Router<T> {
 
   /// Returns the best match for [path], or `null` when none exists.
   RouteMatch<T>? find(String path, {String? method}) =>
-      findRoute(_root, caseSensitive, method ?? '', normalizedSegments(path));
+      lookupRoute(_root, caseSensitive, method ?? '', path);
 
   /// Returns all matches for [path] in broad-to-specific order.
   // dart format off
