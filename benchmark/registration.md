@@ -198,7 +198,9 @@ for r in roux relic relic-nocache shelf; do /tmp/roux-peer-register "$r" methods
 for r in roux relic relic-nocache roux-shelf shelf; do /tmp/roux-peer-lookup "$r"; done
 ```
 
-The accompanying study bundle contains release, checkpoint and candidate sources, the peer lockfile, fixtures, drivers and per-process measurements. From its extracted directory, run the following commands in sequence.
+The archive contains the release, checkpoint and candidate sources, the peer lockfile, fixtures, drivers and per-process measurements. [Download the study bundle (ZIP)](./roux-competitors-2026-11-03.zip).
+
+Extract the archive and run the following commands from its directory.
 
 ```sh
 (cd peers && dart pub get --enforce-lockfile)

@@ -28,3 +28,9 @@ jobs:
 
       - name: Test
         run: dart test
+
+      - name: Check Shelf benchmark workloads
+        working-directory: benchmark/peers
+        run: |
+          dart run registration.dart shelf mixed 4
+          ! dart run registration.dart shelf wildcard 0 rss 2>/dev/null

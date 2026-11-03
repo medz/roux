@@ -135,6 +135,22 @@ Future<void> main(List<String> args) async {
     );
   }
   final target = args[0], kind = args[1], n = int.parse(args[2]);
+  const shelfWorkloads = {
+    'static',
+    'params',
+    'methods',
+    'mixed',
+    'heads',
+    'deep',
+    'opaque',
+  };
+  if (target == 'shelf' && !shelfWorkloads.contains(kind)) {
+    throw ArgumentError.value(
+      kind,
+      'workload',
+      'For shelf, use one of ${shelfWorkloads.join(', ')}',
+    );
+  }
   if (n < 0 || (n == 0 && args.length != 4)) {
     throw ArgumentError.value(n, 'count');
   }
