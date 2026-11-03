@@ -16,7 +16,9 @@ jobs:
         uses: dart-lang/setup-dart@v1
 
       - name: Install Dependencies
-        run: dart pub get
+        run: |
+          dart pub get
+          dart pub get --directory=benchmark/peers --enforce-lockfile
 
       - name: Format
         run: dart format --output=none --set-exit-if-changed .
